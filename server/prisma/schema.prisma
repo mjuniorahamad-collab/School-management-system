@@ -1,0 +1,17 @@
+// School Management System — Prisma foundation.
+//
+// NO domain models yet. Business tables (students, fees, attendance, exams, ...)
+// and their relationships are designed deliberately in their own milestone —
+// never guessed ahead of a module.
+//
+// PostgreSQL is the target database. DATABASE_URL is required only once
+// DB-backed features are enabled; the API must boot without it today.
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
