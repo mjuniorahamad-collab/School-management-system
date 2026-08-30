@@ -1,0 +1,241 @@
+import { useMemo, useState } from "react"
+import { Link, useLocation, useNavigate } from "react-router-dom"
+import {
+  Bell,
+  CalendarDays,
+  CheckCheck,
+  LogOut,
+  Mail,
+  Menu,
+  Settings,
+  UserRound,
+} from "lucide-react"
+import { toast } from "sonner"
+import { branding } from "@/config/branding"
+import { findNavItem } from "@/routes/navigation"
+import { moduleMeta } from "@/data/moduleMeta"
+import { notifications } from "@/data/notifications"
+import { messagePreviews } from "@/data/messages"
+import { cn } from "@/lib/utils"
+import { getInitials, timeAgo } from "@/lib/format"
+import { useSidebar } from "@/hooks/useSidebar"
+import { GlobalSearch } from "@/components/layout/GlobalSearch"
+import { Button } from "@/components/ui/button"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+
+function getHeaderMeta(pathname: string): { title: string; subtitle: string } {
+  const navItem = findNavItem(pathname)
+  const meta = moduleMeta[pathname]
+
+  if (pathname === "/dashboard") {
+    const firstName = branding.currentUser.name.split(" ")[0]
+    return { title: "Dashboard", subtitle: `Welcome back, ${firstName}` }
+  }
+  return {
+    title: navItem?.label ?? "Page not found",
+    subtitle: meta?.purpose ?? "School administration console",
+  }
+}
+
+const notificationToneDot: Record<string, string> = {
+  info: "bg-sky-500",
+  warning: "bg-amber-500",
+  success: "bg-emerald-500",
+}
+
+export function TopHeader() {
+  const { setMobileOpen } = useSidebar()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const { title, subtitle } = useMemo(() => getHeaderMeta(location.pathname), [location.pathname])
+
+  const [readIds, setReadIds] = useState<Set<string>>(new Set())
+  const unreadCount = notifications.filter((item) => !readIds.has(item.id)).length
+
+  const markAllRead = () => {
+    setReadIds(new Set(notifications.map((item) => item.id)))
+    toast.success("All notifications marked as read")
+  }
+
+  return (
+    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b bg-background/85 px-4 backdrop-blur-sm sm:px-6 lg:px-8">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="lg:hidden"
+        onClick={() => setMobileOpen(true)}
+        aria-label="Open navigation"
+      >
+        <Menu className="size-5" aria-hidden="true" />
+      </Button>
+
+      <div className="min-w-0">
+        <h1 className="truncate text-base font-semibold tracking-tight sm:text-lg">{title}</h1>
+        <p className="hidden truncate text-xs text-muted-foreground sm:block">{subtitle}</p>
+      </div>
+
+      <div className="flex flex-1 justify-center px-2">
+        <GlobalSearch />
+      </div>
+
+      <div className="flex shrink-0 items-center gap-1">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="relative" aria-label="Notifications">
+              <Bell className="size-5" aria-hidden="true" />
+              {unreadCount > 0 && (
+                <span className="absolute top-1.5 right-1.5 flex size-2 rounded-full bg-destructive ring-2 ring-background" />
+              )}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-80 sm:min-w-96">
+            <div className="flex items-center justify-between px-2 py-1.5">
+              <DropdownMenuLabel className="pt-0">Notifications</DropdownMenuLabel>
+              <Button variant="ghost" size="xs" onClick={markAllRead} className="gap-1.5">
+                <CheckCheck className="size-3.5" aria-hidden="true" />
+                Mark all as read
+              </Button>
+            </div>
+            <DropdownMenuSeparator />
+            <div className="max-h-80 overflow-y-auto">
+              {notifications.map((item) => {
+                const read = readIds.has(item.id)
+                return (
+                  <DropdownMenuItem
+                    key={item.id}
+                    className="flex items-start gap-3 py-2.5 align-top"
+                    onSelect={(event) => event.preventDefault()}
+                  >
+                    <span
+                      className={cn("mt-1.5 size-2 shrink-0 rounded-full", notificationToneDot[item.tone])}
+                      aria-hidden="true"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">{item.title}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{item.detail}</span>
+                      <span className="mt-0.5 block text-[11px] text-muted-foreground/70">
+                        {timeAgo(item.timestamp)}
+                      </span>
+                    </span>
+                    {!read && <span className="mt-1 size-1.5 shrink-0 rounded-full bg-primary" aria-label="Unread" />}
+                  </DropdownMenuItem>
+                )
+              })}
+            </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="relative hidden sm:inline-flex"
+              aria-label="Messages"
+            >
+              <Mail className="size-5" aria-hidden="true" />
+              {messagePreviews.some((item) => item.unread) && (
+                <span className="absolute top-1.5 right-1.5 flex size-2 rounded-full bg-destructive ring-2 ring-background" />
+              )}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-80 sm:min-w-96">
+            <DropdownMenuLabel className="px-2 py-1.5">Messages</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <div className="max-h-80 overflow-y-auto">
+              {messagePreviews.map((item) => (
+                <DropdownMenuItem
+                  key={item.id}
+                  className="flex flex-col items-start gap-1 py-2.5"
+                  onSelect={() => navigate("/messages")}
+                >
+                  <span className="flex w-full items-center justify-between gap-2">
+                    <span className="truncate text-sm font-medium">{item.subject}</span>
+                    {item.unread && <Badge variant="secondary">New</Badge>}
+                  </span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {item.sender} · {timeAgo(item.timestamp)}
+                  </span>
+                  <span className="line-clamp-1 text-xs text-muted-foreground/80">{item.preview}</span>
+                </DropdownMenuItem>
+              ))}
+            </div>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => navigate("/messages")}>
+              View all messages
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          asChild
+          aria-label="School calendar"
+          className="hidden sm:inline-flex"
+        >
+          <Link to="/events">
+            <CalendarDays className="size-5" aria-hidden="true" />
+          </Link>
+        </Button>
+
+        <Separator orientation="vertical" className="mx-1 hidden h-6 sm:block" />
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" className="gap-2 rounded-full px-1.5 py-1 sm:pr-2" aria-label="Profile menu">
+              <Avatar className="size-8">
+                <AvatarFallback className="bg-primary text-xs text-primary-foreground">
+                  {getInitials(branding.currentUser.name)}
+                </AvatarFallback>
+              </Avatar>
+              <span className="hidden text-left sm:block">
+                <span className="block max-w-28 truncate text-sm font-medium leading-tight">
+                  {branding.currentUser.name}
+                </span>
+                <span className="block text-[11px] text-muted-foreground leading-tight">
+                  {branding.currentUser.role}
+                </span>
+              </span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel className="font-normal">
+              <span className="block text-sm font-medium">{branding.currentUser.name}</span>
+              <span className="text-xs text-muted-foreground">{branding.currentUser.role}</span>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => navigate("/settings")}>
+              <UserRound className="size-4" aria-hidden="true" />
+              Profile
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => navigate("/settings")}>
+              <Settings className="size-4" aria-hidden="true" />
+              Account settings
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              onSelect={() =>
+                toast.info("Sign out will be active once authentication is connected.")
+              }
+            >
+              <LogOut className="size-4" aria-hidden="true" />
+              Sign out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </header>
+  )
+}
