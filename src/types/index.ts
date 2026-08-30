@@ -128,6 +128,8 @@ export interface NavItem {
   label: string
   icon: LucideIcon
   keywords?: string[]
+  /** Permission code (resource:action) required to see this item. UI-hint only. */
+  requiredPermission?: string
 }
 
 export interface NavSection {

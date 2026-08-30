@@ -11,6 +11,9 @@ dist-ssr/
 .env.*
 !.env.example
 
+# Local dev database (user-space PostgreSQL)
+.data/
+
 # Logs
 logs/
 *.log

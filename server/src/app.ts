@@ -17,6 +17,7 @@ export function createApp(): express.Application {
       origin: env.corsOrigins,
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
       allowedHeaders: ["Content-Type", "Authorization"],
+      credentials: true,
     }),
   )
   app.use(requestLogger)

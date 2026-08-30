@@ -46,6 +46,7 @@ async function request<T>(path: string, init?: RequestInit, options?: RequestOpt
       ...init,
       headers,
       signal: controller.signal,
+      credentials: "include",
     })
 
     const text = await response.text()

@@ -1,0 +1,32 @@
+# Optional development PostgreSQL via Docker Compose.
+#
+# This map was NOT validated on the primary dev machine (no Docker there —
+# that machine uses the user-space PostgreSQL documented in README.md).
+# It is provided for contributors who prefer a containerized database.
+#
+# Usage:  docker compose up -d
+#         DATABASE_URL="postgresql://school:school@localhost:5432/school_management"
+#
+# The matching choice replaces the user-space `.data/postgres` workflow;
+# pick ONE of the two local database options, never both on the same port.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sms-postgres
+    environment:
+      POSTGRES_USER: school
+      POSTGRES_PASSWORD: school
+      POSTGRES_DB: school_management
+    ports:
+      - "5432:5432"
+    volumes:
+      - sms-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U school -d school_management"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  sms-postgres-data:

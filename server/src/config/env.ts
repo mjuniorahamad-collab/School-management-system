@@ -14,6 +14,8 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   CORS_ORIGIN: z.string().min(1).optional(),
   DATABASE_URL: z.string().min(1).optional(),
+  SESSION_ACCESS_TTL_MINUTES: z.coerce.number().int().min(1).max(1440).default(15),
+  SESSION_REFRESH_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(7),
 })
 
 const DEFAULT_CORS_ORIGINS = ["http://localhost:5173", "http://localhost:4173"]
@@ -38,4 +40,9 @@ export const env = {
         .filter(Boolean)
     : DEFAULT_CORS_ORIGINS,
   databaseUrl: parsed.data.DATABASE_URL,
+  session: {
+    accessTtlMs: parsed.data.SESSION_ACCESS_TTL_MINUTES * 60_000,
+    refreshTtlMs: parsed.data.SESSION_REFRESH_TTL_DAYS * 86_400_000,
+    cookieSecure: parsed.data.NODE_ENV === "production",
+  },
 } as const

@@ -13,12 +13,12 @@ import {
 import { toast } from "sonner"
 import { branding } from "@/config/branding"
 import { findNavItem } from "@/routes/navigation"
-import { moduleMeta } from "@/data/moduleMeta"
 import { notifications } from "@/data/notifications"
 import { messagePreviews } from "@/data/messages"
 import { cn } from "@/lib/utils"
 import { getInitials, timeAgo } from "@/lib/format"
 import { useSidebar } from "@/hooks/useSidebar"
+import { useAuth } from "@/auth/useAuth"
 import { GlobalSearch } from "@/components/layout/GlobalSearch"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -33,17 +33,23 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
-function getHeaderMeta(pathname: string): { title: string; subtitle: string } {
+function formatRole(role: string): string {
+  return role
+    .split("_")
+    .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}`)
+    .join(" ")
+}
+
+function getHeaderMeta(pathname: string, displayName: string): { title: string; subtitle: string } {
   const navItem = findNavItem(pathname)
-  const meta = moduleMeta[pathname]
 
   if (pathname === "/dashboard") {
-    const firstName = branding.currentUser.name.split(" ")[0]
+    const firstName = displayName.split(" ")[0]
     return { title: "Dashboard", subtitle: `Welcome back, ${firstName}` }
   }
   return {
     title: navItem?.label ?? "Page not found",
-    subtitle: meta?.purpose ?? "School administration console",
+    subtitle: "School administration console",
   }
 }
 
@@ -57,7 +63,15 @@ export function TopHeader() {
   const { setMobileOpen } = useSidebar()
   const location = useLocation()
   const navigate = useNavigate()
-  const { title, subtitle } = useMemo(() => getHeaderMeta(location.pathname), [location.pathname])
+  const { user, signOut } = useAuth()
+
+  const displayName = user?.name ?? branding.schoolName
+  const roleLabel = user?.roles[0] ? formatRole(user.roles[0]) : "User"
+
+  const { title, subtitle } = useMemo(
+    () => getHeaderMeta(location.pathname, displayName),
+    [location.pathname, displayName],
+  )
 
   const [readIds, setReadIds] = useState<Set<string>>(new Set())
   const unreadCount = notifications.filter((item) => !readIds.has(item.id)).length
@@ -65,6 +79,11 @@ export function TopHeader() {
   const markAllRead = () => {
     setReadIds(new Set(notifications.map((item) => item.id)))
     toast.success("All notifications marked as read")
+  }
+
+  const handleSignOut = async () => {
+    await signOut()
+    navigate("/login", { replace: true })
   }
 
   return (
@@ -196,23 +215,23 @@ export function TopHeader() {
             <Button variant="ghost" className="gap-2 rounded-full px-1.5 py-1 sm:pr-2" aria-label="Profile menu">
               <Avatar className="size-8">
                 <AvatarFallback className="bg-primary text-xs text-primary-foreground">
-                  {getInitials(branding.currentUser.name)}
+                  {getInitials(displayName)}
                 </AvatarFallback>
               </Avatar>
               <span className="hidden text-left sm:block">
                 <span className="block max-w-28 truncate text-sm font-medium leading-tight">
-                  {branding.currentUser.name}
+                  {displayName}
                 </span>
                 <span className="block text-[11px] text-muted-foreground leading-tight">
-                  {branding.currentUser.role}
+                  {roleLabel}
                 </span>
               </span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuLabel className="font-normal">
-              <span className="block text-sm font-medium">{branding.currentUser.name}</span>
-              <span className="text-xs text-muted-foreground">{branding.currentUser.role}</span>
+              <span className="block truncate text-sm font-medium">{displayName}</span>
+              <span className="block truncate text-xs text-muted-foreground">{user?.email ?? roleLabel}</span>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => navigate("/settings")}>
@@ -224,12 +243,7 @@ export function TopHeader() {
               Account settings
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              variant="destructive"
-              onSelect={() =>
-                toast.info("Sign out will be active once authentication is connected.")
-              }
-            >
+            <DropdownMenuItem variant="destructive" onSelect={handleSignOut}>
               <LogOut className="size-4" aria-hidden="true" />
               Sign out
             </DropdownMenuItem>

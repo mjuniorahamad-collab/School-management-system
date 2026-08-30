@@ -6,7 +6,7 @@ import tseslint from "typescript-eslint"
 
 export default tseslint.config(
   {
-    ignores: ["dist", "server/dist", "node_modules", "server/prisma"],
+    ignores: ["dist", "server/dist", "node_modules", "server/prisma", ".data"],
   },
   {
     files: ["**/*.{ts,tsx}"],

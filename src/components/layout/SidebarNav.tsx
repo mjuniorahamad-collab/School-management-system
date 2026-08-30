@@ -1,4 +1,5 @@
 import { NavLink } from "react-router-dom"
+import { useAuth } from "@/auth/useAuth"
 import { branding } from "@/config/branding"
 import { navigationSections } from "@/routes/navigation"
 import { cn } from "@/lib/utils"
@@ -38,9 +39,18 @@ export function SidebarSectionLabel({ children }: { children: string }) {
 }
 
 export function SidebarNav({ collapsed = false, onNavigate }: SidebarNavProps) {
+  const { can } = useAuth()
+
+  const sections = navigationSections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => !item.requiredPermission || can(item.requiredPermission)),
+    }))
+    .filter((section) => section.items.length > 0)
+
   return (
     <nav className="flex flex-1 flex-col overflow-y-auto px-3 pb-4" aria-label="Main navigation">
-      {navigationSections.map((section) => (
+      {sections.map((section) => (
         <div key={section.id}>
           {collapsed ? (
             <div className="mx-auto my-3 h-px w-8 bg-border" aria-hidden="true" />
