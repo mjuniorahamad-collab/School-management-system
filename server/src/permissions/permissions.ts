@@ -1,0 +1,281 @@
+// Canonical permission catalog and role grants.
+//
+// Permission codes follow `resource:action`. This file is the single source of
+// truth for codes seeded into the `Permission` table and the role grants seeded
+// into `RolePermission`. The seed script validates every granted code against
+// PERMISSION_CODES so typos fail loudly at seed time.
+
+export const PERMISSION_CODES = [
+  "dashboard:view",
+  "students:view",
+  "students:create",
+  "students:update",
+  "students:delete",
+  "students:export",
+  "teachers:view",
+  "teachers:create",
+  "teachers:update",
+  "teachers:delete",
+  "staff:view",
+  "staff:create",
+  "staff:update",
+  "staff:delete",
+  "admissions:view",
+  "admissions:create",
+  "admissions:update",
+  "admissions:delete",
+  "attendance:view",
+  "attendance:create",
+  "attendance:update",
+  "fees:view",
+  "fees:create",
+  "fees:update",
+  "fees:delete",
+  "exams:view",
+  "exams:create",
+  "exams:update",
+  "results:view",
+  "results:create",
+  "results:update",
+  "library:view",
+  "library:create",
+  "library:update",
+  "library:delete",
+  "transport:view",
+  "transport:create",
+  "transport:update",
+  "transport:delete",
+  "hostel:view",
+  "hostel:create",
+  "hostel:update",
+  "hostel:delete",
+  "payroll:view",
+  "payroll:create",
+  "payroll:update",
+  "classes:view",
+  "classes:create",
+  "classes:update",
+  "classes:delete",
+  "sections:view",
+  "sections:create",
+  "sections:update",
+  "sections:delete",
+  "subjects:view",
+  "subjects:create",
+  "subjects:update",
+  "subjects:delete",
+  "timetable:view",
+  "timetable:create",
+  "timetable:update",
+  "homework:view",
+  "homework:create",
+  "homework:update",
+  "assignments:view",
+  "assignments:create",
+  "assignments:update",
+  "payments:view",
+  "payments:create",
+  "payments:update",
+  "receipts:view",
+  "receipts:export",
+  "reports:view",
+  "reports:export",
+  "notices:view",
+  "notices:create",
+  "notices:update",
+  "notices:delete",
+  "events:view",
+  "events:create",
+  "events:update",
+  "events:delete",
+  "messages:view",
+  "messages:create",
+  "users:view",
+  "users:create",
+  "users:update",
+  "users:delete",
+  "roles:view",
+  "roles:create",
+  "roles:update",
+  "roles:delete",
+  "settings:view",
+  "settings:update",
+  "backups:view",
+  "backups:create",
+  "audit-logs:view",
+  "audit-logs:export",
+] as const
+
+export type PermissionCode = (typeof PERMISSION_CODES)[number]
+
+export const SUPER_ADMIN_ROLE = "SUPER_ADMIN"
+
+export const ROLE_NAMES = {
+  SUPER_ADMIN: "SUPER_ADMIN",
+  SCHOOL_ADMIN: "SCHOOL_ADMIN",
+  PRINCIPAL: "PRINCIPAL",
+  TEACHER: "TEACHER",
+  ACCOUNTANT: "ACCOUNTANT",
+  LIBRARIAN: "LIBRARIAN",
+  TRANSPORT_MANAGER: "TRANSPORT_MANAGER",
+  HOSTEL_WARDEN: "HOSTEL_WARDEN",
+  RECEPTIONIST: "RECEPTIONIST",
+  PARENT: "PARENT",
+  STUDENT: "STUDENT",
+} as const
+
+export type RoleName = keyof typeof ROLE_NAMES
+
+export const ROLE_DESCRIPTIONS: Record<RoleName, string> = {
+  SUPER_ADMIN: "Unrestricted access to every system resource and setting",
+  SCHOOL_ADMIN: "Day-to-day operational control across all school modules",
+  PRINCIPAL: "Leadership oversight of academics, staff, and student outcomes",
+  TEACHER: "Classroom management: teaching resources, attendance, and assessment",
+  ACCOUNTANT: "Financial operations: fees, payments, payroll, and reporting",
+  LIBRARIAN: "Library catalogue and circulation management",
+  TRANSPORT_MANAGER: "Transport routes, vehicles, and student assignments",
+  HOSTEL_WARDEN: "Hostel rooms, residents, and duty management",
+  RECEPTIONIST: "Front desk: admissions intake and general enquiries",
+  PARENT: "Own child's academics, attendance, and fee standing",
+  STUDENT: "Own attendance, timetable, and assessment results",
+}
+
+const VIEW = "view"
+const CREATE = "create"
+const UPDATE = "update"
+const DELETE = "delete"
+const EXPORT = "export"
+
+/** Builds `resource:action` codes from an explicit action list. */
+const codes = (resource: string, actions: readonly string[]): readonly string[] =>
+  actions.map((action) => `${resource}:${action}`)
+
+export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
+  // SUPER_ADMIN is granted everything by role check (hasPermission bypass) and
+  // by full RolePermission seeding — never by email.
+  SUPER_ADMIN: PERMISSION_CODES,
+
+  SCHOOL_ADMIN: PERMISSION_CODES,
+
+  PRINCIPAL: [
+    "dashboard:view",
+    ...codes("students", [VIEW, CREATE, UPDATE, EXPORT]),
+    ...codes("teachers", [VIEW, CREATE, UPDATE]),
+    ...codes("staff", [VIEW, CREATE, UPDATE]),
+    ...codes("admissions", [VIEW, CREATE, UPDATE]),
+    "attendance:view",
+    ...codes("classes", [VIEW, CREATE, UPDATE]),
+    ...codes("sections", [VIEW, CREATE, UPDATE]),
+    ...codes("subjects", [VIEW, CREATE, UPDATE]),
+    "timetable:view",
+    "homework:view",
+    "assignments:view",
+    "exams:view",
+    "results:view",
+    ...codes("fees", [VIEW, UPDATE]),
+    "payments:view",
+    "receipts:view",
+    "library:view",
+    "transport:view",
+    "hostel:view",
+    ...codes("reports", [VIEW, EXPORT]),
+    ...codes("notices", [VIEW, CREATE]),
+    ...codes("events", [VIEW, CREATE]),
+    "messages:view",
+    "audit-logs:view",
+  ],
+
+  TEACHER: [
+    "dashboard:view",
+    "students:view",
+    ...codes("classes", [VIEW, CREATE, UPDATE]),
+    ...codes("sections", [VIEW, CREATE, UPDATE]),
+    ...codes("subjects", [VIEW, CREATE, UPDATE]),
+    ...codes("timetable", [VIEW, CREATE, UPDATE]),
+    ...codes("attendance", [VIEW, CREATE, UPDATE]),
+    ...codes("homework", [VIEW, CREATE, UPDATE]),
+    ...codes("assignments", [VIEW, CREATE, UPDATE]),
+    ...codes("exams", [VIEW, CREATE, UPDATE]),
+    ...codes("results", [VIEW, CREATE, UPDATE]),
+    "library:view",
+    "notices:view",
+    "events:view",
+    ...codes("messages", [VIEW, CREATE]),
+  ],
+
+  ACCOUNTANT: [
+    "dashboard:view",
+    "students:view",
+    ...codes("fees", [VIEW, CREATE, UPDATE]),
+    ...codes("payments", [VIEW, CREATE, UPDATE]),
+    ...codes("receipts", [VIEW, EXPORT]),
+    ...codes("payroll", [VIEW, CREATE, UPDATE]),
+    ...codes("reports", [VIEW, EXPORT]),
+    "settings:view",
+  ],
+
+  LIBRARIAN: [
+    "dashboard:view",
+    "students:view",
+    ...codes("library", [VIEW, CREATE, UPDATE, DELETE]),
+    "notices:view",
+    "events:view",
+    "messages:view",
+  ],
+
+  TRANSPORT_MANAGER: [
+    "dashboard:view",
+    "students:view",
+    ...codes("transport", [VIEW, CREATE, UPDATE, DELETE]),
+    "messages:view",
+  ],
+
+  HOSTEL_WARDEN: [
+    "dashboard:view",
+    "students:view",
+    ...codes("hostel", [VIEW, CREATE, UPDATE, DELETE]),
+    "messages:view",
+  ],
+
+  RECEPTIONIST: [
+    "dashboard:view",
+    "attendance:view",
+    ...codes("admissions", [VIEW, CREATE, UPDATE]),
+    ...codes("students", [VIEW, CREATE]),
+    "fees:view",
+    "notices:view",
+    "events:view",
+    ...codes("messages", [VIEW, CREATE]),
+  ],
+
+  PARENT: [
+    "dashboard:view",
+    "students:view",
+    "attendance:view",
+    "exams:view",
+    "results:view",
+    "fees:view",
+    "library:view",
+    "notices:view",
+    "events:view",
+    "messages:view",
+  ],
+
+  STUDENT: [
+    "dashboard:view",
+    "attendance:view",
+    "exams:view",
+    "results:view",
+    "fees:view",
+    "library:view",
+    "notices:view",
+    "events:view",
+  ],
+}
+
+/** Human description for a permission code, e.g. `students:view` → `View students`. */
+export function describePermission(code: string): string {
+  const [resource, action] = code.split(":")
+  const actionLabel = action ? `${action.charAt(0).toUpperCase()}${action.slice(1)}` : "Access"
+  return `${actionLabel} ${resource}`
+}

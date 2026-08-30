@@ -1,9 +1,12 @@
 # School Management System
 
-A premium, production-oriented School Management System for a real school client.
-Current milestone: **engineering foundation** — admin dashboard, Express API
-foundation, and the frontend/backend boundary. Domain modules come next, each with
-its own written specification.
+A premium, production-oriented School Management System for a real school client
+(current placeholder brand: **Bright Future International School**).
+Completed: **engineering foundation** — premium admin dashboard, Express API, a real
+authentication + RBAC layer (DB-backed login, opaque refresh/access cookie sessions,
+roles + permissions), and the first end-to-end domain module (**Students**: directory, academic placement,
+guardians, CSV export). Additional domain modules come next, each
+with its own written specification.
 
 ## Stack
 
@@ -11,73 +14,153 @@ its own written specification.
   React Router 7 · TanStack Query 5 · Recharts 3 · Lucide icons
 - Backend: Node.js (>= 22.18) + Express 5 + TypeScript · Prisma (PostgreSQL) ·
   zod · helmet · cors
-- Tooling: npm · ESLint 9 + typescript-eslint · `tsx watch` (dev) · `tsc` (build)
+- Auth: Node built-in `crypto` (scrypt, randomBytes, sha256, timingSafeEqual) —
+  no auth library
+- Tooling: npm · ESLint 9 + typescript-eslint · `tsx watch` (dev) · `tsc` (build) ·
+  vitest + supertest (DB-free tests)
 
 ## Structure
 
 ```
 src/            Frontend
   app/          Application composition: providers, route tree
-  routes/       Single source of truth for navigation + routing
+  auth/         Auth context, useAuth, can() + identity types (real RBAC UI)
+  routes/       Route tree, ProtectedRoute, navigation (single source of truth)
   components/
     layout/     Shell: sidebar, header, containers
     dashboard/  Dashboard widgets
     charts/     Recharts wrappers
     dialogs/    Workflow dialogs
     ui/         shadcn/ui primitives (PROTECTED — do not hand-edit)
-  pages/        Route pages
+  pages/        Route pages (incl. LoginPage)
   data/         TEMPORARY mock data (clearly labeled, never in UI components)
   services/     Service facade — components talk to this, never to mock data
+                (authService.ts → real API; dashboardService → mock until live)
   hooks/        Data/composition hooks
   types/        Domain types + API envelope types (src/types/api.ts)
   lib/          Utilities (formatting, cn, apiClient.ts)
 server/         Express + TypeScript + Prisma (PostgreSQL) API
   src/
     config/     Typed environment (zod)
+    auth/       Password scrypt, token/cookie primitives, hasPermission
+permissions/ Canonical permission catalog (98 codes, 11 roles)
     controllers/  HTTP handlers
-    middleware/   Request logging, error handling, 404s
-    routes/     Routers mounted under /api/v1
-    services/   Business logic
-    lib/        ApiError, response envelope, logger, lazy Prisma client
-    types/      API envelope types
-    app.ts      createApp() factory (no listen — testable)
-    server.ts   Entry point + graceful shutdown
-  prisma/       schema.prisma (datasource/generator only — no models yet)
+    middleware/   requireAuth / requirePermission / error handling / 404s
+    routes/       Routers mounted under /api/v1 (auth.* under /api/v1/auth)
+    services/     Business logic (auth/permission/student services)
+    lib/          ApiError, response envelope, logger, lazy Prisma client
+    types/        API envelope types (+ Express Request augmentation)
+    app.ts        createApp() factory (no listen — testable)
+    server.ts     Entry point + graceful shutdown
+  prisma/       schema.prisma (School, AcademicSession, User, Role, Permission,
+                Session, Student, Guardian, StudentGuardian, StudentEnrollment)
+                + seed.ts + migrations/
+  tests/        vitest + supertest (DB-free; integration tests opt in via
+                TEST_DATABASE_URL)
 ```
 
 ## Data architecture
 
 ```
 UI components
-   └─ hooks → services (dashboardService)
-         └─ data layer (mock now → REST API + database later)
+   └─ hooks → services (authService → real API · dashboardService → mock)
+         └─ data layer (mock now → REST API + database per module)
 ```
 
-Components never import mock data or call `fetch` directly. Future module data
-flows through `src/lib/apiClient.ts` → `/api/v1`. The dashboard keeps its validated
-mock service until each module gains a real endpoint — never wrapped in fake HTTP.
+Components never import mock data or call `fetch` directly. Module data flows
+through `src/lib/apiClient.ts` → `/api/v1` once a real endpoint exists; the
+dashboard keeps its validated mock service until each module gains a real endpoint
+—— never wrapped in fake HTTP.
+
+## Students module (implemented)
+
+The first real domain module, used as the template for every future module:
+
+- **Models** (`server/prisma/schema.prisma`): `Student`, `Guardian`,
+  `StudentGuardian` (join with `relationshipType`, `isPrimary`,
+  `isEmergencyContact`), and `StudentEnrollment` (one per student per academic
+  session; placement edits move the student's current ACTIVE session record). A
+  `School.admissionCounter` powers server-generated admission numbers
+  (`ADM-YYYY-NNNN`).
+- **API** (`/api/v1/students`): list with pagination/search/filters, create,
+  update (placement + status + guardians), detail, metadata (`/meta`), CSV export
+  (`/export`). No delete endpoint by design. All endpoints school-scoped and
+  RBAC-guarded (`students:view/create/update/export`).
+- **Frontend**: `src/pages/students/*`, wired through the service seam
+  (`src/services/studentsService.ts` → real API) with TanStack Query hooks and a
+  validated form (`src/components/students/StudentForm.tsx`).
+- **Movies**: admission number generation, guardian primary rules, query
+  validation, and CSV building are covered by unit tests; DB-backed integration
+  tests run against a test database. See `server/tests/students.*`.
+
+## Authentication & RBAC
+
+- **Real, DB-backed.** Email/password login (scrypt-hashed), opaque access/refresh
+  tokens stored hashed in the `Session` table, `sms.access`/`sms.refresh`
+  httpOnly cookies with refresh rotation. No JWTs, no auth library, nothing fake.
+- **Roles & permissions.** 98 permission codes across 11 roles. The super admin
+  (SUPER_ADMIN) bypasses checks by role. Server enforces via route middleware;
+  the frontend `can()` only hides UI.
+- **Sign in** at `http://localhost:5173/login`. After `npm run db:seed`, log in
+  with `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` from your `.env`.
+- Endpoint contract under `/api/v1/auth/*`: login, refresh, logout, me.
 
 ## Environment
 
 Copy `.env.example` to `.env` for local development. The single root `.env` serves
-both sides. Requirements are documented from `.env.example`; the API boots with no
-database configured.
+both sides. The API boots without a database; auth endpoints return a clean error
+until `DATABASE_URL` is set.
+
+### Local database (pick ONE)
+
+**Option A — Docker (if available):** `docker compose up -d`, then
+`DATABASE_URL="postgresql://school:school@localhost:5432/school_management"`.
+
+**Option B — user-space PostgreSQL (no Docker, no admin):** the EDB Windows
+binaries are unpacked under `.data/postgres` (gitignored, machine-local):
+`npm run db:local:start`, then
+`DATABASE_URL="postgresql://school@127.0.0.1:5433/school_management"`.
+Stop it with `npm run db:local:stop`. Data lives in `.data/postgres/data`.
+
+After either option:
+1. `npm run generate:prisma`
+2. `npm run db:migrate`
+3. `npm run db:seed` (needs `SEED_ADMIN_EMAIL` + `SEED_ADMIN_PASSWORD`) — idempotent
 
 ## Scripts
 
-| Command                  | Purpose                                        |
-| ------------------------ | ---------------------------------------------- |
-| `npm run dev`            | Vite dev server (proxies `/api` → :4000)       |
-| `npm run dev:server`     | API dev server (`tsx watch`)                    |
-| `npm run build`          | Frontend type-check + production build         |
-| `npm run build:server`   | API production build (`server/dist`)            |
-| `npm run start:server`   | Run the built API (`node server/dist/server.js`)|
-| `npm run typecheck`      | Type-check frontend + server                   |
-| `npm run lint`           | ESLint (frontend + server)                     |
-| `npm run generate:prisma`| Generate Prisma Client (needed after install)  |
+| Command                      | Purpose                                          |
+| ---------------------------- | ------------------------------------------------ |
+| `npm run dev`                | Vite dev server (proxies `/api` → :4000)         |
+| `npm run dev:server`         | API dev server (`tsx watch`)                     |
+| `npm run build`              | Frontend type-check + production build           |
+| `npm run build:server`       | API production build (`server/dist`)             |
+| `npm run start:server`       | Run the built API (`node server/dist/server.js`) |
+| `npm run typecheck`          | Type-check frontend + server                     |
+| `npm run lint`               | ESLint (frontend + server)                       |
+| `npm test` / `npm run test:watch` | vitest (DB-free backend tests)             |
+| `npm run generate:prisma`    | Generate Prisma Client (needed after install)    |
+| `npm run db:migrate`         | Apply Prisma migrations                          |
+| `npm run db:seed`            | Idempotent seed (catalog, roles, super admin, students)|
+| `npm run db:local:start`     | Start user-space PostgreSQL (`.data/postgres`)   |
+| `npm run db:local:stop`      | Stop user-space PostgreSQL                       |
 
-Fresh clone: `npm install`, then `npm run generate:prisma`. Health check:
-`GET http://localhost:4000/api/v1/health`.
+Fresh clone: `npm install`, then follow the database + seed steps above. Health
+check: `GET http://localhost:4000/api/v1/health`.
+
+### Tests against a real database
+
+`npm test` runs DB-free by default. To also run the DB-backed integration tests
+(students, auth), create a dedicated test database and export its URL:
+
+```
+createdb school_management_test   # your usual tooling
+$env:TEST_DATABASE_URL="postgresql://.../@.../school_management_test"; npm test
+```
+
+The integration suite applies migrations to that database on startup and isolates
+itself with per-test cleanup. Skip if a test database is unavailable — unit tests
+still cover the rules.
 
 ## Branding
 

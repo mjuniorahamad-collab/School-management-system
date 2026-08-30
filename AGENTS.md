@@ -34,16 +34,24 @@ production features come next, each with its own written domain specification.
 
 ## 2. Product scope
 
-Completed foundations:
+Completed:
 
 - Premium admin dashboard foundation (frontend) — PROTECTED BASELINE.
 - Backend API foundation (Express + TypeScript) with health endpoint.
 - Frontend API client boundary.
+- Authentication + RBAC v1 — real DB-backed email/password login, opaque
+  refresh/access cookie sessions, roles + permissions, guarded routes and nav
+  (design in section 26).
+- Students module (end-to-end implemented): server-generated admission numbers,
+  per-session enrollment placement, guardians, status lifecycle, CSV export,
+  RBAC-guarded REST under `/api/v1/students`, full frontend, unit + DB-backed
+  integration tests.
+- Testing: vitest + supertest (DB-free unit tests always run; DB-backed
+  integration suites opt in via `TEST_DATABASE_URL`).
 
 Deferred until individually spec'd (do NOT build proactively):
 
-- Authentication + RBAC (the next major milestone, before the first real module).
-- Domain modules: Students, Teachers, Admissions, Attendance, Fees, Exams, Results,
+- Domain modules: Teachers, Admissions, Attendance, Fees, Exams, Results,
   Library, Transport, Hostel, Payroll, Parent portal.
 - Real database schema / business relationships (promotion rules, fee installments,
   grading rules, attendance policies, class history, parent relationships, session
@@ -56,8 +64,12 @@ Deferred until individually spec'd (do NOT build proactively):
   sonner, cmdk.
 - Backend: Node.js (>= 22.18), Express 5, TypeScript (ESM / NodeNext), Prisma
   (PostgreSQL), zod, helmet, cors.
+- Frontend auth: TanStack Query 5 + custom `src/auth/` context (no auth library).
 - Tooling: npm only, ESLint 9 + typescript-eslint, `tsx watch` for dev, `tsc` for
-  production builds.
+  production builds, vitest + supertest for tests. Node's built-in `crypto`
+  (scrypt, randomBytes, timingSafeEqual) for password/session primitives.
+- Optional dev database: `docker-compose.yml` (postgres:16-alpine) OR the
+  user-space PostgreSQL workflow documented in README (`npm run db:local:start`).
 
 ## 4. Frontend architecture
 
@@ -78,7 +90,8 @@ Layered, dependency flows downward only:
 
 `server/` is modular by layer:
 
-`routes → controllers → services → (lib / db)` plus `config`, `middleware`, `types`.
+`routes → controllers → services → (lib / db)` plus `config`, `middleware`, `types`,
+`auth` (password/token/cookie/hasPermission primitives), `permissions`, `prisma`.
 
 - `app.ts` exports `createApp()` (no listening) so it is testable;
   `server.ts` is the only entry point.
@@ -87,6 +100,9 @@ Layered, dependency flows downward only:
 - All API routes live under `/api/v1`.
 - Keep business logic in `services`, HTTP logic in `controllers`/`middleware`, and
   requests of configuration only through `config/env.ts`.
+- Auth-aware routes mount `requireAuth` (and `requirePermission` where needed) as
+  middleware; permission checks belong on the route/middleware, never buried in
+  controllers.
 
 ## 6. Data / API boundaries
 
@@ -98,6 +114,8 @@ Layered, dependency flows downward only:
   envelope — keep them in sync when the contract changes.
 - The dashboard currently uses mock data by design. Convert per-module only when its
   real endpoint exists. Never wrap mock data in fake HTTP calls.
+- Auth endpoints live under `/api/v1/auth/*` (login, refresh, logout, me) and use
+  this envelope with custom error codes (see section 26).
 
 ## 7. Component architecture rules
 
@@ -145,13 +163,18 @@ Layered, dependency flows downward only:
 
 ## 12. Security rules
 
-- Backend: helmet headers, allow-listed CORS from `CORS_ORIGIN`, `express.json`
-  size limit, central error handling that never leaks stack traces or internals,
-  zod validation at the API boundary.
+- Backend: helmet headers, allow-listed CORS from `CORS_ORIGIN` (with
+  `credentials: true`), `express.json` size limit, central error handling that
+  never leaks stack traces or internals, zod validation at the API boundary.
+- Passwords: scrypt (N=16384, r=8, p=1, 64-byte key), salted per user, stored as
+  `scrypt$N$r$p$salt$key`; never store or log plaintext. Session tokens are opaque
+  random bytes stored hashed (sha256) in the DB — they are revocable and rotating.
+- Cookies: httpOnly + SameSite=Lax, `Secure` in production only, short access TTL
+  (15 min) with refresh rotation. Never expose the raw token to JS.
 - Frontend: only `VITE_`-prefixed env vars are exposed to bundles; never bundle
   secrets.
-- Authentication and RBAC are NOT implemented yet. Do not add fake auth, and do not
-  claim auth exists.
+- Authentication and RBAC ARE implemented (v1). Do not add fake auth, do not claim
+  auth that does not exist, and never bypass the real auth paths in code.
 
 ## 13. Environment-variable rules
 
@@ -161,8 +184,12 @@ Layered, dependency flows downward only:
 - Required/optional values are documented in `.env.example`:
   - `NODE_ENV` (optional, default `development`), `PORT` (optional, default `4000`),
     `CORS_ORIGIN` (optional, sensible localhost default).
-  - `DATABASE_URL` — REQUIRED only once DB-backed features are enabled; the server
-    must boot without it today.
+  - `DATABASE_URL` — REQUIRED for auth/RBAC and future DB-backed features; the
+    server must still boot without it (auth endpoints fail cleanly until set).
+  - `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD` — REQUIRED (non-production) for
+    `npm run db:seed` to create the initial super admin.
+  - `SESSION_ACCESS_TTL_MINUTES` (default 15), `SESSION_REFRESH_TTL_DAYS`
+    (default 7).
   - `VITE_API_URL` (optional, default `/api/v1`).
 
 ## 14. Git safety rules
@@ -180,16 +207,27 @@ Canonical validation before claiming anything works:
 1. `npm run lint` → zero problems.
 2. `npm run typecheck` → passes (frontend `tsc -b` + server typecheck).
 3. `npm run build` and `npm run build:server` → pass.
-4. Server boots (`npm run dev:server`) and `GET /api/v1/health` → 200; an unknown
+4. `npm test` → all vitest tests pass.
+5. Server boots (`npm run dev:server`) and `GET /api/v1/health` → 200; an unknown
    `/api/v1/...` route → 404 envelope.
-5. Frontend dev/preview serves `/`, `/dashboard`, `/students`, `/settings`.
-6. `git status` is clean (or only intended files differ).
+6. Auth smoke: login → 200 + httpOnly session cookies, `GET /auth/me` → user with
+   roles/permissions, logout → revoked, unauthenticated `me` → 401.
+7. Frontend dev/preview serves `/`, `/dashboard`, `/students`, `/settings`; `/login`
+   renders; an unauthenticated protected route can still serve the shell, with the
+   client redirecting to `/login` (never a fake login gate).
+8. `git status` is clean (or only intended files differ).
 
-Never claim success without actually running the checks. No test framework exists
-yet; when one is added, its running command becomes part of this list.
+Never claim success without actually running the checks.
 
-Fresh-clone setup: `npm install` then `npm run generate:prisma` (Prisma must be
-generated before server typecheck/build that references `@prisma/client`).
+Fresh-clone setup:
+1. `npm install`
+2. Prepare a local database (one of): Docker (`docker compose up -d`) or
+   user-space PostgreSQL (`npm run db:local:start`) — see README.
+3. `cp .env.example .env` and set `DATABASE_URL`, `SEED_ADMIN_EMAIL`,
+   `SEED_ADMIN_PASSWORD`.
+4. `npm run generate:prisma` (Prisma must be generated before server
+   typecheck/build that references `@prisma/client`).
+5. `npm run db:migrate` then `npm run db:seed`.
 
 ## 16. Mock-data rules
 
@@ -274,3 +312,38 @@ to pick. Derive answers from this file and existing code patterns, then proceed.
 - Never replace real behavior with mocks silently. Mocks are explicit, labeled, and
   routed through the service seam.
 - Never claim a feature "works" when it is a placeholder or unverified.
+
+## 26. Auth & RBAC (implemented, v1)
+
+Design decisions — follow these when extending auth:
+
+- **Sessions, not JWTs.** Tokens are `crypto.randomBytes(32)` base64url; only their
+  sha256 hash is stored in the `Session` table, so they are revocable and rotating.
+  Access token TTL 15 min, refresh token TTL 7 days. Refresh rotates (old token is
+  invalidated); logout deletes the session.
+- **Cookies.** `sms.access` / `sms.refresh`, httpOnly + SameSite=Lax, `Secure` in
+  production only. The raw token never reaches JS; the client only knows it is signed
+  in via `GET /auth/me`.
+- **Passwords.** scrypt as in section 12. Login responses are constant-time against a
+  dummy hash for unknown emails; a single generic `Invalid email or password` error
+  (code `INVALID_CREDENTIALS`, 401). Non-ACTIVE users get `ACCOUNT_DISABLED` (403).
+  Errors: unauthenticated → `UNAUTHORIZED` (401); missing permission →
+  `FORBIDDEN` (403).
+- **RBAC models.** `User` ↔ `UserRole` ↔ `Role` ↔ `RolePermission` ↔ `Permission`.
+  `server/src/permissions/permissions.ts` is the canonical catalog: 98 permission
+  codes across 11 roles (`SUPER_ADMIN` bypasses checks by role, never by email).
+  `requirePermission(code)` enforces server-side as route middleware — never inside
+  controllers. Frontend `can()` mirrors checks for UI hiding only; it is not a
+  security boundary.
+- **Frontend placement.** `src/auth/` (context + `can` + `useAuth`) owns identity;
+  `src/services/authService.ts` is the data seam for auth calls;
+  `src/routes/ProtectedRoute.tsx` wraps private routes and redirects anonymous
+  visitors to `/login` with a `from` hint; `NavItem.requiredPermission` hides nav
+  entries the actor cannot use. Login page is `src/pages/LoginPage.tsx`.
+- **Seed.** `npm run db:seed` is idempotent — creates school + academic sessions,
+  the permission/role catalog (validated against the grants map), and the super
+  admin from `SEED_ADMIN_*` (production: skipped). Never overwrites an existing
+  password hash; never prints secrets.
+- **Testing.** `server/tests/*` run DB-free under vitest (+ supertest integration
+  against `createApp()`); auth behavior is fully covered there and by the live
+  smoke in section 15.6.

@@ -12,7 +12,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { branding } from "@/config/branding"
-import { findNavItem } from "@/routes/navigation"
+import { findNavItem, getAllNavItems } from "@/routes/navigation"
 import { notifications } from "@/data/notifications"
 import { messagePreviews } from "@/data/messages"
 import { cn } from "@/lib/utils"
@@ -41,7 +41,7 @@ function formatRole(role: string): string {
 }
 
 function getHeaderMeta(pathname: string, displayName: string): { title: string; subtitle: string } {
-  const navItem = findNavItem(pathname)
+  const navItem = findNavItem(pathname) ?? findByPathPrefix(pathname)
 
   if (pathname === "/dashboard") {
     const firstName = displayName.split(" ")[0]
@@ -51,6 +51,12 @@ function getHeaderMeta(pathname: string, displayName: string): { title: string; 
     title: navItem?.label ?? "Page not found",
     subtitle: "School administration console",
   }
+}
+
+function findByPathPrefix(pathname: string) {
+  return getAllNavItems()
+    .filter((item) => pathname.startsWith(`${item.path}/`))
+    .sort((a, b) => b.path.length - a.path.length)[0]
 }
 
 const notificationToneDot: Record<string, string> = {

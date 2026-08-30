@@ -1,7 +1,8 @@
 import { useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AddStudentDialog } from "@/components/dialogs/AddStudentDialog"
+import { useAuth } from "@/auth/useAuth"
 import { AddTeacherDialog } from "@/components/dialogs/AddTeacherDialog"
 import { MarkAttendanceDialog } from "@/components/dialogs/MarkAttendanceDialog"
 import { CollectFeeDialog } from "@/components/dialogs/CollectFeeDialog"
@@ -16,9 +17,19 @@ interface QuickActionsProps {
 
 export function QuickActions({ className }: QuickActionsProps) {
   const { data, isPending, isError } = useQuickActions()
+  const { can } = useAuth()
+  const navigate = useNavigate()
   const [openDialog, setOpenDialog] = useState<string | null>(null)
 
   const inlineBase = `inline-flex items-center justify-center gap-2.5 rounded-xl border bg-card p-3 text-sm font-medium shadow-card transition-colors hover:bg-muted/50 hover:shadow-card-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none`
+
+  const handleActionClick = (id: string | undefined) => {
+    if (id === "add-student") {
+      navigate("/students/new")
+      return
+    }
+    setOpenDialog(id ?? null)
+  }
 
   return (
     <Card className={cn("flex h-full flex-col", className)}>
@@ -43,35 +54,33 @@ export function QuickActions({ className }: QuickActionsProps) {
 
         {data && (
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            {data.map((action) => {
-              const Icon = action.icon
-              return (
-                <button
-                  key={action.id}
-                  type="button"
-                  className={inlineBase}
-                  onClick={() => setOpenDialog(action.id)}
-                >
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
-                    <Icon className="size-[18px]" aria-hidden="true" />
-                  </span>
-                  <span className="min-w-0 text-left">
-                    <span className="block truncate text-sm font-medium">{action.label}</span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {action.description}
+            {data
+              .filter((action) => action.id !== "add-student" || can("students:create"))
+              .map((action) => {
+                const Icon = action.icon
+                return (
+                  <button
+                    key={action.id}
+                    type="button"
+                    className={inlineBase}
+                    onClick={() => handleActionClick(action.id)}
+                  >
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+                      <Icon className="size-[18px]" aria-hidden="true" />
                     </span>
-                  </span>
-                </button>
-              )
-            })}
+                    <span className="min-w-0 text-left">
+                      <span className="block truncate text-sm font-medium">{action.label}</span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {action.description}
+                      </span>
+                    </span>
+                  </button>
+                )
+              })}
           </div>
         )}
       </CardContent>
 
-      <AddStudentDialog
-        open={openDialog === "add-student"}
-        onOpenChange={(open) => setOpenDialog(open ? "add-student" : null)}
-      />
       <AddTeacherDialog
         open={openDialog === "add-teacher"}
         onOpenChange={(open) => setOpenDialog(open ? "add-teacher" : null)}
