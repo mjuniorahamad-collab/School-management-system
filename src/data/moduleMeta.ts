@@ -4,20 +4,6 @@ import type { ModuleMeta } from "@/types"
 // are not part of the current dashboard milestone. When a module is implemented,
 // remove its entry here and mount its real page in the route tree.
 export const moduleMeta: Record<string, ModuleMeta> = {
-  "/timetable": {
-    path: "/timetable",
-    label: "Timetable",
-    status: "planned",
-    purpose: "Period-wise timetable for classes, with teacher and room allocation.",
-    futureConnection: "Connects to the Timetable API and timetable table in the database.",
-  },
-  "/attendance": {
-    path: "/attendance",
-    label: "Attendance",
-    status: "planned",
-    purpose: "Daily and periodic attendance marking, reports, and analytics.",
-    futureConnection: "Connects to the Attendance API and attendance table in the database.",
-  },
   "/homework": {
     path: "/homework",
     label: "Homework",

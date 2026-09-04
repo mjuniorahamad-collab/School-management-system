@@ -19,6 +19,8 @@ import { NoticesPage } from "@/pages/notices/NoticesPage"
 import { EventsPage } from "@/pages/events/EventsPage"
 import { AdmissionsPage } from "@/pages/admissions/AdmissionsPage"
 import { SettingsPage } from "@/pages/settings/SettingsPage"
+import { TimetablePage } from "@/pages/timetable/TimetablePage"
+import { AttendancePage } from "@/pages/attendance/AttendancePage"
 import { ProtectedRoute } from "@/routes/ProtectedRoute"
 import { getAllNavItems } from "@/routes/navigation"
 import { moduleMeta } from "@/data/moduleMeta"
@@ -37,6 +39,8 @@ const IMPLEMENTED_PATHS = new Set([
   "/events",
   "/admissions",
   "/settings",
+  "/timetable",
+  "/attendance",
 ])
 
 export const router = createBrowserRouter([
@@ -70,6 +74,8 @@ export const router = createBrowserRouter([
       { path: "/events", element: <EventsPage /> },
       { path: "/admissions", element: <AdmissionsPage /> },
       { path: "/settings", element: <SettingsPage /> },
+      { path: "/timetable", element: <TimetablePage /> },
+      { path: "/attendance", element: <AttendancePage /> },
       // Remaining unimplemented modules from the navigation registry.
       ...getAllNavItems()
         .filter((item) => !IMPLEMENTED_PATHS.has(item.path) && !item.path.startsWith("/students"))

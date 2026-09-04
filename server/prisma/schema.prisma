@@ -1,22 +1,21 @@
 // School Management System — Prisma schema.
 //
-// Current milestone: identity & authorization foundation.
+// Current milestone: Timetable & Attendance (Phase 4).
 //
 //   School, AcademicSession, User, Role, Permission, UserRole, RolePermission,
-//   Session(auth tokens).
-//
-// Domain tables (students, teachers, fees, attendance, exams, ...) and their
-// relationships are designed deliberately in their own milestone — never
-// guessed ahead of a module.
+//   Session(auth tokens), Student, Teacher, Staff, Class, Section, Subject,
+//   PeriodSlot, TimetableEntry, AttendanceRecord.
 //
 // Decisions:
 //   - `User` is a pure authentication identity (email + password hash). Domain
-//     profiles (student/teacher/parent) will link to it later, they are NOT
-//     columns here.
+//     profiles (student/teacher/parent) link to it via dedicated domain tables.
 //   - Auth uses opaque bearer tokens stored as cryptographic hashes in
 //     `Session` (see server/src/auth), so sessions are revocable server-side.
 //   - Authorization is flat Role -> Permission (resource:action codes).
 //     SUPER_ADMIN grants everything by role, never by email.
+//   - TimetableEntry uses two @@unique constraints for conflict prevention
+//     (class-slot and teacher-slot). AttendanceRecord snapshots classId/sectionId
+//     from enrollment at mark-time for historical correctness.
 
 datasource db {
   provider = "postgresql"
@@ -80,6 +79,22 @@ enum MembershipStatus {
   INACTIVE
 }
 
+enum TimetableDay {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  HOLIDAY
+}
+
 model School {
   id                          String       @id @default(uuid())
   name                        String
@@ -115,6 +130,8 @@ model School {
   notices               Notice[]
   events                Event[]
   admissionApplications AdmissionApplication[]
+  timetableEntries     TimetableEntry[]
+  attendanceRecords    AttendanceRecord[]
 }
 
 model AcademicSession {
@@ -133,6 +150,8 @@ model AcademicSession {
   enrollments           StudentEnrollment[]
   feeStructures         FeeStructure[]
   admissionApplications AdmissionApplication[] @relation("ApplicationPreferredSession")
+  timetableEntries      TimetableEntry[]
+  attendanceRecords     AttendanceRecord[]
 
   @@unique([schoolId, code])
   @@index([schoolId, status])
@@ -174,6 +193,8 @@ model User {
   updatedApplications   AdmissionApplication[] @relation("ApplicationUpdatedBy")
   reviewedApplications  AdmissionApplication[] @relation("ApplicationReviewedBy")
   convertedApplications AdmissionApplication[] @relation("ApplicationConvertedBy")
+
+  markedAttendance AttendanceRecord[] @relation("AttendanceMarkedBy")
 
   @@index([schoolId])
   @@index([email])
@@ -304,6 +325,8 @@ model Class {
   teacherClasses        TeacherClass[]
   feeStructures         FeeStructure[]
   admissionApplications AdmissionApplication[] @relation("ApplicationPreferredClass")
+  timetableEntries      TimetableEntry[]
+  attendanceRecords     AttendanceRecord[]
 
   @@unique([schoolId, name])
   @@index([schoolId])
@@ -320,6 +343,8 @@ model Section {
   enrollments           StudentEnrollment[]
   teacherClasses        TeacherClass[]
   admissionApplications AdmissionApplication[] @relation("ApplicationPreferredSection")
+  timetableEntries      TimetableEntry[]
+  attendanceRecords     AttendanceRecord[]
 
   @@unique([classId, name])
   @@index([classId])
@@ -337,6 +362,7 @@ model Subject {
   school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
 
   teacherSubjects TeacherSubject[]
+  timetableEntries TimetableEntry[]
 
   @@unique([schoolId, code])
   @@index([schoolId])
@@ -411,6 +437,7 @@ model Student {
   school                    School                 @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   studentGuardians          StudentGuardian[]
   enrollments               StudentEnrollment[]
+  attendanceRecords         AttendanceRecord[]
   createdByUser             User?                  @relation("StudentCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
   updatedByUser             User?                  @relation("StudentUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
   user                      User?                  @relation("StudentUser", fields: [userId], references: [id], onDelete: SetNull)
@@ -434,6 +461,7 @@ model StudentEnrollment {
   academicSession AcademicSession @relation(fields: [academicSessionId], references: [id], onDelete: Cascade)
   class           Class           @relation(fields: [classId], references: [id], onDelete: Cascade)
   section         Section?        @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  attendanceRecords AttendanceRecord[]
 
   @@unique([studentId, academicSessionId])
   @@index([academicSessionId])
@@ -486,6 +514,7 @@ model Teacher {
   school          School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   teacherSubjects TeacherSubject[]
   teacherClasses  TeacherClass[]
+  timetableEntries TimetableEntry[]
   user            User?            @relation("TeacherUser", fields: [userId], references: [id], onDelete: SetNull)
 
   @@unique([schoolId, employeeId])
@@ -577,6 +606,8 @@ model PeriodSlot {
   updatedAt DateTime @updatedAt
 
   school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  timetableEntries TimetableEntry[]
 
   @@unique([schoolId, name])
   @@index([schoolId])
@@ -867,4 +898,80 @@ model AdmissionApplication {
   @@index([schoolId, createdAt])
   @@index([schoolId, lastName])
   @@index([convertedStudentId])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Timetable & Attendance (Phase 4).
+//
+// Decisions:
+//   - `TimetableEntry` defines one recurring weekly slot: a class/section
+//     takes a subject from a teacher during a PeriodSlot on a specific day.
+//     Conflict prevention is handled by two @@unique constraints — same
+//     class+section OR same teacher cannot overlap at the same period+day.
+//   - `AttendanceRecord` is a daily per-student snapshot. `classId`/`sectionId`
+//     are denormalized from the enrollment at mark-time so historical records
+//     survive mid-session class transfers. `markedBy` is set server-side.
+//   - Both models are tenant-scoped (schoolId FK). Foreign IDs are validated
+//     server-side to belong to the same school.
+// ────────────────────────────────────────────────────────────────────────────
+
+model TimetableEntry {
+  id                String       @id @default(uuid())
+  schoolId          String
+  academicSessionId String
+  dayOfWeek         TimetableDay
+  periodSlotId      String
+  classId           String
+  sectionId         String?
+  subjectId         String
+  teacherId         String
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  school          School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicSession AcademicSession @relation(fields: [academicSessionId], references: [id], onDelete: Cascade)
+  periodSlot      PeriodSlot      @relation(fields: [periodSlotId], references: [id], onDelete: Cascade)
+  class           Class           @relation(fields: [classId], references: [id], onDelete: Cascade)
+  section         Section?        @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  subject         Subject         @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  teacher         Teacher         @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  // Prevent same class/section from being double-booked at the same period+day.
+  @@unique([schoolId, academicSessionId, dayOfWeek, periodSlotId, classId, sectionId], map: "timetable_class_slot_unique")
+  // Prevent same teacher from being double-booked at the same period+day.
+  @@unique([schoolId, academicSessionId, dayOfWeek, periodSlotId, teacherId], map: "timetable_teacher_slot_unique")
+  @@index([schoolId, academicSessionId])
+  @@index([schoolId, classId, sectionId])
+  @@index([schoolId, teacherId])
+}
+
+model AttendanceRecord {
+  id                String           @id @default(uuid())
+  schoolId          String
+  academicSessionId String
+  classId           String
+  sectionId         String?
+  date              DateTime         @db.Date
+  studentId         String
+  enrollmentId      String
+  status            AttendanceStatus @default(PRESENT)
+  note              String?
+  markedBy          String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  school          School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicSession AcademicSession @relation(fields: [academicSessionId], references: [id], onDelete: Cascade)
+  class           Class           @relation(fields: [classId], references: [id], onDelete: Cascade)
+  section         Section?        @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  student         Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  enrollment      StudentEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  markedByUser    User?           @relation("AttendanceMarkedBy", fields: [markedBy], references: [id], onDelete: SetNull)
+
+  // One record per student per day per school.
+  @@unique([schoolId, enrollmentId, date])
+  @@index([schoolId, academicSessionId])
+  @@index([schoolId, classId, sectionId])
+  @@index([schoolId, studentId])
+  @@index([schoolId, date])
 }

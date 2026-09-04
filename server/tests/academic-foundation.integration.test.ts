@@ -320,6 +320,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Academic Foundation API (integration)", () 
 })
 
 async function resetAllTables(prisma: PrismaClient): Promise<void> {
+  await prisma.timetableEntry.deleteMany()
+  await prisma.attendanceRecord.deleteMany()
+  await prisma.periodSlot.deleteMany()
   await prisma.subject.deleteMany()
   await prisma.studentGuardian.deleteMany()
   await prisma.studentEnrollment.deleteMany()

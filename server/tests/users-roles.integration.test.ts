@@ -346,6 +346,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Users & Roles (integration)", () => {
 })
 
 async function resetAllTables(prisma: PrismaClient): Promise<void> {
+  await prisma.timetableEntry.deleteMany()
+  await prisma.attendanceRecord.deleteMany()
+  await prisma.periodSlot.deleteMany()
   await prisma.teacherSubject.deleteMany()
   await prisma.teacherClass.deleteMany()
   await prisma.staff.deleteMany()

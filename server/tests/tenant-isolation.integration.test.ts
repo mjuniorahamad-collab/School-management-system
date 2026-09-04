@@ -23,6 +23,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Tenant isolation (integration)", () => {
   let teacherBId = ""
   let subjectBId = ""
   let subjectAId = ""
+  let periodSlotBId = ""
+  let timetableEntryBId = ""
+  let attendanceRecordBId = ""
 
   const agentA = request.agent(app) // membership in A
   const agentB = request.agent(app) // legacy (schoolId=B), no membership
@@ -82,6 +85,74 @@ describe.skipIf(!TEST_DATABASE_URL)("Tenant isolation (integration)", () => {
       },
     })
     teacherBId = teacherB.id
+
+    // School B period slots + a timetable entry.
+    const slotB = await prisma.periodSlot.create({
+      data: { schoolId: schoolB.id, name: "P1", startTime: "08:00", endTime: "08:45", sortOrder: 1 },
+    })
+    periodSlotBId = slotB.id
+
+    // School B academic session + class + section for attendance anchoring.
+    const sessionB = await prisma.academicSession.create({
+      data: {
+        schoolId: schoolB.id,
+        name: "B Year",
+        code: "BY2026",
+        startDate: new Date("2026-04-01T00:00:00.000Z"),
+        endDate: new Date("2027-03-31T00:00:00.000Z"),
+        status: "ACTIVE",
+      },
+    })
+    const classB = await prisma.class.create({ data: { schoolId: schoolB.id, name: "6", sortOrder: 6 } })
+    const sectionB = await prisma.section.create({ data: { classId: classB.id, name: "A" } })
+
+    const timetableEntryB = await prisma.timetableEntry.create({
+      data: {
+        schoolId: schoolB.id,
+        academicSessionId: sessionB.id,
+        dayOfWeek: "MONDAY",
+        periodSlotId: slotB.id,
+        classId: classB.id,
+        sectionId: sectionB.id,
+        subjectId: subjectBId,
+        teacherId: teacherBId,
+      },
+    })
+    timetableEntryBId = timetableEntryB.id
+
+    const studentB = await prisma.student.create({
+      data: {
+        schoolId: schoolB.id,
+        admissionNumber: "ADM-2026-0001",
+        firstName: "Bola",
+        lastName: "Student",
+        dateOfBirth: new Date("2015-05-01T00:00:00.000Z"),
+        gender: "FEMALE",
+        status: "ACTIVE",
+        admissionDate: new Date("2026-04-01T00:00:00.000Z"),
+      },
+    })
+    const enrollmentB = await prisma.studentEnrollment.create({
+      data: {
+        studentId: studentB.id,
+        academicSessionId: sessionB.id,
+        classId: classB.id,
+        sectionId: sectionB.id,
+      },
+    })
+    const attendanceRecordB = await prisma.attendanceRecord.create({
+      data: {
+        schoolId: schoolB.id,
+        academicSessionId: sessionB.id,
+        classId: classB.id,
+        sectionId: sectionB.id,
+        date: new Date("2026-05-01T00:00:00.000Z"),
+        studentId: studentB.id,
+        enrollmentId: enrollmentB.id,
+        status: "PRESENT",
+      },
+    })
+    attendanceRecordBId = attendanceRecordB.id
 
     // School A admin — with an ACTIVE membership in A (exercises the
     // membership resolution path) and a SUPER_ADMIN role to prove that even a
@@ -171,6 +242,70 @@ describe.skipIf(!TEST_DATABASE_URL)("Tenant isolation (integration)", () => {
     })
   })
 
+  describe("cross-tenant timetable", () => {
+    it("a user in school A cannot read school B's timetable entry (404)", async () => {
+      const res = await agentA.get(`/api/v1/timetable/${timetableEntryBId}`)
+      expect(res.status).toBe(404)
+      expect(res.body.error.code).toBe("NOT_FOUND")
+    })
+
+    it("a user in school A cannot list school B's timetable entries", async () => {
+      const res = await agentA.get("/api/v1/timetable")
+      expect(res.status).toBe(200)
+      expect(res.body.data.total).toBe(0)
+    })
+
+    it("a user in school A cannot create an entry referencing school B's period slot (400)", async () => {
+      // Fields that pass zod (schema-valid UUIDs) but reference resources outside
+      // school A. The service's foreign-key validation rejects the create with
+      // BAD_REQUEST before any row is inserted — schoolId is always derived from
+      // req.auth, so school B's period slot is unreachable from school A.
+      const res = await agentA.post("/api/v1/timetable").send({
+        academicSessionId: "00000000-0000-4000-8000-000000000001",
+        dayOfWeek: "MONDAY",
+        periodSlotId: periodSlotBId,
+        classId: "00000000-0000-4000-8000-000000000002",
+        sectionId: null,
+        subjectId: subjectAId,
+        teacherId: "00000000-0000-4000-8000-000000000003",
+      })
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe("BAD_REQUEST")
+    })
+
+    it("a user in school B can still read its own timetable entry (sanity)", async () => {
+      const res = await agentB.get(`/api/v1/timetable/${timetableEntryBId}`)
+      expect(res.status).toBe(200)
+      expect(res.body.data.id).toBe(timetableEntryBId)
+    })
+  })
+
+  describe("cross-tenant attendance", () => {
+    it("a user in school A cannot read school B's attendance record (404)", async () => {
+      const res = await agentA.get(`/api/v1/attendance/${attendanceRecordBId}`)
+      expect(res.status).toBe(404)
+      expect(res.body.error.code).toBe("NOT_FOUND")
+    })
+
+    it("a user in school A cannot list school B's attendance records", async () => {
+      const res = await agentA.get("/api/v1/attendance")
+      expect(res.status).toBe(200)
+      expect(res.body.data.total).toBe(0)
+    })
+
+    it("a user in school A cannot update school B's attendance record (404)", async () => {
+      const res = await agentA.patch(`/api/v1/attendance/${attendanceRecordBId}`).send({ status: "ABSENT" })
+      expect(res.status).toBe(404)
+      expect(res.body.error.code).toBe("NOT_FOUND")
+    })
+
+    it("a user in school B can still read its own attendance record (sanity)", async () => {
+      const res = await agentB.get(`/api/v1/attendance/${attendanceRecordBId}`)
+      expect(res.status).toBe(200)
+      expect(res.body.data.id).toBe(attendanceRecordBId)
+    })
+  })
+
   describe("membership resolution", () => {
     it("explicitly selecting a school the user does not belong to is forbidden (403)", async () => {
       const res = await agentA
@@ -212,6 +347,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Tenant isolation (integration)", () => {
 })
 
 async function resetAllTables(prisma: PrismaClient): Promise<void> {
+  await prisma.timetableEntry.deleteMany()
+  await prisma.attendanceRecord.deleteMany()
+  await prisma.periodSlot.deleteMany()
   await prisma.teacherSubject.deleteMany()
   await prisma.teacherClass.deleteMany()
   await prisma.staff.deleteMany()

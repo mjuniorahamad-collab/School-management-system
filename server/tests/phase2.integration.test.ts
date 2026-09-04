@@ -409,6 +409,8 @@ async function resetAllTables(prisma: PrismaClient): Promise<void> {
   await prisma.notice.deleteMany()
   await prisma.schoolSetting.deleteMany()
   await prisma.gradingBand.deleteMany()
+  await prisma.timetableEntry.deleteMany()
+  await prisma.attendanceRecord.deleteMany()
   await prisma.periodSlot.deleteMany()
   await prisma.examType.deleteMany()
   await prisma.teacherSubject.deleteMany()
