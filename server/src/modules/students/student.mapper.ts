@@ -29,7 +29,7 @@ export type StudentListItemRow = Prisma.StudentGetPayload<{ include: ReturnType<
 export function buildStudentName(student: {
   firstName: string
   middleName: string | null
-  lastName: string
+  lastName: string | null
 }): string {
   return [student.firstName, student.middleName, student.lastName]
     .filter((part): part is string => part !== null && part !== "")
@@ -72,7 +72,9 @@ export function mapStudentDetail(row: StudentDetailRow): StudentDetail {
             status: enrollment.academicSession.status,
           },
           class: { id: enrollment.class.id, name: enrollment.class.name },
-          section: { id: enrollment.section.id, name: enrollment.section.name },
+          section: enrollment.section
+            ? { id: enrollment.section.id, name: enrollment.section.name }
+            : null,
         }
       : null,
     guardians: row.studentGuardians.map((sg) => ({
@@ -104,7 +106,9 @@ export function mapStudentListItem(row: StudentListItemRow): StudentListItem {
     status: row.status,
     photoUrl: row.photoUrl,
     class: enrollment ? { id: enrollment.class.id, name: enrollment.class.name } : null,
-    section: enrollment ? { id: enrollment.section.id, name: enrollment.section.name } : null,
+    section: enrollment?.section
+      ? { id: enrollment.section.id, name: enrollment.section.name }
+      : null,
     primaryGuardian: primaryGuardian
       ? { id: primaryGuardian.id, name: primaryGuardian.name, phone: primaryGuardian.phone }
       : null,

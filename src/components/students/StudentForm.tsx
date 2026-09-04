@@ -74,7 +74,7 @@ function toFormValues(initial?: StudentDetail | null): StudentFormPayload {
     status: initial?.status,
     academicSessionId: "",
     classId: enrollment?.class.id ?? "",
-    sectionId: enrollment?.section.id ?? "",
+    sectionId: enrollment?.section?.id ?? "",
     guardians: (initial?.guardians ?? []).map((guardian) => ({
       name: guardian.name,
       relationshipType: guardian.relationshipType,
@@ -104,16 +104,73 @@ function toGuardianFields(initial: StudentFormPayload): GuardianFields[] {
   }))
 }
 
-function isValidForm(values: StudentFormPayload, guardians: GuardianFields[]): boolean {
-  const basic = values.firstName.trim() && values.lastName.trim() && values.dateOfBirth
-  const placement = values.classId && values.sectionId
-  const hasNamedGuardian = guardians.some((guardian) => guardian.name.trim())
-  return Boolean(basic && placement && hasNamedGuardian)
+interface FormErrors {
+  firstName: boolean
+  gender: boolean
+  dateOfBirth: boolean
+  admissionDate: boolean
+  classId: boolean
+  sectionId: boolean
+  guardian: boolean
+}
+
+function emptyErrors(): FormErrors {
+  return {
+    firstName: false,
+    gender: false,
+    dateOfBirth: false,
+    admissionDate: false,
+    classId: false,
+    sectionId: false,
+    guardian: false,
+  }
+}
+
+/**
+ * Collects the missing required fields for the current live form state.
+ * `classHasSections` decides whether a section is required for the placement.
+ */
+function collectErrors(
+  values: StudentFormPayload,
+  guardians: GuardianFields[],
+  classId: string,
+  sectionId: string | undefined,
+  classHasSections: boolean,
+): FormErrors {
+  const errors = emptyErrors()
+  if (!values.firstName.trim()) errors.firstName = true
+  if (!values.gender) errors.gender = true
+  if (!values.dateOfBirth) errors.dateOfBirth = true
+  if (!values.admissionDate) errors.admissionDate = true
+  if (!classId) errors.classId = true
+  if (classHasSections && !sectionId) errors.sectionId = true
+  const hasValidGuardian = guardians.some(
+    (guardian) =>
+      guardian.name.trim() &&
+      guardian.relationshipType &&
+      (guardian.phone.trim() || guardian.email.trim()),
+  )
+  if (!hasValidGuardian) errors.guardian = true
+  return errors
+}
+
+function hasErrors(errors: FormErrors): boolean {
+  return Object.values(errors).some(Boolean)
+}
+
+function guardianContactMissing(guardian: GuardianFields): boolean {
+  return guardian.name.trim() !== "" && !guardian.phone.trim() && !guardian.email.trim()
 }
 
 function optional(value: string): string | undefined {
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : undefined
+}
+
+/** Like `optional`, but returns `null` when empty — tells the backend to clear the field. */
+function clearable(value: string): string | null {
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 export function StudentForm({
@@ -131,9 +188,15 @@ export function StudentForm({
   const [classId, setClassId] = useState(startingValues.classId)
   const [sectionId, setSectionId] = useState(startingValues.sectionId)
   const [status, setStatus] = useState<string>(startingValues.status ?? "")
+  const [showErrors, setShowErrors] = useState(false)
 
   const activeSession = meta?.academicSessions.find((session) => session.status === "ACTIVE")
   const selectedClass = meta?.classes.find((cls) => cls.id === classId)
+  const classHasSections = (selectedClass?.sections.length ?? 0) > 0
+
+  const errors = showErrors
+    ? collectErrors(values, guardians, classId, sectionId, classHasSections)
+    : null
 
   const setField = <TKey extends keyof StudentFormPayload>(
     key: TKey,
@@ -161,11 +224,16 @@ export function StudentForm({
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const currentErrors = collectErrors(values, guardians, classId, sectionId, classHasSections)
+    if (hasErrors(currentErrors)) {
+      setShowErrors(true)
+      return
+    }
     const payload: StudentFormPayload = {
       ...values,
       firstName: values.firstName.trim(),
-      middleName: optional(values.middleName ?? ""),
-      lastName: values.lastName.trim(),
+      middleName: clearable(values.middleName ?? ""),
+      lastName: clearable(values.lastName ?? ""),
       email: optional(values.email ?? ""),
       phone: optional(values.phone ?? ""),
       addressLine1: optional(values.addressLine1 ?? ""),
@@ -173,9 +241,9 @@ export function StudentForm({
       city: optional(values.city ?? ""),
       state: optional(values.state ?? ""),
       postalCode: optional(values.postalCode ?? ""),
-      academicSessionId: activeSession ? activeSession.id : undefined,
+      academicSessionId: mode === "create" ? activeSession?.id : undefined,
       classId,
-      sectionId,
+      ...(classHasSections ? { sectionId } : { sectionId: undefined }),
       ...(mode === "edit" && status ? { status: status as StudentStatus } : {}),
       guardians: guardians
         .filter((guardian) => guardian.name.trim())
@@ -211,6 +279,9 @@ export function StudentForm({
                 required
                 autoComplete="given-name"
               />
+              {errors?.firstName && (
+                <p className="text-xs text-destructive">First name is required.</p>
+              )}
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="middleName">Middle name</Label>
@@ -222,12 +293,11 @@ export function StudentForm({
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="lastName">Last name *</Label>
+              <Label htmlFor="lastName">Last name</Label>
               <Input
                 id="lastName"
-                value={values.lastName}
+                value={values.lastName ?? ""}
                 onChange={(event) => setField("lastName", event.target.value)}
-                required
                 autoComplete="family-name"
               />
             </div>
@@ -248,6 +318,9 @@ export function StudentForm({
                   ))}
                 </SelectContent>
               </Select>
+              {errors?.gender && (
+                <p className="text-xs text-destructive">Gender is required.</p>
+              )}
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="dateOfBirth">Date of birth *</Label>
@@ -258,6 +331,9 @@ export function StudentForm({
                 onChange={(event) => setField("dateOfBirth", event.target.value)}
                 required
               />
+              {errors?.dateOfBirth && (
+                <p className="text-xs text-destructive">Date of birth is required.</p>
+              )}
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="email">Email</Label>
@@ -289,19 +365,23 @@ export function StudentForm({
           <CardDescription data-slot="card-description">
             {mode === "create"
               ? "The admission number is generated by the school after saving"
-              : "Move the student using both class and section"}
+              : "Move the student by selecting a class; section is required if the class has sections"}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="admissionDate">Admission date</Label>
+              <Label htmlFor="admissionDate">Admission date *</Label>
               <Input
                 id="admissionDate"
                 type="date"
                 value={values.admissionDate}
                 onChange={(event) => setField("admissionDate", event.target.value)}
+                required
               />
+              {errors?.admissionDate && (
+                <p className="text-xs text-destructive">Admission date is required.</p>
+              )}
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="classSelect">Class *</Label>
@@ -323,27 +403,59 @@ export function StudentForm({
                   ))}
                 </SelectContent>
               </Select>
+              {errors?.classId && (
+                <p className="text-xs text-destructive">Class is required.</p>
+              )}
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="sectionSelect">Section *</Label>
-              <Select
-                value={sectionId}
-                onValueChange={setSectionId}
-                disabled={!selectedClass}
-              >
-                <SelectTrigger id="sectionSelect" aria-label="Section">
-                  <SelectValue
-                    placeholder={selectedClass ? "Select section" : "Select class first"}
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {selectedClass?.sections.map((section) => (
-                    <SelectItem key={section.id} value={section.id}>
-                      {section.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {classHasSections ? (
+                <>
+                  <Label htmlFor="sectionSelect">Section *</Label>
+                  <Select
+                    value={sectionId}
+                    onValueChange={setSectionId}
+                    disabled={!selectedClass}
+                  >
+                    <SelectTrigger id="sectionSelect" aria-label="Section">
+                      <SelectValue placeholder="Select section" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {selectedClass?.sections.map((section) => (
+                        <SelectItem key={section.id} value={section.id}>
+                          {section.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {errors?.sectionId && (
+                    <p className="text-xs text-destructive">
+                      Please select a section for this class.
+                    </p>
+                  )}
+                </>
+              ) : selectedClass ? (
+                <>
+                  <Label htmlFor="sectionSelect">Section</Label>
+                  <div
+                    id="sectionSelect"
+                    className="flex h-10 items-center rounded-md border border-dashed px-3 text-sm text-muted-foreground"
+                    aria-label="Section"
+                  >
+                    No sections configured
+                  </div>
+                </>
+              ) : (
+                <>
+                  <Label htmlFor="sectionSelect">Section</Label>
+                  <div
+                    id="sectionSelect"
+                    className="flex h-10 items-center rounded-md border border-dashed px-3 text-sm text-muted-foreground"
+                    aria-label="Section"
+                  >
+                    Select class first
+                  </div>
+                </>
+              )}
             </div>
             {mode === "edit" && (
               <div className="flex flex-col gap-1.5">
@@ -426,6 +538,11 @@ export function StudentForm({
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
+          {errors?.guardian && (
+            <p className="text-xs text-destructive">
+              At least one guardian with a name, relationship and a phone or email is required.
+            </p>
+          )}
           {guardians.map((guardian, index) => (
             <div
               key={index}
@@ -436,7 +553,7 @@ export function StudentForm({
                   <UserRound className="size-4 text-muted-foreground" aria-hidden="true" />
                   Guardian {index + 1}
                   {guardian.isPrimary && (
-                    <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-600">
+                    <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300">
                       Primary
                     </span>
                   )}
@@ -504,6 +621,11 @@ export function StudentForm({
                   />
                 </div>
               </div>
+              {guardianContactMissing(guardian) && (
+                <p className="text-xs text-destructive" id={`guardian-contact-hint-${index}`}>
+                  Provide at least one of phone or email for this guardian.
+                </p>
+              )}
               <div className="flex flex-wrap items-center gap-6">
                 <div className="flex items-center gap-2">
                   <Switch
@@ -545,7 +667,7 @@ export function StudentForm({
       </Card>
 
       <div className="flex items-center justify-end gap-2">
-        <Button type="submit" disabled={!isValidForm(values, guardians) || isSubmitting}>
+        <Button type="submit" disabled={isSubmitting}>
           {isSubmitting ? "Saving…" : mode === "create" ? "Add Student" : "Save changes"}
         </Button>
       </div>

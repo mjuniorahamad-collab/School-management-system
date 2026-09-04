@@ -50,7 +50,7 @@ export function FeeCollectionStatus({ className }: FeeCollectionStatusProps) {
                 <span className="text-[1.75rem] font-semibold tracking-tight tabular-nums">
                   {formatINR(data.collected)}
                 </span>
-                <span className="inline-flex items-center rounded-full bg-emerald-50 px-1.5 py-0.5 text-xs font-medium text-emerald-600">
+                <span className="inline-flex items-center rounded-full bg-emerald-50 px-1.5 py-0.5 text-xs font-medium text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300">
                   {formatPercent((data.collected / data.total) * 100, 0)} collected
                 </span>
               </div>

@@ -17,9 +17,9 @@ import { formatPercent } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 const rankStyles: Record<number, string> = {
-  1: "bg-amber-100 text-amber-700",
-  2: "bg-slate-200 text-slate-700",
-  3: "bg-orange-100 text-orange-700",
+  1: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
+  2: "bg-slate-200 text-slate-700 dark:bg-slate-500/15 dark:text-slate-300",
+  3: "bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-300",
 }
 
 interface TopPerformingClassesProps {

@@ -10,9 +10,9 @@ import { findNavItem } from "@/routes/navigation"
 import type { ModuleMeta, ModuleStatus } from "@/types"
 
 const statusMeta: Record<ModuleStatus, { label: string; className: string }> = {
-  planned: { label: "Not implemented yet", className: "bg-amber-50 text-amber-700 border-transparent" },
-  "in-progress": { label: "In progress", className: "bg-sky-50 text-sky-700 border-transparent" },
-  ready: { label: "Available", className: "bg-emerald-50 text-emerald-700 border-transparent" },
+  planned: { label: "Not implemented yet", className: "bg-amber-50 text-amber-700 border-transparent dark:bg-amber-500/15 dark:text-amber-300" },
+  "in-progress": { label: "In progress", className: "bg-sky-50 text-sky-700 border-transparent dark:bg-sky-500/15 dark:text-sky-300" },
+  ready: { label: "Available", className: "bg-emerald-50 text-emerald-700 border-transparent dark:bg-emerald-500/15 dark:text-emerald-300" },
 }
 
 export function ModulePlaceholderPage({ module }: { module: ModuleMeta }) {
@@ -35,7 +35,7 @@ export function ModulePlaceholderPage({ module }: { module: ModuleMeta }) {
 
       <Card>
         <CardContent className="flex flex-col items-start gap-5 px-6 py-8 sm:px-8">
-          <div className="flex size-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+          <div className="flex size-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300">
             <Icon className="size-6" aria-hidden="true" />
           </div>
           <div className="max-w-2xl">

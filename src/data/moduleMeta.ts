@@ -4,48 +4,6 @@ import type { ModuleMeta } from "@/types"
 // are not part of the current dashboard milestone. When a module is implemented,
 // remove its entry here and mount its real page in the route tree.
 export const moduleMeta: Record<string, ModuleMeta> = {
-  "/admissions": {
-    path: "/admissions",
-    label: "Admissions",
-    status: "planned",
-    purpose: "Manage new admissions, application status, and enrollment workflow.",
-    futureConnection: "Connects to the Admissions API and admission records in the database.",
-  },
-  "/teachers": {
-    path: "/teachers",
-    label: "Teachers",
-    status: "planned",
-    purpose: "Teacher directory with profiles, subject assignments, and class load.",
-    futureConnection: "Connects to the Teachers API and staff table in the database.",
-  },
-  "/staff": {
-    path: "/staff",
-    label: "Staff",
-    status: "planned",
-    purpose: "Non-teaching staff directory and employment records.",
-    futureConnection: "Connects to the Staff API and staff table in the database.",
-  },
-  "/classes": {
-    path: "/classes",
-    label: "Classes",
-    status: "planned",
-    purpose: "Class management: student strength, class teachers, and cohort overview.",
-    futureConnection: "Connects to the Classes API and classes table in the database.",
-  },
-  "/sections": {
-    path: "/sections",
-    label: "Sections",
-    status: "planned",
-    purpose: "Section management under each class, with strength and teacher allocation.",
-    futureConnection: "Connects to the Sections API and sections table in the database.",
-  },
-  "/subjects": {
-    path: "/subjects",
-    label: "Subjects",
-    status: "planned",
-    purpose: "Subject master data and subject–teacher–class mappings.",
-    futureConnection: "Connects to the Subjects API and subjects table in the database.",
-  },
   "/timetable": {
     path: "/timetable",
     label: "Timetable",
@@ -137,20 +95,6 @@ export const moduleMeta: Record<string, ModuleMeta> = {
     purpose: "Hostel blocks, room allocation, and boarder management.",
     futureConnection: "Connects to the Hostel API and hostel tables in the database.",
   },
-  "/notices": {
-    path: "/notices",
-    label: "Notices",
-    status: "planned",
-    purpose: "Create, schedule, and publish notices to students and parents.",
-    futureConnection: "Connects to the Notices API and notices table in the database.",
-  },
-  "/events": {
-    path: "/events",
-    label: "Events",
-    status: "planned",
-    purpose: "School calendar, event scheduling, and audience targeting.",
-    futureConnection: "Connects to the Events API and events table in the database.",
-  },
   "/messages": {
     path: "/messages",
     label: "Messages",
@@ -171,13 +115,6 @@ export const moduleMeta: Record<string, ModuleMeta> = {
     status: "planned",
     purpose: "User accounts, roles, and permission assignments.",
     futureConnection: "Connects to the Users API, roles and permissions tables in the database.",
-  },
-  "/settings": {
-    path: "/settings",
-    label: "Settings",
-    status: "planned",
-    purpose: "School profile, academic session, and system configuration.",
-    futureConnection: "Connects to the Settings API and system settings table in the database.",
   },
   "/backups": {
     path: "/backups",

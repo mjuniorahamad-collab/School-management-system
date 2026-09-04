@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils"
 import { getInitials, timeAgo } from "@/lib/format"
 import { useSidebar } from "@/hooks/useSidebar"
 import { useAuth } from "@/auth/useAuth"
+import { ThemeToggle } from "@/theme/ThemeToggle"
 import { GlobalSearch } from "@/components/layout/GlobalSearch"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -114,6 +115,8 @@ export function TopHeader() {
       </div>
 
       <div className="flex shrink-0 items-center gap-1">
+        <ThemeToggle />
+
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="relative" aria-label="Notifications">

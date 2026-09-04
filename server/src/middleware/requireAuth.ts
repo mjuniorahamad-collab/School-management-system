@@ -6,15 +6,22 @@ import {
   ApiError,
   INTERNAL_ERROR,
   accountDisabledError,
+  forbiddenError,
   unauthorizedError,
 } from "../lib/ApiError.js"
 import { getPrisma } from "../lib/database.js"
 import { loadPrincipalContext } from "../services/auth.service.js"
 
+const SCHOOL_HEADER = "x-school-id"
+
 /**
  * Authenticates the request from the `sms.access` httpOnly cookie and attaches
- * `req.auth` (identity + resolved roles/permissions). Requires a valid, active,
- * non-revoked, unexpired session associated with an ACTIVE user.
+ * `req.auth` (identity + resolved roles/permissions + server-derived tenant).
+ * Requires a valid, active, non-revoked, unexpired session associated with an
+ * ACTIVE user whose resolved tenant school is ACTIVE.
+ *
+ * A multi-school user may disambiguate their tenant with the `X-School-Id`
+ * header; it is validated against an ACTIVE membership (never trusted blindly).
  */
 export const requireAuth: RequestHandler = async (req, _res, next) => {
   try {
@@ -39,13 +46,30 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
       return
     }
 
-    const principal = await loadPrincipalContext(session.userId)
+    const headerValue = req.headers[SCHOOL_HEADER]
+    const requestedSchoolId =
+      typeof headerValue === "string" ? headerValue.trim() : undefined
+
+    const principal = await loadPrincipalContext(session.userId, {
+      schoolId: requestedSchoolId || undefined,
+    })
+
     if (principal.user.status !== "ACTIVE") {
       next(accountDisabledError())
       return
     }
 
-    req.auth = buildAuthUser(principal.user, principal.roles, principal.permissions)
+    if (!principal.school) {
+      next(forbiddenError("Your account is not associated with any school"))
+      return
+    }
+
+    if (principal.school.status !== "ACTIVE") {
+      next(forbiddenError("This school has been suspended"))
+      return
+    }
+
+    req.auth = buildAuthUser(principal.user, principal.school, principal.roles, principal.permissions)
     next()
   } catch (error) {
     next(error)

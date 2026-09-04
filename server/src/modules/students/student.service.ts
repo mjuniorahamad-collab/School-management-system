@@ -3,7 +3,7 @@ import type { Guardian } from "@prisma/client"
 import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
 import { buildAdmissionNumber } from "./admission-number.js"
-import { normalizeGuardianPrimaries } from "./student-rules.js"
+import { normalizeGuardianPrimaries, resolveActiveSession, resolveClassAndSection } from "./student-rules.js"
 import type { CreateStudentInput, GuardianInput, ListStudentsQuery, UpdateStudentInput } from "./student.schema.js"
 import type {
   Pagination,
@@ -39,47 +39,6 @@ function toUtcDate(value: string): Date {
 function startOfTodayUtc(): Date {
   const now = new Date()
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
-}
-
-/**
- * Resolves the academic session a placement targets. Falls back to the school's
- * ACTIVE session; an explicit session must belong to the school and be ACTIVE
- * (students cannot be placed into closed or upcoming sessions).
- */
-async function resolveActiveSession(
-  prisma: PrismaClient,
-  schoolId: string,
-  explicitSessionId?: string,
-): Promise<{ id: string }> {
-  if (explicitSessionId) {
-    const session = await prisma.academicSession.findFirst({
-      where: { id: explicitSessionId, schoolId },
-    })
-    if (!session) throw badRequestError("Academic session is not valid for this school")
-    if (session.status !== "ACTIVE") {
-      throw badRequestError("Students can only be placed in the active academic session")
-    }
-    return session
-  }
-  const session = await prisma.academicSession.findFirst({
-    where: { schoolId, status: "ACTIVE" },
-    orderBy: { startDate: "asc" },
-  })
-  if (!session) throw badRequestError("No active academic session is configured for this school")
-  return session
-}
-
-async function resolveClassAndSection(
-  prisma: PrismaClient,
-  schoolId: string,
-  classId: string,
-  sectionId: string,
-): Promise<{ classId: string; sectionId: string }> {
-  const cls = await prisma.class.findFirst({ where: { id: classId, schoolId } })
-  if (!cls) throw badRequestError("Class is not valid for this school")
-  const section = await prisma.section.findFirst({ where: { id: sectionId, classId } })
-  if (!section) throw badRequestError("Section is not valid for the selected class")
-  return { classId: cls.id, sectionId: section.id }
 }
 
 /** Reuses an existing school-scoped guardian by name+contact, else creates it. */
@@ -145,7 +104,7 @@ export async function createStudent(
           admissionNumber,
           firstName: input.firstName,
           middleName: input.middleName ?? null,
-          lastName: input.lastName,
+          lastName: input.lastName ?? null,
           dateOfBirth,
           gender: input.gender,
           photoUrl: input.photoUrl ?? null,
@@ -170,7 +129,7 @@ export async function createStudent(
           studentId: student.id,
           academicSessionId: session.id,
           classId,
-          sectionId,
+          ...(sectionId ? { sectionId } : {}),
         },
       })
 
@@ -211,14 +170,14 @@ export async function updateStudent(
 
   const { classId, sectionId } = input
   const wantsPlacementChange = classId !== undefined || sectionId !== undefined
-  if (wantsPlacementChange && (classId === undefined || sectionId === undefined)) {
-    throw badRequestError("Changing placement requires both class and section")
+  if (wantsPlacementChange && classId === undefined) {
+    throw badRequestError("Changing placement requires a class")
   }
 
   await prisma.$transaction(async (tx) => {
     if (wantsPlacementChange) {
       const session = await resolveActiveSession(prisma, schoolId)
-      const resolved = await resolveClassAndSection(prisma, schoolId, classId!, sectionId!)
+      const resolved = await resolveClassAndSection(prisma, schoolId, classId!, sectionId)
       await tx.studentEnrollment.upsert({
         where: { studentId_academicSessionId: { studentId: id, academicSessionId: session.id } },
         update: { classId: resolved.classId, sectionId: resolved.sectionId },
@@ -226,7 +185,7 @@ export async function updateStudent(
           studentId: id,
           academicSessionId: session.id,
           classId: resolved.classId,
-          sectionId: resolved.sectionId,
+          ...(resolved.sectionId ? { sectionId: resolved.sectionId } : {}),
         },
       })
     }
@@ -251,13 +210,30 @@ export async function updateStudent(
       "emergencyContactName",
       "emergencyContactPhone",
     ] as const satisfies readonly (keyof UpdateStudentInput)[]
+    // Columns that are nullable in the Student model and may be explicitly cleared.
+    const nullableFields = new Set<string>([
+      "middleName",
+      "lastName",
+      "photoUrl",
+      "email",
+      "phone",
+      "addressLine1",
+      "addressLine2",
+      "city",
+      "state",
+      "postalCode",
+      "emergencyContactName",
+      "emergencyContactPhone",
+    ])
     for (const field of scalarFields) {
       if (field in input && input[field] !== undefined) {
         const value = input[field]
-        if (field === "dateOfBirth" || field === "admissionDate") {
+        if (value === null && nullableFields.has(field)) {
+          data[field] = null as never
+        } else if (field === "dateOfBirth" || field === "admissionDate") {
           data[field] = toUtcDate(value as string)
         } else {
-          data[field] = (value ?? null) as never
+          data[field] = value as never
         }
       }
     }

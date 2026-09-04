@@ -18,9 +18,9 @@ import { timeAgo } from "@/lib/format"
 import type { ActivityTone } from "@/types"
 
 const toneIcon: Record<ActivityTone, { icon: typeof Info; className: string }> = {
-  success: { icon: CircleCheck, className: "bg-emerald-50 text-emerald-600" },
-  info: { icon: Info, className: "bg-sky-50 text-sky-600" },
-  warning: { icon: CircleAlert, className: "bg-amber-50 text-amber-600" },
+  success: { icon: CircleCheck, className: "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300" },
+  info: { icon: Info, className: "bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-300" },
+  warning: { icon: CircleAlert, className: "bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300" },
   neutral: { icon: FileText, className: "bg-muted text-muted-foreground" },
 }
 

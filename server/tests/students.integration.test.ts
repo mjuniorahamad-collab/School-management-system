@@ -17,6 +17,7 @@ interface Fixtures {
   sessionId: string
   classSixId: string
   sectionSixAId: string
+  noSectionClassId: string
   adminUserId: string
   adminPassword: string
   teacherPassword: string
@@ -27,6 +28,7 @@ const fixtures: Fixtures = {
   sessionId: "",
   classSixId: "",
   sectionSixAId: "",
+  noSectionClassId: "",
   adminUserId: "",
   adminPassword: "super-secret-123",
   teacherPassword: "teacher-secret-123",
@@ -96,6 +98,12 @@ describe.skipIf(!TEST_DATABASE_URL)("Students API (integration)", () => {
         fixtures.sectionSixAId = section.id
       }
     }
+
+    // A class with NO sections configured (e.g. a pre-primary class).
+    const noSectionClass = await prisma.class.create({
+      data: { schoolId: school.id, name: "LKG", sortOrder: 0 },
+    })
+    fixtures.noSectionClassId = noSectionClass.id
 
     await prisma.role.create({ data: { name: SUPER_ADMIN_ROLE, description: "Test super admin" } })
     const teacherRole = await prisma.role.create({ data: { name: "TEACHER", description: "Test teacher" } })
@@ -176,8 +184,11 @@ describe.skipIf(!TEST_DATABASE_URL)("Students API (integration)", () => {
       expect(res.status).toBe(200)
       const { academicSessions, classes } = res.body.data
       expect(academicSessions.some((s: { status: string }) => s.status === "ACTIVE")).toBe(true)
-      expect(classes).toHaveLength(2)
-      expect(classes[0].sections.map((s: { name: string }) => s.name)).toContain("A")
+      expect(classes).toHaveLength(3)
+      const classSix = classes.find((c: { name: string }) => c.name === "6")
+      expect(classSix.sections.map((s: { name: string }) => s.name)).toContain("A")
+      const lkg = classes.find((c: { name: string }) => c.name === "LKG")
+      expect(lkg.sections).toEqual([])
     })
   })
 
@@ -227,6 +238,82 @@ describe.skipIf(!TEST_DATABASE_URL)("Students API (integration)", () => {
       const res = await adminAgent.post("/api/v1/students").send(payload)
       expect(res.status).toBe(400)
       expect(res.body.error.code).toBe("BAD_REQUEST")
+    })
+
+    it("creates a student in a class with no sections, without a section", async () => {
+      const res = await adminAgent
+        .post("/api/v1/students")
+        .send(createStudentPayload({ classId: fixtures.noSectionClassId, sectionId: undefined }))
+      expect(res.status).toBe(201)
+      expect(res.body.success).toBe(true)
+      expect(res.body.data.enrollment.class.name).toBe("LKG")
+      expect(res.body.data.enrollment.section).toBeNull()
+    })
+
+    it("creates with nullable optional names, empty student phone/email, and a sectionless class", async () => {
+      const res = await adminAgent.post("/api/v1/students").send(
+        createStudentPayload({
+          classId: fixtures.noSectionClassId,
+          sectionId: null,
+          middleName: null,
+          lastName: null,
+          email: undefined,
+          phone: undefined,
+        }),
+      )
+      expect(res.status).toBe(201)
+      expect(res.body.success).toBe(true)
+      expect(res.body.data.middleName).toBeNull()
+      expect(res.body.data.lastName).toBeNull()
+      expect(res.body.data.email).toBeNull()
+      expect(res.body.data.phone).toBeNull()
+      expect(res.body.data.enrollment.section).toBeNull()
+    })
+
+    it("accepts sectionId null for a class with no sections", async () => {
+      const res = await adminAgent
+        .post("/api/v1/students")
+        .send(createStudentPayload({ classId: fixtures.noSectionClassId, sectionId: null }))
+      expect(res.status).toBe(201)
+      expect(res.body.data.enrollment.section).toBeNull()
+    })
+
+    it("rejects a section when the selected class has no sections", async () => {
+      const res = await adminAgent
+        .post("/api/v1/students")
+        .send(createStudentPayload({ classId: fixtures.noSectionClassId, sectionId: fixtures.sectionSixAId }))
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe("BAD_REQUEST")
+    })
+
+    it("requires a section when the selected class has sections", async () => {
+      const res = await adminAgent
+        .post("/api/v1/students")
+        .send(createStudentPayload({ sectionId: undefined }))
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe("BAD_REQUEST")
+    })
+
+    it("rejects a section that does not belong to the selected class", async () => {
+      const classSevenSection = await prisma.section.findFirstOrThrow({
+        where: { class: { schoolId: fixtures.schoolId, name: "7" } },
+      })
+      const res = await adminAgent
+        .post("/api/v1/students")
+        .send(createStudentPayload({ classId: fixtures.classSixId, sectionId: classSevenSection.id }))
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe("BAD_REQUEST")
+    })
+
+    it("rejects a guardian without any contact method", async () => {
+      const payload = createStudentPayload({
+        guardians: [
+          { name: "Ravi Kumar", relationshipType: "PARENT", isPrimary: true, phone: undefined, email: undefined },
+        ],
+      })
+      const res = await adminAgent.post("/api/v1/students").send(payload)
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe("VALIDATION_ERROR")
     })
   })
 
@@ -334,8 +421,10 @@ describe.skipIf(!TEST_DATABASE_URL)("Students API (integration)", () => {
   describe("search and filters", () => {
     it("filters to the current academic session by default", async () => {
       await createStudent(adminAgent)
-      const every = await prisma.student.count()
-      expect(every).toBe(1)
+      const students = await prisma.student.count()
+      const enrollments = await prisma.studentEnrollment.count()
+      expect(students).toBe(1)
+      expect(enrollments).toBe(1)
       const res = await adminAgent.get("/api/v1/students")
       expect(res.body.data.pagination.total).toBe(1)
     })
@@ -361,6 +450,7 @@ async function resetAllTables(prisma: PrismaClient): Promise<void> {
   await prisma.guardian.deleteMany()
   await prisma.session.deleteMany()
   await prisma.userRole.deleteMany()
+  await prisma.tenantMembership.deleteMany()
   await prisma.academicSession.deleteMany()
   await prisma.section.deleteMany()
   await prisma.class.deleteMany()

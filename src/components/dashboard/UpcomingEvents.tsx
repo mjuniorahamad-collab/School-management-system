@@ -18,9 +18,9 @@ import { formatDateDay, formatDateMonth } from "@/lib/format"
 import type { EventCategory } from "@/types"
 
 const categoryMeta: Record<EventCategory, { label: string; className: string }> = {
-  sports: { label: "Sports", className: "bg-amber-50 text-amber-700 border-transparent" },
-  academic: { label: "Academic", className: "bg-sky-50 text-sky-700 border-transparent" },
-  community: { label: "Community", className: "bg-emerald-50 text-emerald-700 border-transparent" },
+  sports: { label: "Sports", className: "bg-amber-50 text-amber-700 border-transparent dark:bg-amber-500/15 dark:text-amber-300" },
+  academic: { label: "Academic", className: "bg-sky-50 text-sky-700 border-transparent dark:bg-sky-500/15 dark:text-sky-300" },
+  community: { label: "Community", className: "bg-emerald-50 text-emerald-700 border-transparent dark:bg-emerald-500/15 dark:text-emerald-300" },
 }
 
 function filterUpcoming(eventDate: string): boolean {

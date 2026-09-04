@@ -35,7 +35,7 @@ export function ImportantNotices({ className }: ImportantNoticesProps) {
         <CardTitle>Important Notices</CardTitle>
         <CardDescription data-slot="card-description">Latest communications</CardDescription>
         <CardAction>
-          <span className="hidden items-center gap-1.5 rounded-full bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-700 sm:inline-flex">
+          <span className="hidden items-center gap-1.5 rounded-full bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-700 sm:inline-flex dark:bg-indigo-500/15 dark:text-indigo-300">
             <Megaphone className="size-3.5" aria-hidden="true" />
             {data?.length ?? 0} active
           </span>

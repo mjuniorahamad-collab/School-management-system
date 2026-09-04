@@ -1,16 +1,24 @@
 import { env } from "../config/env.js"
-import { buildAuthUser, type AuthUserSource } from "../auth/authUser.js"
+import {
+  buildAuthUser,
+  type AuthUserSource,
+  type ResolvedTenant,
+} from "../auth/authUser.js"
 import { hashPassword, verifyPassword } from "../auth/password.js"
 import { generateToken, hashToken } from "../auth/tokens.js"
 import {
   ApiError,
   INTERNAL_ERROR,
   accountDisabledError,
+  forbiddenError,
   invalidCredentialsError,
   unauthorizedError,
 } from "../lib/ApiError.js"
 import { getPrisma } from "../lib/database.js"
-import { resolveUserPermissions } from "./permission.service.js"
+import {
+  resolveRolePermissions,
+  resolveUserPermissions,
+} from "./permission.service.js"
 import type { AuthUser } from "../types/auth.js"
 
 export interface LoginInput {
@@ -30,8 +38,12 @@ export interface LoginResult {
 
 export interface PrincipalContext {
   user: AuthUserSource
+  school: ResolvedTenant | null
   roles: string[]
   permissions: Set<string>
+  // Ids of the schools the user holds an ACTIVE membership in. Used by clients
+  // to present a tenant switcher when it is > 1.
+  membershipSchoolIds: string[]
 }
 
 // Verified against when the email is unknown so both failure paths burn equal
@@ -88,8 +100,18 @@ export async function doLogin(input: LoginInput): Promise<LoginResult> {
 
   await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } })
 
-  const principal = await resolveUserPermissions(user.id)
-  const authUser = buildAuthUser(user as AuthUserSource, principal.roles, principal.permissions)
+  const principal = await resolvePrincipalContext(user.id)
+  if (!principal.school) {
+    // A user with no resolvable tenant cannot be placed in a school.
+    throw forbiddenError("Your account is not associated with any school")
+  }
+
+  const authUser = buildAuthUser(
+    principal.user,
+    principal.school,
+    principal.roles,
+    principal.permissions,
+  )
 
   return { user: authUser, tokens }
 }
@@ -139,15 +161,119 @@ export async function doRefresh(refreshToken: string): Promise<SessionTokens> {
   return { accessToken: nextAccessToken, refreshToken: nextRefreshToken }
 }
 
-/** Loads a user's principal context (identity + roles + permissions). */
-export async function loadPrincipalContext(userId: string): Promise<PrincipalContext> {
+export interface LoadPrincipalOptions {
+  /** Explicit tenant chosen by a multi-school user (from `X-School-Id` header). */
+  schoolId?: string
+}
+
+/**
+ * Loads a user's principal context (identity + roles + permissions), resolving
+ * the tenant context from the user's ACTIVE TenantMembership(s).
+ *
+ * Resolution order:
+ *  1. An explicit `schoolId` requires an ACTIVE membership for that school
+ *     (rejects otherwise — a 403, never a silent cross-tenant fallback).
+ *  2. Otherwise a single ACTIVE membership is auto-selected.
+ *  3. Otherwise (zero, or multiple without an explicit selection) we fall back
+ *     to the legacy `User.schoolId` + `UserRole` model so pre-membership users
+ *     and integration-test fixtures keep working.
+ */
+export async function loadPrincipalContext(
+  userId: string,
+  opts: LoadPrincipalOptions = {},
+): Promise<PrincipalContext> {
   const prisma = await requirePrisma()
+
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: { school: true },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      status: true,
+      schoolId: true,
+    },
   })
   if (!user) throw new ApiError(500, INTERNAL_ERROR, "Authenticated user no longer exists")
 
+  const memberships = await prisma.tenantMembership.findMany({
+    where: { userId, status: "ACTIVE" },
+    include: { school: { select: { id: true, name: true, status: true } } },
+  })
+
+  // 1. Explicit tenant selection (multi-school user).
+  if (opts.schoolId) {
+    const membership = memberships.find((m) => m.schoolId === opts.schoolId)
+    if (!membership) {
+      throw forbiddenError("You do not have access to that school")
+    }
+    const principal = await resolveRolePermissions(membership.roleId)
+    return {
+      user: toAuthUserSource(user),
+      school: tenantFromSchool(membership.school),
+      roles: principal.roles,
+      permissions: principal.permissions,
+      membershipSchoolIds: memberships.map((m) => m.schoolId),
+    }
+  }
+
+  // 2. Single ACTIVE membership → auto-select it.
+  if (memberships.length === 1) {
+    const membership = memberships[0]
+    const principal = await resolveRolePermissions(membership.roleId)
+    return {
+      user: toAuthUserSource(user),
+      school: tenantFromSchool(membership.school),
+      roles: principal.roles,
+      permissions: principal.permissions,
+      membershipSchoolIds: memberships.map((m) => m.schoolId),
+    }
+  }
+
+  // 3. Legacy fallback: `User.schoolId` + global `UserRole`.
+  const legacySchool = user.schoolId
+    ? await prisma.school.findUnique({
+        where: { id: user.schoolId },
+        select: { id: true, name: true, status: true },
+      })
+    : null
+
   const principal = await resolveUserPermissions(user.id)
-  return { user: user as AuthUserSource, roles: principal.roles, permissions: principal.permissions }
+  return {
+    user: toAuthUserSource(user),
+    school: legacySchool ? tenantFromSchool(legacySchool) : null,
+    roles: principal.roles,
+    permissions: principal.permissions,
+    membershipSchoolIds: memberships.map((m) => m.schoolId),
+  }
+}
+
+function toAuthUserSource(user: {
+  id: string
+  name: string
+  email: string
+  status: string
+}): AuthUserSource {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    status: user.status as AuthUserSource["status"],
+  }
+}
+
+function tenantFromSchool(school: {
+  id: string
+  name: string
+  status: string
+}): ResolvedTenant {
+  return { id: school.id, name: school.name, status: school.status }
+}
+
+/**
+ * Resolves the principal context for a user. This is the shared entry point
+ * used by login and session authentication.
+ */
+async function resolvePrincipalContext(userId: string): Promise<PrincipalContext> {
+  return loadPrincipalContext(userId)
 }

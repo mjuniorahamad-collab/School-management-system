@@ -31,6 +31,15 @@ function optionalText(max: number) {
   return z.union([emptyToUndefined, z.string().trim().min(1).max(max)]).optional()
 }
 
+/**
+ * Optional text field that also accepts `null` (treated as absent). Used for
+ * columns that are nullable in the database and may be explicitly cleared
+ * (e.g. an empty optional middle/last name submitted as `null`).
+ */
+function nullableText(max: number) {
+  return z.union([z.null(), emptyToUndefined, z.string().trim().min(1).max(max)]).optional()
+}
+
 function optionalEmail() {
   return z.union([emptyToUndefined, z.email("Enter a valid email address").max(200)]).optional()
 }
@@ -40,21 +49,31 @@ function optionalParam<TSchema extends z.ZodType>(schema: TSchema) {
   return z.union([emptyToUndefined, schema]).optional()
 }
 
-export const guardianInputSchema = z.object({
-  name: z.string().trim().min(1, "Guardian name is required").max(200),
-  relationshipType: z.enum(GUARDIAN_RELATIONSHIP_TYPES),
-  isPrimary: z.boolean().optional().default(false),
-  isEmergencyContact: z.boolean().optional().default(false),
-  email: optionalEmail(),
-  phone: optionalText(30),
-  address: optionalText(300),
-})
+export const guardianInputSchema = z
+  .object({
+    name: z.string().trim().min(1, "Guardian name is required").max(200),
+    relationshipType: z.enum(GUARDIAN_RELATIONSHIP_TYPES),
+    isPrimary: z.boolean().optional().default(false),
+    isEmergencyContact: z.boolean().optional().default(false),
+    email: optionalEmail(),
+    phone: optionalText(30),
+    address: optionalText(300),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.phone && !data.email) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["contact"],
+        message: "Provide at least one of phone or email for each guardian",
+      })
+    }
+  })
 
 export const createStudentSchema = z
   .object({
     firstName: z.string().trim().min(1, "First name is required").max(100),
-    middleName: optionalText(100),
-    lastName: z.string().trim().min(1, "Last name is required").max(100),
+    middleName: nullableText(100),
+    lastName: nullableText(100),
     dateOfBirth: dateStringSchema,
     gender: z.enum(STUDENT_GENDERS),
     photoUrl: optionalText(500),
@@ -69,7 +88,7 @@ export const createStudentSchema = z
     admissionDate: dateStringSchema.optional(),
     academicSessionId: z.string().min(1).optional(),
     classId: z.string().min(1, "Class is required"),
-    sectionId: z.string().min(1, "Section is required"),
+    sectionId: z.union([z.null(), emptyToUndefined, z.string().trim().min(1)]).optional(),
     emergencyContactName: optionalText(200),
     emergencyContactPhone: optionalText(30),
     guardians: z.array(guardianInputSchema).min(1, "At least one guardian is required").max(4),
@@ -79,6 +98,10 @@ export const createStudentSchema = z
 export const updateStudentSchema = createStudentSchema
   .omit({ academicSessionId: true })
   .partial()
+  .extend({
+    middleName: z.string().trim().min(1).max(100).nullish(),
+    lastName: z.string().trim().min(1).max(100).nullish(),
+  })
   .strict()
 
 export const listStudentsQuerySchema = z.object({

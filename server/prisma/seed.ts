@@ -35,6 +35,15 @@ const SUPER_ADMIN_ROLE = ROLE_NAMES.SUPER_ADMIN
 const CLASS_NAMES = ["6", "7", "8", "9", "10"]
 const SECTION_NAMES = ["A", "B"]
 
+const SUBJECT_SEEDS: { code: string; name: string; sortOrder: number }[] = [
+  { code: "MAT", name: "Mathematics", sortOrder: 1 },
+  { code: "ENG", name: "English", sortOrder: 2 },
+  { code: "SCI", name: "Science", sortOrder: 3 },
+  { code: "HIN", name: "Hindi", sortOrder: 4 },
+  { code: "SST", name: "Social Studies", sortOrder: 5 },
+  { code: "CS", name: "Computer Science", sortOrder: 6 },
+]
+
 interface GuardianSeed {
   name: string
   email: string
@@ -234,6 +243,20 @@ async function seedSuperAdmin(schoolId: string, roleIds: Map<RoleName, string>):
     create: { userId: admin.id, roleId: superRoleId },
   })
 
+  // Tenant membership: keeps the super admin on the current membership-based
+  // identity model (idempotent). Note: if a school already has real memberships,
+  // this should be reconciled by an admin; for the dev seed it's straightforward.
+  await prisma.tenantMembership.upsert({
+    where: { userId_schoolId: { userId: admin.id, schoolId } },
+    update: { roleId: superRoleId, status: "ACTIVE" },
+    create: {
+      userId: admin.id,
+      schoolId,
+      roleId: superRoleId,
+      status: "ACTIVE",
+    },
+  })
+
   console.log(`Seeded super admin: ${email}`)
 }
 
@@ -252,6 +275,16 @@ async function seedAcademicStructure(schoolId: string): Promise<void> {
         create: { classId: cls.id, name: sectionName },
       })
     }
+  }
+}
+
+async function seedSubjects(schoolId: string): Promise<void> {
+  for (const subject of SUBJECT_SEEDS) {
+    await prisma.subject.upsert({
+      where: { schoolId_code: { schoolId, code: subject.code } },
+      update: { name: subject.name, sortOrder: subject.sortOrder },
+      create: { schoolId, code: subject.code, name: subject.name, sortOrder: subject.sortOrder },
+    })
   }
 }
 
@@ -277,7 +310,7 @@ async function seedStudents(
   }
 
   const classes = await prisma.class.findMany({
-    where: { schoolId },
+    where: { schoolId, name: { in: CLASS_NAMES } },
     include: { sections: true },
     orderBy: { sortOrder: "asc" },
   })
@@ -401,6 +434,7 @@ async function main(): Promise<void> {
   })
 
   await seedAcademicStructure(school.id)
+  await seedSubjects(school.id)
   await seedGuardians(school.id)
   await seedStudents(
     school.id,

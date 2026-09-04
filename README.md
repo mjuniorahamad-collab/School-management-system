@@ -121,6 +121,7 @@ binaries are unpacked under `.data/postgres` (gitignored, machine-local):
 `npm run db:local:start`, then
 `DATABASE_URL="postgresql://school@127.0.0.1:5433/school_management"`.
 Stop it with `npm run db:local:stop`. Data lives in `.data/postgres/data`.
+With the user-space database, `npm run dev` handles PostgreSQL start/stop for you.
 
 After either option:
 1. `npm run generate:prisma`
@@ -131,8 +132,9 @@ After either option:
 
 | Command                      | Purpose                                          |
 | ---------------------------- | ------------------------------------------------ |
-| `npm run dev`                | Vite dev server (proxies `/api` → :4000)         |
-| `npm run dev:server`         | API dev server (`tsx watch`)                     |
+| `npm run dev`                | **Start everything**: PostgreSQL → API → Vite   |
+| `npm run dev:vite`           | Vite dev server only (proxies `/api` → :4000)    |
+| `npm run dev:server`         | API dev server only (`tsx watch`)                |
 | `npm run build`              | Frontend type-check + production build           |
 | `npm run build:server`       | API production build (`server/dist`)             |
 | `npm run start:server`       | Run the built API (`node server/dist/server.js`) |
@@ -144,6 +146,22 @@ After either option:
 | `npm run db:seed`            | Idempotent seed (catalog, roles, super admin, students)|
 | `npm run db:local:start`     | Start user-space PostgreSQL (`.data/postgres`)   |
 | `npm run db:local:stop`      | Stop user-space PostgreSQL                       |
+
+### One-command development (`npm run dev`)
+
+Run **`npm run dev` once** and the whole local stack comes up:
+
+1. **PostgreSQL** (`.data/postgres`, port 5433) — started only if not already
+   running; an already-running instance is detected and reused.
+2. **API server** (`tsx watch`, port 4000) — skipped if port 4000 is already in
+   use (i.e. a backend is already running).
+3. **Vite** dev server (port 5173 or next free port) — proxies `/api` → :4000.
+
+Open `http://localhost:5173` in the browser. On `Ctrl+C`, the orchestrator stops
+Vite and the API, and also stops PostgreSQL **only if it started it** — an
+instance that was already running before `npm run dev` is left untouched. Escalate
+to — a fresh `npm run dev:server`, `dev:vite`, `db:local:start`, or `db:local:stop`
+for the individual pieces.
 
 Fresh clone: `npm install`, then follow the database + seed steps above. Health
 check: `GET http://localhost:4000/api/v1/health`.

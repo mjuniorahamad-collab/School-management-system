@@ -31,12 +31,15 @@ export const PERMISSION_CODES = [
   "fees:create",
   "fees:update",
   "fees:delete",
+  "fees:export",
   "exams:view",
   "exams:create",
   "exams:update",
+  "exams:delete",
   "results:view",
   "results:create",
   "results:update",
+  "results:export",
   "library:view",
   "library:create",
   "library:update",
@@ -52,6 +55,9 @@ export const PERMISSION_CODES = [
   "payroll:view",
   "payroll:create",
   "payroll:update",
+  "academic-sessions:view",
+  "academic-sessions:create",
+  "academic-sessions:update",
   "classes:view",
   "classes:create",
   "classes:update",
@@ -67,16 +73,20 @@ export const PERMISSION_CODES = [
   "timetable:view",
   "timetable:create",
   "timetable:update",
+  "timetable:delete",
   "homework:view",
   "homework:create",
   "homework:update",
+  "homework:delete",
   "assignments:view",
   "assignments:create",
   "assignments:update",
+  "assignments:delete",
   "payments:view",
   "payments:create",
   "payments:update",
   "receipts:view",
+  "receipts:create",
   "receipts:export",
   "reports:view",
   "reports:export",
@@ -126,6 +136,20 @@ export const ROLE_NAMES = {
 
 export type RoleName = keyof typeof ROLE_NAMES
 
+/**
+ * Roles a tenant administrator may assign to a user within their own tenant.
+ * Platform-level roles (SUPER_ADMIN) are excluded: they are granted explicitly
+ * by a platform super admin and never by a tenant admin, preventing a tenant
+ * from escalating a user to cross-tenant platform access.
+ */
+export const ASSIGNABLE_ROLE_NAMES = (Object.keys(ROLE_NAMES) as RoleName[]).filter(
+  (name) => name !== ROLE_NAMES.SUPER_ADMIN,
+)
+
+export function isAssignableRoleName(name: string): boolean {
+  return (ASSIGNABLE_ROLE_NAMES as readonly string[]).includes(name)
+}
+
 export const ROLE_DESCRIPTIONS: Record<RoleName, string> = {
   SUPER_ADMIN: "Unrestricted access to every system resource and setting",
   SCHOOL_ADMIN: "Day-to-day operational control across all school modules",
@@ -164,6 +188,7 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
     ...codes("staff", [VIEW, CREATE, UPDATE]),
     ...codes("admissions", [VIEW, CREATE, UPDATE]),
     "attendance:view",
+    ...codes("academic-sessions", [VIEW, CREATE, UPDATE]),
     ...codes("classes", [VIEW, CREATE, UPDATE]),
     ...codes("sections", [VIEW, CREATE, UPDATE]),
     ...codes("subjects", [VIEW, CREATE, UPDATE]),
@@ -172,7 +197,8 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
     "assignments:view",
     "exams:view",
     "results:view",
-    ...codes("fees", [VIEW, UPDATE]),
+    "results:export",
+    ...codes("fees", [VIEW, UPDATE, EXPORT]),
     "payments:view",
     "receipts:view",
     "library:view",
@@ -191,12 +217,12 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
     ...codes("classes", [VIEW, CREATE, UPDATE]),
     ...codes("sections", [VIEW, CREATE, UPDATE]),
     ...codes("subjects", [VIEW, CREATE, UPDATE]),
-    ...codes("timetable", [VIEW, CREATE, UPDATE]),
+    ...codes("timetable", [VIEW, CREATE, UPDATE, DELETE]),
     ...codes("attendance", [VIEW, CREATE, UPDATE]),
-    ...codes("homework", [VIEW, CREATE, UPDATE]),
-    ...codes("assignments", [VIEW, CREATE, UPDATE]),
-    ...codes("exams", [VIEW, CREATE, UPDATE]),
-    ...codes("results", [VIEW, CREATE, UPDATE]),
+    ...codes("homework", [VIEW, CREATE, UPDATE, DELETE]),
+    ...codes("assignments", [VIEW, CREATE, UPDATE, DELETE]),
+    ...codes("exams", [VIEW, CREATE, UPDATE, DELETE]),
+    ...codes("results", [VIEW, CREATE, UPDATE, EXPORT]),
     "library:view",
     "notices:view",
     "events:view",
@@ -206,11 +232,12 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
   ACCOUNTANT: [
     "dashboard:view",
     "students:view",
-    ...codes("fees", [VIEW, CREATE, UPDATE]),
+    ...codes("fees", [VIEW, CREATE, UPDATE, EXPORT]),
     ...codes("payments", [VIEW, CREATE, UPDATE]),
-    ...codes("receipts", [VIEW, EXPORT]),
+    ...codes("receipts", [VIEW, CREATE, EXPORT]),
     ...codes("payroll", [VIEW, CREATE, UPDATE]),
     ...codes("reports", [VIEW, EXPORT]),
+    "results:export",
     "settings:view",
   ],
 

@@ -7,17 +7,17 @@ const statusStyles: Record<
 > = {
   present: {
     label: "Present",
-    className: "bg-emerald-50 text-emerald-700 border-transparent",
+    className: "bg-emerald-50 text-emerald-700 border-transparent dark:bg-emerald-500/15 dark:text-emerald-300",
     dot: "bg-emerald-500",
   },
   late: {
     label: "Late",
-    className: "bg-amber-50 text-amber-700 border-transparent",
+    className: "bg-amber-50 text-amber-700 border-transparent dark:bg-amber-500/15 dark:text-amber-300",
     dot: "bg-amber-500",
   },
   absent: {
     label: "Absent",
-    className: "bg-red-50 text-red-700 border-transparent",
+    className: "bg-red-50 text-red-700 border-transparent dark:bg-red-500/15 dark:text-red-300",
     dot: "bg-red-500",
   },
 }

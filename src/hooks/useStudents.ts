@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
+import { ApiClientError } from "@/lib/apiClient"
 import { studentsService } from "@/services/studentsService"
 import type {
   StudentDetail,
@@ -7,6 +8,23 @@ import type {
   StudentsMeta,
   StudentsQuery,
 } from "@/types/students"
+
+interface ValidationIssue {
+  path?: string
+  message?: string
+}
+
+/** Surfaces the most useful message from an API failure, including zod issues. */
+function describeError(error: Error): string {
+  if (!(error instanceof ApiClientError)) return error.message
+  const issues = error.details as { issues?: ValidationIssue[] } | undefined
+  if (issues?.issues && issues.issues.length > 0) {
+    return issues.issues
+      .map((issue) => (issue.path ? `${issue.path}: ${issue.message}` : issue.message))
+      .join("; ")
+  }
+  return error.message
+}
 
 const STUDENTS_QUERY_KEY = ["students"] as const
 
@@ -53,7 +71,7 @@ export function useCreateStudent() {
       })
     },
     onError: (error: Error) => {
-      toast.error("Could not add student", { description: error.message })
+      toast.error("Could not add student", { description: describeError(error) })
     },
   })
 }
@@ -68,7 +86,7 @@ export function useUpdateStudent(id: string) {
       toast.success("Student updated", { description: `${student.name}'s record was saved.` })
     },
     onError: (error: Error) => {
-      toast.error("Could not update student", { description: error.message })
+      toast.error("Could not update student", { description: describeError(error) })
     },
   })
 }

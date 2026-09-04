@@ -65,7 +65,7 @@ export function QuickActions({ className }: QuickActionsProps) {
                     className={inlineBase}
                     onClick={() => handleActionClick(action.id)}
                   >
-                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300">
                       <Icon className="size-[18px]" aria-hidden="true" />
                     </span>
                     <span className="min-w-0 text-left">

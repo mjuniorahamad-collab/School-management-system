@@ -4,10 +4,10 @@ import { cn } from "@/lib/utils"
 import type { DashboardStat, TrendTone } from "@/types"
 
 const toneStyles: Record<DashboardStat["tone"], string> = {
-  primary: "bg-indigo-50 text-indigo-600",
-  emerald: "bg-emerald-50 text-emerald-600",
-  amber: "bg-amber-50 text-amber-600",
-  sky: "bg-sky-50 text-sky-600",
+  primary: "bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300",
+  emerald: "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300",
+  amber: "bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300",
+  sky: "bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-300",
 }
 
 function trendMeta(trend: number): { tone: TrendTone; arrow: typeof ArrowUpRight; className: string } {
@@ -15,13 +15,13 @@ function trendMeta(trend: number): { tone: TrendTone; arrow: typeof ArrowUpRight
     return {
       tone: "positive",
       arrow: ArrowUpRight,
-      className: "text-emerald-600 bg-emerald-50",
+      className: "text-emerald-600 bg-emerald-50 dark:bg-emerald-500/15 dark:text-emerald-300",
     }
   }
   return {
     tone: "negative",
     arrow: ArrowDownRight,
-    className: "text-red-600 bg-red-50",
+    className: "text-red-600 bg-red-50 dark:bg-red-500/15 dark:text-red-300",
   }
 }
 

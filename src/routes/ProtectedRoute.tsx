@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 
 function AuthLoadingScreen() {
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-slate-50">
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-muted">
       <Loader2 className="size-6 animate-spin text-primary" aria-hidden="true" />
       <p className="text-sm text-muted-foreground">Loading your session…</p>
     </div>
@@ -15,7 +15,7 @@ function AuthLoadingScreen() {
 
 function AuthErrorScreen({ onRetry }: { onRetry: () => void }) {
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-slate-50 px-4">
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-muted px-4">
       <p className="max-w-md text-center text-sm text-muted-foreground">
         We couldn't reach the school server. Check that the API is running, then try again.
       </p>

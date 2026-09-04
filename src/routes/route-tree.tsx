@@ -4,14 +4,40 @@ import { ModulePlaceholderPage } from "@/components/placeholders/ModulePlacehold
 import { DashboardPage } from "@/pages/DashboardPage"
 import LoginPage from "@/pages/LoginPage"
 import { NotFoundPage } from "@/pages/NotFoundPage"
+import { AcademicSessionsPage } from "@/pages/academicSessions/AcademicSessionsPage"
+import { ClassesPage } from "@/pages/classes/ClassesPage"
+import { SectionsPage } from "@/pages/sections/SectionsPage"
+import { SubjectsPage } from "@/pages/subjects/SubjectsPage"
 import { StudentDetailPage } from "@/pages/students/StudentDetailPage"
 import { StudentFormPage } from "@/pages/students/StudentFormPage"
 import { StudentsPage } from "@/pages/students/StudentsPage"
+import { TeachersPage } from "@/pages/teachers/TeachersPage"
+import { TeacherDetailPage } from "@/pages/teachers/TeacherDetailPage"
+import { StaffPage } from "@/pages/staff/StaffPage"
+import { StaffDetailPage } from "@/pages/staff/StaffDetailPage"
+import { NoticesPage } from "@/pages/notices/NoticesPage"
+import { EventsPage } from "@/pages/events/EventsPage"
+import { AdmissionsPage } from "@/pages/admissions/AdmissionsPage"
+import { SettingsPage } from "@/pages/settings/SettingsPage"
 import { ProtectedRoute } from "@/routes/ProtectedRoute"
 import { getAllNavItems } from "@/routes/navigation"
 import { moduleMeta } from "@/data/moduleMeta"
 
 const DASHBOARD_PATH = "/dashboard"
+const IMPLEMENTED_PATHS = new Set([
+  DASHBOARD_PATH,
+  "/students",
+  "/academic-sessions",
+  "/classes",
+  "/sections",
+  "/subjects",
+  "/teachers",
+  "/staff",
+  "/notices",
+  "/events",
+  "/admissions",
+  "/settings",
+])
 
 export const router = createBrowserRouter([
   {
@@ -32,12 +58,21 @@ export const router = createBrowserRouter([
       { path: "/students/new", element: <StudentFormPage /> },
       { path: "/students/:id", element: <StudentDetailPage /> },
       { path: "/students/:id/edit", element: <StudentFormPage /> },
-      // Remaining modules from the navigation registry. Every entry is routed —
-      // no dead navigation items. Unimplemented modules render the placeholder page.
+      { path: "/academic-sessions", element: <AcademicSessionsPage /> },
+      { path: "/classes", element: <ClassesPage /> },
+      { path: "/sections", element: <SectionsPage /> },
+      { path: "/subjects", element: <SubjectsPage /> },
+      { path: "/teachers", element: <TeachersPage /> },
+      { path: "/teachers/:id", element: <TeacherDetailPage /> },
+      { path: "/staff", element: <StaffPage /> },
+      { path: "/staff/:id", element: <StaffDetailPage /> },
+      { path: "/notices", element: <NoticesPage /> },
+      { path: "/events", element: <EventsPage /> },
+      { path: "/admissions", element: <AdmissionsPage /> },
+      { path: "/settings", element: <SettingsPage /> },
+      // Remaining unimplemented modules from the navigation registry.
       ...getAllNavItems()
-        .filter(
-          (item) => item.path !== DASHBOARD_PATH && !item.path.startsWith("/students"),
-        )
+        .filter((item) => !IMPLEMENTED_PATHS.has(item.path) && !item.path.startsWith("/students"))
         .map((item) => ({
           path: item.path,
           element: <ModulePlaceholderPage module={moduleMeta[item.path]} />,

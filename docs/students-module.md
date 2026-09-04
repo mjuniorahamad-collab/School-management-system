@@ -38,9 +38,11 @@ pattern for future modules.
   session (unique on `(studentId, academicSessionId)`). At most one record per
   session per student.
 - Create requires an **ACTIVE** academic session; the new student is placed in it.
-- Update placement targets the student's current ACTIVE-session record: both
-  `classId` and `sectionId` must be supplied together. Providing only a class
-  (no section) is rejected. The section must belong to the class.
+- Update placement targets the student's current ACTIVE-session record. A
+  section is optional and only required when the target class has sections
+  configured. If the class has sections, `sectionId` is required and must belong
+  to the class; if the class has no sections, `sectionId` is omitted and the
+  enrollment is stored without a section.
 - Retrieving a student resolves the active placement (the ACTIVE session's
   enrollment), and the list joins placement per the requested session filter
   (default: ACTIVE session).
@@ -112,13 +114,14 @@ Create payload:
 {
   firstName, middleName?, lastName, dateOfBirth, gender,
   email?, phone?, addressLine1?, addressLine2?, city?, state?, postalCode?,
-  admissionDate, classId, sectionId, academicSessionId,   // ACTIVE session
+  admissionDate, classId, sectionId?, academicSessionId,   // ACTIVE session
   guardians: [{ name, relationshipType, isPrimary, isEmergencyContact, email?, phone? }]
 }
 ```
 
 Patch payload: same shape, all fields optional (status included); placement
-update must provide both `classId` and `sectionId` together.
+update must provide `classId` (section is required only when the class has
+sections).
 
 ### Permissions
 

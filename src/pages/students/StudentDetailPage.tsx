@@ -83,7 +83,7 @@ export function StudentDetailPage() {
                 <p className="mt-0.5 text-sm text-muted-foreground">
                   {student.admissionNumber}
                   {place
-                    ? ` · Class ${place.class.name}-${place.section.name}`
+                    ? ` · Class ${place.class.name}${place.section ? `-${place.section.name}` : ""}`
                     : " · Not placed this session"}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -143,7 +143,11 @@ export function StudentDetailPage() {
                       value={place.academicSession.name}
                     />
                     <DetailRow icon={Hash} label="Class" value={`Class ${place.class.name}`} />
-                    <DetailRow icon={Hash} label="Section" value={`Section ${place.section.name}`} />
+                    <DetailRow
+                      icon={Hash}
+                      label="Section"
+                      value={place.section ? `Section ${place.section.name}` : "No section"}
+                    />
                     <DetailRow
                       icon={BadgeCheck}
                       label="Session status"

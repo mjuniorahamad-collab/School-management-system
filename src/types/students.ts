@@ -57,7 +57,7 @@ export interface StudentListItem {
   admissionNumber: string
   firstName: string
   middleName: string | null
-  lastName: string
+  lastName: string | null
   name: string
   gender: StudentGender
   status: StudentStatus
@@ -76,7 +76,7 @@ export interface StudentListItem {
 export interface StudentEnrollmentDetail {
   academicSession: { id: string; name: string; code: string; status: AcademicSessionStatus }
   class: { id: string; name: string }
-  section: { id: string; name: string }
+  section: { id: string; name: string } | null
 }
 
 export interface StudentGuardianDetail {
@@ -94,7 +94,7 @@ export interface StudentDetail {
   admissionNumber: string
   firstName: string
   middleName: string | null
-  lastName: string
+  lastName: string | null
   name: string
   dateOfBirth: string
   gender: StudentGender
@@ -152,8 +152,8 @@ export interface StudentGuardianInput {
 
 export interface StudentFormPayload {
   firstName: string
-  middleName?: string
-  lastName: string
+  middleName?: string | null
+  lastName?: string | null
   dateOfBirth: string
   gender: StudentGender
   email?: string
@@ -167,6 +167,6 @@ export interface StudentFormPayload {
   status?: StudentStatus
   academicSessionId?: string
   classId: string
-  sectionId: string
+  sectionId?: string
   guardians: StudentGuardianInput[]
 }

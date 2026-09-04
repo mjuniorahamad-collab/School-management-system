@@ -6,17 +6,20 @@ const DEFAULT_TIMEOUT_MS = 10_000
 
 /**
  * Normalized API failure. `status` is 0 for network/timeout failures.
- * `code` mirrors the backend error code when one was returned.
+ * `code` mirrors the backend error code when one was returned; `details`
+ * mirrors the backend `error.details` (e.g. zod `issues`) when available.
  */
 export class ApiClientError extends Error {
   readonly status: number
   readonly code?: string
+  readonly details?: unknown
 
-  constructor(status: number, message: string, code?: string) {
+  constructor(status: number, message: string, code?: string, details?: unknown) {
     super(message)
     this.name = "ApiClientError"
     this.status = status
     this.code = code
+    this.details = details
   }
 }
 
@@ -65,6 +68,7 @@ async function request<T>(path: string, init?: RequestInit, options?: RequestOpt
         response.status,
         errorBody?.error?.message ?? `Request failed with status ${response.status}`,
         errorBody?.error?.code,
+        errorBody?.error?.details,
       )
     }
 

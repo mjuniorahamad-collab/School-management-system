@@ -5,6 +5,24 @@ export interface ResolvedPrincipal {
   permissions: Set<string>
 }
 
+/** Resolves a single role's name and flattened permission codes. */
+export async function resolveRolePermissions(roleId: string): Promise<ResolvedPrincipal> {
+  const prisma = await getPrisma()
+  if (!prisma) throw new Error("Database is not configured")
+
+  const role = await prisma.role.findUnique({
+    where: { id: roleId },
+    include: { rolePermissions: { include: { permission: true } } },
+  })
+  if (!role) return { roles: [], permissions: new Set() }
+
+  const permissions = new Set<string>()
+  for (const rolePermission of role.rolePermissions) {
+    permissions.add(rolePermission.permission.code)
+  }
+  return { roles: [role.name], permissions }
+}
+
 /** Resolves a user's roles and flattened permission codes from the database. */
 export async function resolveUserPermissions(userId: string): Promise<ResolvedPrincipal> {
   const prisma = await getPrisma()

@@ -8,9 +8,9 @@ import { useCreateStudent, useStudent, useStudentsMeta, useUpdateStudent } from 
 import type { StudentFormPayload } from "@/types/students"
 
 export function StudentFormPage() {
-  const { mode = "new", id = "" } = useParams()
+  const { id = "" } = useParams()
   const navigate = useNavigate()
-  const isEdit = mode === "edit"
+  const isEdit = Boolean(id)
 
   const { data: meta, isPending: metaPending } = useStudentsMeta()
   const { data: student, isPending: studentPending, isError: studentError } = useStudent(

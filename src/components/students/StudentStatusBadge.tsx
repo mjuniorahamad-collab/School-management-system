@@ -2,11 +2,11 @@ import { Badge } from "@/components/ui/badge"
 import type { StudentStatus } from "@/types/students"
 
 const STATUS_STYLES: Record<StudentStatus, string> = {
-  ACTIVE: "bg-emerald-50 text-emerald-700",
-  INACTIVE: "bg-slate-100 text-slate-600",
-  TRANSFERRED: "bg-sky-50 text-sky-700",
-  WITHDRAWN: "bg-amber-50 text-amber-700",
-  GRADUATED: "bg-indigo-50 text-indigo-700",
+  ACTIVE: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
+  INACTIVE: "bg-slate-100 text-slate-600 dark:bg-slate-500/15 dark:text-slate-300",
+  TRANSFERRED: "bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300",
+  WITHDRAWN: "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
+  GRADUATED: "bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300",
 }
 
 const STATUS_DOT: Record<StudentStatus, string> = {

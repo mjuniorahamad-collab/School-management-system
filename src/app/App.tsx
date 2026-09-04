@@ -3,6 +3,7 @@ import { RouterProvider } from "react-router-dom"
 import { AuthProvider } from "@/auth/AuthContext"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
+import { ThemeProvider } from "@/theme/ThemeProvider"
 import { router } from "@/routes/route-tree"
 
 const queryClient = new QueryClient({
@@ -17,13 +18,15 @@ const queryClient = new QueryClient({
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <TooltipProvider delayDuration={200}>
-          <RouterProvider router={router} />
-          <Toaster position="top-right" richColors closeButton />
-        </TooltipProvider>
-      </AuthProvider>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <TooltipProvider delayDuration={200}>
+            <RouterProvider router={router} />
+            <Toaster position="top-right" richColors closeButton />
+          </TooltipProvider>
+        </AuthProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
   )
 }

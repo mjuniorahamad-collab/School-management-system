@@ -67,82 +67,137 @@ enum GuardianRelationshipType {
   OTHER
 }
 
-model School {
-  id               String            @id @default(uuid())
-  name             String
-  code             String?           @unique
-  status           SchoolStatus      @default(ACTIVE)
-  // Server-side admission number sequence for this school (see Student).
-  admissionCounter Int               @default(1)
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+  ON_LEAVE
+}
 
-  users            User[]
-  academicSessions AcademicSession[]
-  classes          Class[]
-  students         Student[]
-  guardians        Guardian[]
+// A user's access to a specific school (tenant). Isolated from the global
+// User identity so the same person can belong to one or many schools.
+enum MembershipStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model School {
+  id                          String       @id @default(uuid())
+  name                        String
+  code                        String?      @unique
+  status                      SchoolStatus @default(ACTIVE)
+  // Server-side admission number sequence for this school (see Student).
+  admissionCounter            Int          @default(1)
+  // Server-side employee ID sequences (see Teacher, Staff).
+  teacherCounter              Int          @default(1)
+  staffCounter                Int          @default(1)
+  // Server-side sequence for admission applications (see AdmissionApplication).
+  admissionApplicationCounter Int          @default(1)
+  // Server-side receipt number sequence (see FeeReceipt).
+  feeReceiptCounter           Int          @default(1)
+  createdAt                   DateTime     @default(now())
+  updatedAt                   DateTime     @updatedAt
+
+  users                 User[]
+  memberships           TenantMembership[]
+  academicSessions      AcademicSession[]
+  classes               Class[]
+  subjects              Subject[]
+  students              Student[]
+  guardians             Guardian[]
+  teachers              Teacher[]
+  staff                 Staff[]
+  periodSlots           PeriodSlot[]
+  feeHeads              FeeHead[]
+  feeStructures         FeeStructure[]
+  examTypes             ExamType[]
+  gradingBands          GradingBand[]
+  schoolSettings        SchoolSetting[]
+  notices               Notice[]
+  events                Event[]
+  admissionApplications AdmissionApplication[]
 }
 
 model AcademicSession {
-  id        String                 @id @default(uuid())
+  id        String                @id @default(uuid())
   schoolId  String
   name      String
   code      String
-  startDate DateTime               @db.Date
-  endDate   DateTime               @db.Date
-  status    AcademicSessionStatus  @default(UPCOMING)
-  createdAt DateTime               @default(now())
-  updatedAt DateTime               @updatedAt
+  startDate DateTime              @db.Date
+  endDate   DateTime              @db.Date
+  status    AcademicSessionStatus @default(UPCOMING)
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
 
   school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
 
-  enrollments StudentEnrollment[]
+  enrollments           StudentEnrollment[]
+  feeStructures         FeeStructure[]
+  admissionApplications AdmissionApplication[] @relation("ApplicationPreferredSession")
 
   @@unique([schoolId, code])
   @@index([schoolId, status])
 }
 
 model User {
-  id           String          @id @default(uuid())
-  schoolId     String
+  id           String     @id @default(uuid())
+  // Tenancy: a User is a platform-global identity. schoolId is retained as a
+  // convenience/legacy link to a single default school; real tenant access is
+  // granted through TenantMembership (one or many schools per user).
+  schoolId     String?
   name         String
-  email        String          @unique
+  email        String     @unique
   passwordHash String
-  status       UserStatus      @default(ACTIVE)
+  status       UserStatus @default(ACTIVE)
   lastLoginAt  DateTime?
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 
-  school  School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  roles   UserRole[]
-  sessions Session[]
+  school      School?            @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  memberships TenantMembership[]
+  roles       UserRole[]
+  sessions    Session[]
 
-  createdStudents  Student[] @relation("StudentCreatedBy")
-  updatedStudents  Student[] @relation("StudentUpdatedBy")
+  createdStudents Student[] @relation("StudentCreatedBy")
+  updatedStudents Student[] @relation("StudentUpdatedBy")
+
+  teacherProfile  Teacher?  @relation("TeacherUser")
+  staffProfile    Staff?    @relation("StaffUser")
+  studentProfile  Student?  @relation("StudentUser")
+  guardianProfile Guardian? @relation("GuardianUser")
+
+  createdNotices Notice[] @relation("NoticeCreatedBy")
+  updatedNotices Notice[] @relation("NoticeUpdatedBy")
+  createdEvents  Event[]  @relation("EventCreatedBy")
+  updatedEvents  Event[]  @relation("EventUpdatedBy")
+
+  createdApplications   AdmissionApplication[] @relation("ApplicationCreatedBy")
+  updatedApplications   AdmissionApplication[] @relation("ApplicationUpdatedBy")
+  reviewedApplications  AdmissionApplication[] @relation("ApplicationReviewedBy")
+  convertedApplications AdmissionApplication[] @relation("ApplicationConvertedBy")
 
   @@index([schoolId])
   @@index([email])
 }
 
 model Role {
-  id          String           @id @default(uuid())
-  name        String           @unique
+  id          String   @id @default(uuid())
+  name        String   @unique
   description String?
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   userRoles       UserRole[]
   rolePermissions RolePermission[]
+  memberships     TenantMembership[]
 }
 
 model Permission {
-  id          String           @id @default(uuid())
-  code        String           @unique
+  id          String   @id @default(uuid())
+  code        String   @unique
   resource    String
   action      String
   description String?
-  createdAt   DateTime         @default(now())
+  createdAt   DateTime @default(now())
 
   rolePermissions RolePermission[]
 
@@ -150,9 +205,9 @@ model Permission {
 }
 
 model UserRole {
-  id     String @id @default(uuid())
-  userId String
-  roleId String
+  id        String   @id @default(uuid())
+  userId    String
+  roleId    String
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -162,11 +217,32 @@ model UserRole {
   @@index([roleId])
 }
 
+// Tenant access granted to a global User. One membership per (user, school)
+// with a single role for now. `roleId` drives the user's permissions *within
+// that school*; the same user may hold different roles in different schools.
+model TenantMembership {
+  id        String           @id @default(uuid())
+  userId    String
+  schoolId  String
+  roleId    String
+  status    MembershipStatus @default(ACTIVE)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, schoolId])
+  @@index([schoolId])
+  @@index([roleId])
+}
+
 model RolePermission {
-  id           String      @id @default(uuid())
+  id           String   @id @default(uuid())
   roleId       String
   permissionId String
-  createdAt    DateTime    @default(now())
+  createdAt    DateTime @default(now())
 
   role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
   permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
@@ -222,9 +298,12 @@ model Class {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  school      School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  sections    Section[]
-  enrollments StudentEnrollment[]
+  school                School                 @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  sections              Section[]
+  enrollments           StudentEnrollment[]
+  teacherClasses        TeacherClass[]
+  feeStructures         FeeStructure[]
+  admissionApplications AdmissionApplication[] @relation("ApplicationPreferredClass")
 
   @@unique([schoolId, name])
   @@index([schoolId])
@@ -237,11 +316,30 @@ model Section {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  class       Class               @relation(fields: [classId], references: [id], onDelete: Cascade)
-  enrollments StudentEnrollment[]
+  class                 Class                  @relation(fields: [classId], references: [id], onDelete: Cascade)
+  enrollments           StudentEnrollment[]
+  teacherClasses        TeacherClass[]
+  admissionApplications AdmissionApplication[] @relation("ApplicationPreferredSection")
 
   @@unique([classId, name])
   @@index([classId])
+}
+
+model Subject {
+  id        String   @id @default(uuid())
+  schoolId  String
+  code      String
+  name      String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  teacherSubjects TeacherSubject[]
+
+  @@unique([schoolId, code])
+  @@index([schoolId])
 }
 
 model Guardian {
@@ -251,23 +349,29 @@ model Guardian {
   email     String?
   phone     String?
   address   String?
+  // Optional link to a login account. A single Guardian person row may be
+  // related to many students (via StudentGuardian), so one parent login can
+  // cover multiple children within the same school.
+  userId    String?  @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   school           School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   studentGuardians StudentGuardian[]
+  user             User?             @relation("GuardianUser", fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([schoolId])
+  @@index([userId])
 }
 
 model StudentGuardian {
-  id               String                   @id @default(uuid())
-  studentId        String
-  guardianId       String
-  relationshipType GuardianRelationshipType
-  isPrimary        Boolean                  @default(false)
-  isEmergencyContact Boolean                @default(false)
-  createdAt        DateTime                 @default(now())
+  id                 String                   @id @default(uuid())
+  studentId          String
+  guardianId         String
+  relationshipType   GuardianRelationshipType
+  isPrimary          Boolean                  @default(false)
+  isEmergencyContact Boolean                  @default(false)
+  createdAt          DateTime                 @default(now())
 
   student  Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
   guardian Guardian @relation(fields: [guardianId], references: [id], onDelete: Cascade)
@@ -277,36 +381,40 @@ model StudentGuardian {
 }
 
 model Student {
-  id                  String        @id @default(uuid())
-  schoolId            String
-  admissionNumber     String
-  firstName           String
-  middleName          String?
-  lastName            String
-  dateOfBirth         DateTime      @db.Date
-  gender              StudentGender
-  photoUrl            String?
-  status              StudentStatus @default(ACTIVE)
-  email               String?
-  phone               String?
-  addressLine1        String?
-  addressLine2        String?
-  city                String?
-  state               String?
-  postalCode          String?
-  admissionDate       DateTime      @db.Date
+  id                    String        @id @default(uuid())
+  schoolId              String
+  admissionNumber       String
+  firstName             String
+  middleName            String?
+  lastName              String?
+  dateOfBirth           DateTime      @db.Date
+  gender                StudentGender
+  photoUrl              String?
+  status                StudentStatus @default(ACTIVE)
+  email                 String?
+  phone                 String?
+  addressLine1          String?
+  addressLine2          String?
+  city                  String?
+  state                 String?
+  postalCode            String?
+  admissionDate         DateTime      @db.Date
   emergencyContactName  String?
   emergencyContactPhone String?
-  createdBy           String?
-  updatedBy           String?
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
+  // Optional link to a login account (future student portal).
+  userId                String?       @unique
+  createdBy             String?
+  updatedBy             String?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
-  school            School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  studentGuardians  StudentGuardian[]
-  enrollments       StudentEnrollment[]
-  createdByUser     User?             @relation("StudentCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
-  updatedByUser     User?             @relation("StudentUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+  school                    School                 @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  studentGuardians          StudentGuardian[]
+  enrollments               StudentEnrollment[]
+  createdByUser             User?                  @relation("StudentCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  updatedByUser             User?                  @relation("StudentUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+  user                      User?                  @relation("StudentUser", fields: [userId], references: [id], onDelete: SetNull)
+  convertedFromApplications AdmissionApplication[] @relation("ApplicationConvertedStudent")
 
   @@unique([schoolId, admissionNumber])
   @@index([schoolId, status])
@@ -318,16 +426,445 @@ model StudentEnrollment {
   studentId         String
   academicSessionId String
   classId           String
-  sectionId         String
+  sectionId         String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   student         Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
   academicSession AcademicSession @relation(fields: [academicSessionId], references: [id], onDelete: Cascade)
   class           Class           @relation(fields: [classId], references: [id], onDelete: Cascade)
-  section         Section         @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  section         Section?        @relation(fields: [sectionId], references: [id], onDelete: SetNull)
 
   @@unique([studentId, academicSessionId])
   @@index([academicSessionId])
   @@index([classId, sectionId])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Teachers & Staff (second business domain).
+//
+// Decisions:
+//   - Teachers and Staff are separate domain entities (not a shared Employee
+//     abstraction) because they have fundamentally different relationships:
+//     teachers link to subjects/classes for timetable/homework, while staff
+//     are department-based non-teaching employees.
+//   - `EmployeeStatus` (ACTIVE/INACTIVE/ON_LEAVE) is shared via a single
+//     Prisma enum for both tables.
+//   - `StudentGender` is reused for gender on both Teacher and Staff.
+//   - Employee IDs are server-generated from per-school atomic counters
+//     (TCH-YYYY-NNNN / STF-YYYY-NNNN), matching the Student admission
+//     number pattern.
+//   - `TeacherSubject` and `TeacherClass` junction tables support future
+//     timetable, homework, assignments, and exam module relationships.
+//   - No `userId` FK yet — teachers/staff are domain entities independent
+//     of login; a future module can add the link when staff login is built.
+// ────────────────────────────────────────────────────────────────────────────
+
+model Teacher {
+  id            String         @id @default(uuid())
+  schoolId      String
+  employeeId    String
+  firstName     String
+  middleName    String?
+  lastName      String?
+  gender        StudentGender
+  dateOfBirth   DateTime?      @db.Date
+  email         String?
+  phone         String?
+  address       String?
+  designation   String
+  qualification String?
+  experience    Int?
+  joiningDate   DateTime       @db.Date
+  status        EmployeeStatus @default(ACTIVE)
+  photoUrl      String?
+  // Optional link to a login account (future teacher portal).
+  userId        String?        @unique
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  school          School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  teacherSubjects TeacherSubject[]
+  teacherClasses  TeacherClass[]
+  user            User?            @relation("TeacherUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([schoolId, employeeId])
+  @@index([schoolId, status])
+  @@index([schoolId, lastName])
+  @@index([userId])
+}
+
+model TeacherSubject {
+  id        String   @id @default(uuid())
+  teacherId String
+  subjectId String
+  createdAt DateTime @default(now())
+
+  teacher Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, subjectId])
+  @@index([subjectId])
+}
+
+model TeacherClass {
+  id        String   @id @default(uuid())
+  teacherId String
+  classId   String
+  sectionId String?
+  createdAt DateTime @default(now())
+
+  teacher Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  class   Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  section Section? @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+
+  @@unique([teacherId, classId, sectionId])
+  @@index([classId, sectionId])
+}
+
+model Staff {
+  id                           String         @id @default(uuid())
+  schoolId                     String
+  employeeId                   String
+  firstName                    String
+  middleName                   String?
+  lastName                     String?
+  gender                       StudentGender
+  dateOfBirth                  DateTime?      @db.Date
+  email                        String?
+  phone                        String?
+  address                      String?
+  department                   String
+  designation                  String
+  qualification                String?
+  experience                   Int?
+  joiningDate                  DateTime       @db.Date
+  status                       EmployeeStatus @default(ACTIVE)
+  photoUrl                     String?
+  emergencyContactName         String?
+  emergencyContactRelationship String?
+  emergencyContactPhone        String?
+  // Optional link to a login account (future staff portal).
+  userId                       String?        @unique
+  createdAt                    DateTime       @default(now())
+  updatedAt                    DateTime       @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  user   User?  @relation("StaffUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([schoolId, employeeId])
+  @@index([schoolId, status])
+  @@index([schoolId, lastName])
+  @@index([userId])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Shared config / master data (Phase 0 schema scaffolding; services land in
+// later phases). All of these are tenant-scoped so each school configures its
+// own timetable periods, grading bands, fee heads and settings.
+// ────────────────────────────────────────────────────────────────────────────
+
+// Tracks the distinct time-of-day slots a school uses across the weekly
+// timetable. Periods are per-school master rows referenced by TimetableEntry.
+model PeriodSlot {
+  id        String   @id @default(uuid())
+  schoolId  String
+  name      String
+  startTime String // "HH:MM" (24h)
+  endTime   String // "HH:MM" (24h)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, name])
+  @@index([schoolId])
+}
+
+// A fee head/category of a fee (e.g. tuition, transport, admission).
+model FeeHead {
+  id          String   @id @default(uuid())
+  schoolId    String
+  code        String
+  name        String
+  isRecurring Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  school School             @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  items  FeeStructureItem[]
+
+  @@unique([schoolId, code])
+  @@index([schoolId])
+}
+
+// A named set of fee items configured for a class within an academic session.
+model FeeStructure {
+  id        String   @id @default(uuid())
+  schoolId  String
+  sessionId String
+  classId   String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school  School             @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  session AcademicSession    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  class   Class              @relation(fields: [classId], references: [id], onDelete: Cascade)
+  items   FeeStructureItem[]
+}
+
+model FeeStructureItem {
+  id             String   @id @default(uuid())
+  feeStructureId String
+  feeHeadId      String
+  amount         Decimal  @db.Decimal(12, 2)
+  installmentNo  Int      @default(1)
+  dueDate        DateTime @db.Date
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  feeStructure FeeStructure @relation(fields: [feeStructureId], references: [id], onDelete: Cascade)
+  feeHead      FeeHead      @relation(fields: [feeHeadId], references: [id], onDelete: Restrict)
+
+  @@unique([feeStructureId, feeHeadId, installmentNo])
+  @@index([feeStructureId])
+  @@index([feeHeadId])
+}
+
+// Exam types (e.g. midterm, final) — tenant-scoped.
+model ExamType {
+  id        String   @id @default(uuid())
+  schoolId  String
+  code      String
+  name      String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, code])
+  @@index([schoolId])
+}
+
+// Configurable percentage → letter grade bands used for Results. Tenant-scoped.
+model GradingBand {
+  id          String   @id @default(uuid())
+  schoolId    String
+  minPercent  Int // inclusive lower bound
+  maxPercent  Int // inclusive upper bound
+  grade       String
+  description String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, minPercent])
+  @@index([schoolId])
+}
+
+// Generic key/value store for tenant-scoped school configuration.
+model SchoolSetting {
+  id        String   @id @default(uuid())
+  schoolId  String
+  key       String
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, key])
+  @@index([schoolId])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Notices & Events (Phase 2 communication module).
+//
+// Decisions:
+//   - Both are tenant-scoped (schoolId FK), isolated per school.
+//   - `Notice` carries an explicit status lifecycle (DRAFT → PUBLISHED →
+//     ARCHIVED) plus an audience so a school can target students, parents,
+//     teachers or staff without leaking to other tenants. `publishedAt` is set
+//     server-side the moment a notice transitions to PUBLISHED.
+//   - `Event` holds a start/end window, a category and a status. Dates are
+//     stored as DateTime (with time) so 24h timelines and ordering are exact.
+//   - `createdBy`/`updatedBy` link back to the acting User for auditability and
+//     notice/event authorship (owner checks in the service layer).
+// ────────────────────────────────────────────────────────────────────────────
+
+enum NoticeAudience {
+  EVERYONE
+  STUDENTS
+  PARENTS
+  TEACHERS
+  STAFF
+}
+
+enum NoticeStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum NoticePriority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+model Notice {
+  id          String         @id @default(uuid())
+  schoolId    String
+  title       String
+  body        String
+  audience    NoticeAudience @default(EVERYONE)
+  status      NoticeStatus   @default(DRAFT)
+  priority    NoticePriority @default(MEDIUM)
+  publishedAt DateTime?
+  createdBy   String?
+  updatedBy   String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  school        School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  createdByUser User?  @relation("NoticeCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  updatedByUser User?  @relation("NoticeUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@index([schoolId, status])
+  @@index([schoolId, createdAt])
+}
+
+enum EventCategory {
+  GENERAL
+  ACADEMIC
+  SPORTS
+  CULTURAL
+  COMMUNITY
+}
+
+enum EventStatus {
+  SCHEDULED
+  ONGOING
+  COMPLETED
+  CANCELLED
+}
+
+model Event {
+  id          String        @id @default(uuid())
+  schoolId    String
+  title       String
+  description String?
+  category    EventCategory @default(GENERAL)
+  status      EventStatus   @default(SCHEDULED)
+  startAt     DateTime
+  endAt       DateTime
+  location    String?
+  createdBy   String?
+  updatedBy   String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  school        School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  createdByUser User?  @relation("EventCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  updatedByUser User?  @relation("EventUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@index([schoolId, startAt])
+  @@index([schoolId, status])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Admissions (Phase 3 — applicant intake pipeline).
+//
+// Decisions:
+//   - `AdmissionApplication` captures a prospective student BEFORE they become
+//     a `Student`. It is tenant-scoped (schoolId FK) like every other domain
+//     entity; the school is always resolved server-side from the session.
+//   - The applicant's identity/contact fields mirror the Student model so the
+//     intake can be converted to a Student without guessing a mapping.
+//   - A single inline primary guardian (name + optional contact + relationship)
+//     is captured at intake; a full multi-guardian model is the Students module's
+//     concern and is resolved at conversion time.
+//   - Placement is a *preference* (`preferredAcademicSession`, `preferredClass`,
+//     `preferredSection`) that the school may record but is not required to
+//     enter up front; the ACTIVE session + class/section are resolved authoritatively
+//     at conversion time by the service layer.
+//   - Status workflow: PENDING → APPROVED / REJECTED / WITHDRAWN. Approval stamps
+//     `reviewedAt`/`reviewedBy`/`reviewNote` server-side. A dedicated
+//     convert-to-Student action stamps `convertedAt`/`convertedBy` and links the
+//     resulting `Student` through `convertedStudentId`, then flips status to a
+//     terminal `CONVERTED` so the pipeline is unambiguous and idempotent.
+//   - Application numbers are server-generated (`APP-YYYY-NNNN`) from the
+//     per-school atomic `School.admissionApplicationCounter`, matching the
+//     admission-number/employee-id pattern. Uniqueness is enforced by
+//     `@@unique([schoolId, applicationNumber])`.
+// ────────────────────────────────────────────────────────────────────────────
+
+enum AdmissionApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+  CONVERTED
+}
+
+model AdmissionApplication {
+  id                         String                     @id @default(uuid())
+  schoolId                   String
+  applicationNumber          String
+  firstName                  String
+  middleName                 String?
+  lastName                   String?
+  dateOfBirth                DateTime                   @db.Date
+  gender                     StudentGender
+  email                      String?
+  phone                      String?
+  addressLine1               String?
+  addressLine2               String?
+  city                       String?
+  state                      String?
+  postalCode                 String?
+  status                     AdmissionApplicationStatus @default(PENDING)
+  // Preferred placement (optional at intake; resolved authoritatively at conversion).
+  preferredAcademicSessionId String?
+  preferredClassId           String?
+  preferredSectionId         String?
+  // Inline primary guardian captured at intake.
+  guardianName               String
+  guardianPhone              String?
+  guardianEmail              String?
+  guardianRelationshipType   GuardianRelationshipType   @default(PARENT)
+  // Intake review bookkeeping.
+  reviewNote                 String?
+  reviewedBy                 String?
+  reviewedAt                 DateTime?
+  // Convert-to-Student bookkeeping.
+  convertedStudentId         String?
+  convertedBy                String?
+  convertedAt                DateTime?
+  createdBy                  String?
+  updatedBy                  String?
+  createdAt                  DateTime                   @default(now())
+  updatedAt                  DateTime                   @updatedAt
+
+  school                   School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  preferredAcademicSession AcademicSession? @relation("ApplicationPreferredSession", fields: [preferredAcademicSessionId], references: [id], onDelete: SetNull)
+  preferredClass           Class?           @relation("ApplicationPreferredClass", fields: [preferredClassId], references: [id], onDelete: SetNull)
+  preferredSection         Section?         @relation("ApplicationPreferredSection", fields: [preferredSectionId], references: [id], onDelete: SetNull)
+  convertedStudent         Student?         @relation("ApplicationConvertedStudent", fields: [convertedStudentId], references: [id], onDelete: SetNull)
+  createdByUser            User?            @relation("ApplicationCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  updatedByUser            User?            @relation("ApplicationUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+  reviewedByUser           User?            @relation("ApplicationReviewedBy", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  convertedByUser          User?            @relation("ApplicationConvertedBy", fields: [convertedBy], references: [id], onDelete: SetNull)
+
+  @@unique([schoolId, applicationNumber])
+  @@index([schoolId, status])
+  @@index([schoolId, createdAt])
+  @@index([schoolId, lastName])
+  @@index([convertedStudentId])
 }
