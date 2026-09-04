@@ -20,6 +20,8 @@ import { eventsRouter } from "../modules/events/event.route.js"
 import { admissionsRouter } from "../modules/admissions/admission.route.js"
 import { timetableRouter } from "../modules/timetable/timetable.route.js"
 import { attendanceRouter } from "../modules/attendance/attendance.route.js"
+import { homeworkRouter } from "../modules/homework/homework.route.js"
+import { assignmentRouter } from "../modules/assignments/assignment.route.js"
 
 // Feature modules register their routers here (e.g. apiRouter.use(studentsRouter)).
 export const apiRouter: Router = Router()
@@ -45,3 +47,5 @@ apiRouter.use("/events", eventsRouter)
 apiRouter.use("/admissions", admissionsRouter)
 apiRouter.use("/timetable", timetableRouter)
 apiRouter.use("/attendance", attendanceRouter)
+apiRouter.use("/homework", homeworkRouter)
+apiRouter.use("/assignments", assignmentRouter)

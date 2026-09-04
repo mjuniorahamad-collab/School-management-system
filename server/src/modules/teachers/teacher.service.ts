@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client"
+import { ROLE_NAMES } from "../../permissions/permissions.js"
 import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
 import type { CreateTeacherInput, ListTeachersQuery, UpdateTeacherInput } from "./teacher.schema.js"
@@ -12,6 +13,40 @@ async function requirePrisma(): Promise<PrismaClient> {
   const prisma = await getPrisma()
   if (!prisma) throw new Error("Database is not configured")
   return prisma
+}
+
+/**
+ * Validates a user→teacher login link: the user must hold an ACTIVE membership
+ * with the TEACHER role in this school, and must not already be linked to
+ * another Teacher profile anywhere. Returns the normalized userId (null for no
+ * link).
+ */
+async function resolveTeacherUserId(
+  prisma: PrismaClient,
+  schoolId: string,
+  inputUserId: string | null | undefined,
+  currentTeacherId?: string,
+): Promise<string | null> {
+  const userId = inputUserId ?? null
+  if (!userId) return null
+
+  const membership = await prisma.tenantMembership.findFirst({
+    where: { userId, schoolId, status: "ACTIVE" },
+    include: { role: { select: { name: true } } },
+  })
+  if (!membership || membership.role.name !== ROLE_NAMES.TEACHER) {
+    throw badRequestError("The linked user must have an active TEACHER role in this school")
+  }
+
+  const linkedElsewhere = await prisma.teacher.findFirst({
+    where: { userId, id: { not: currentTeacherId ?? "" } },
+    select: { id: true },
+  })
+  if (linkedElsewhere) {
+    throw badRequestError("This user is already linked to another teacher account")
+  }
+
+  return userId
 }
 
 export async function listTeachers(
@@ -125,6 +160,9 @@ export async function createTeacher(
     }
   }
 
+  // Validate the optional user link (ACTIVE TEACHER membership, not already linked).
+  const userId = await resolveTeacherUserId(prisma, schoolId, input.userId)
+
   try {
     return await prisma.$transaction(async (tx) => {
       // Increment teacher counter and generate employee ID
@@ -156,6 +194,7 @@ export async function createTeacher(
           joiningDate,
           status: (input.status as "ACTIVE" | "INACTIVE" | "ON_LEAVE") ?? "ACTIVE",
           photoUrl: input.photoUrl ?? null,
+          userId,
         },
       })
 
@@ -206,6 +245,7 @@ export async function updateTeacher(
 
   const subjectIds = input.subjectIds
   const classAssignments = input.classAssignments
+  const userId = await resolveTeacherUserId(prisma, schoolId, input.userId, id)
 
   try {
     return await prisma.$transaction(async (tx) => {
@@ -261,6 +301,7 @@ export async function updateTeacher(
       if (input.joiningDate !== undefined) data.joiningDate = new Date(input.joiningDate)
       if (input.status !== undefined) data.status = input.status as "ACTIVE" | "INACTIVE" | "ON_LEAVE"
       if (input.photoUrl !== undefined) data.photoUrl = input.photoUrl ?? null
+      if (input.userId !== undefined) data.userId = userId
 
       await tx.teacher.update({ where: { id }, data })
 

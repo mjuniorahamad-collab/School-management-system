@@ -34,6 +34,13 @@ const classAssignmentSchema = z.object({
   sectionId: z.union([z.null(), emptyToUndefined, z.string().trim().min(1)]).optional(),
 })
 
+/**
+ * Optional link to the teacher's login account (global `User.id`). The server
+ * verifies the user holds an ACTIVE membership with the TEACHER role in this
+ * school, and that no other Teacher profile is already linked to the same user.
+ */
+const teacherUserIdSchema = z.union([z.string().uuid(), z.null(), emptyToUndefined]).optional()
+
 export const createTeacherSchema = z
   .object({
     firstName: z.string().trim().min(1, "First name is required").max(100),
@@ -50,6 +57,7 @@ export const createTeacherSchema = z
     joiningDate: dateStringSchema,
     status: z.enum(EMPLOYEE_STATUSES).optional(),
     photoUrl: optionalText(500),
+    userId: teacherUserIdSchema,
     subjectIds: z.array(z.string().min(1)).optional(),
     classAssignments: z.array(classAssignmentSchema).optional(),
   })

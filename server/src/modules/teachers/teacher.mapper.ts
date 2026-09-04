@@ -39,6 +39,7 @@ export function mapTeacherDetail(row: TeacherDetailRow): TeacherDetail {
     joiningDate: row.joiningDate.toISOString(),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    userId: row.userId,
     dateOfBirth: row.dateOfBirth?.toISOString() ?? null,
     address: row.address,
     qualification: row.qualification,

@@ -1,10 +1,11 @@
 // School Management System — Prisma schema.
 //
-// Current milestone: Timetable & Attendance (Phase 4).
+// Current milestone: Homework & Assignments (Phase 5).
 //
 //   School, AcademicSession, User, Role, Permission, UserRole, RolePermission,
 //   Session(auth tokens), Student, Teacher, Staff, Class, Section, Subject,
-//   PeriodSlot, TimetableEntry, AttendanceRecord.
+//   PeriodSlot, TimetableEntry, AttendanceRecord, Homework, Assignment,
+//   HomeworkSubmission, AssignmentSubmission.
 //
 // Decisions:
 //   - `User` is a pure authentication identity (email + password hash). Domain
@@ -95,6 +96,18 @@ enum AttendanceStatus {
   HOLIDAY
 }
 
+enum TaskStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum TaskSubmissionStatus {
+  SUBMITTED
+  LATE
+  GRADED
+}
+
 model School {
   id                          String       @id @default(uuid())
   name                        String
@@ -132,6 +145,10 @@ model School {
   admissionApplications AdmissionApplication[]
   timetableEntries     TimetableEntry[]
   attendanceRecords    AttendanceRecord[]
+  homeworks            Homework[]
+  assignments          Assignment[]
+  homeworkSubmissions  HomeworkSubmission[]
+  assignmentSubmissions AssignmentSubmission[]
 }
 
 model AcademicSession {
@@ -152,6 +169,8 @@ model AcademicSession {
   admissionApplications AdmissionApplication[] @relation("ApplicationPreferredSession")
   timetableEntries      TimetableEntry[]
   attendanceRecords     AttendanceRecord[]
+  homeworks             Homework[]
+  assignments           Assignment[]
 
   @@unique([schoolId, code])
   @@index([schoolId, status])
@@ -195,6 +214,13 @@ model User {
   convertedApplications AdmissionApplication[] @relation("ApplicationConvertedBy")
 
   markedAttendance AttendanceRecord[] @relation("AttendanceMarkedBy")
+
+  createdHomework  Homework[] @relation("HomeworkCreatedBy")
+  updatedHomework  Homework[] @relation("HomeworkUpdatedBy")
+  createdAssignments Assignment[] @relation("AssignmentCreatedBy")
+  updatedAssignments Assignment[] @relation("AssignmentUpdatedBy")
+  gradedHomeworkAssignments HomeworkSubmission[] @relation("HomeworkGradedBy")
+  gradedAssignmentAssignments AssignmentSubmission[] @relation("AssignmentGradedBy")
 
   @@index([schoolId])
   @@index([email])
@@ -327,6 +353,8 @@ model Class {
   admissionApplications AdmissionApplication[] @relation("ApplicationPreferredClass")
   timetableEntries      TimetableEntry[]
   attendanceRecords     AttendanceRecord[]
+  homeworks             Homework[]
+  assignments           Assignment[]
 
   @@unique([schoolId, name])
   @@index([schoolId])
@@ -345,6 +373,8 @@ model Section {
   admissionApplications AdmissionApplication[] @relation("ApplicationPreferredSection")
   timetableEntries      TimetableEntry[]
   attendanceRecords     AttendanceRecord[]
+  homeworks             Homework[]
+  assignments           Assignment[]
 
   @@unique([classId, name])
   @@index([classId])
@@ -363,6 +393,8 @@ model Subject {
 
   teacherSubjects TeacherSubject[]
   timetableEntries TimetableEntry[]
+  homeworks        Homework[]
+  assignments      Assignment[]
 
   @@unique([schoolId, code])
   @@index([schoolId])
@@ -442,6 +474,8 @@ model Student {
   updatedByUser             User?                  @relation("StudentUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
   user                      User?                  @relation("StudentUser", fields: [userId], references: [id], onDelete: SetNull)
   convertedFromApplications AdmissionApplication[] @relation("ApplicationConvertedStudent")
+  homeworkSubmissions       HomeworkSubmission[]
+  assignmentSubmissions     AssignmentSubmission[]
 
   @@unique([schoolId, admissionNumber])
   @@index([schoolId, status])
@@ -462,6 +496,8 @@ model StudentEnrollment {
   class           Class           @relation(fields: [classId], references: [id], onDelete: Cascade)
   section         Section?        @relation(fields: [sectionId], references: [id], onDelete: SetNull)
   attendanceRecords AttendanceRecord[]
+  homeworkSubmissions   HomeworkSubmission[]
+  assignmentSubmissions AssignmentSubmission[]
 
   @@unique([studentId, academicSessionId])
   @@index([academicSessionId])
@@ -516,6 +552,8 @@ model Teacher {
   teacherClasses  TeacherClass[]
   timetableEntries TimetableEntry[]
   user            User?            @relation("TeacherUser", fields: [userId], references: [id], onDelete: SetNull)
+  homeworks       Homework[]
+  assignments     Assignment[]
 
   @@unique([schoolId, employeeId])
   @@index([schoolId, status])
@@ -974,4 +1012,166 @@ model AttendanceRecord {
   @@index([schoolId, classId, sectionId])
   @@index([schoolId, studentId])
   @@index([schoolId, date])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Homework & Assignments (Phase 5).
+//
+// Decisions:
+//   - Homework and Assignments are two clearly separate entities (matching the
+//     separate permission resources, nav items and module placeholders). They
+//     share one `TaskStatus` enum and the same targeting shape; the FK
+//     validation for the targeting references and the lifecycle transitions
+//     are shared helpers, so the tables do not duplicate logic.
+//   - Targeting is cohort-based: academic session + class (+ optional section)
+//     + subject + teacher. The recipients are derived from `StudentEnrollment`
+//     filtered by (academicSessionId, classId, sectionId); a sectionless class
+//     is never forced to have a section.
+//   - `status` lifecycle is minimal (DRAFT → PUBLISHED → ARCHIVED); there is no
+//     stored CLOSED state — "overdue" is derived from `dueDate < today` so the
+//     UI can never drift from the real due date. `publishedAt` is set
+//     server-side on the DRAFT→PUBLISHED transition (matches Notice).
+//   - `dueDate` is a `@db.Date` (date-only). The API boundary is the bare
+//     `YYYY-MM-DD` string, so there is no timezone conversion and no
+//     UTC-boundary bug. Time-of-day due dates are deferred deliberately.
+//   - Submissions are schema-ready now (no endpoints/UI this phase) so the
+//     future student/parent portal requires no redesign. Each submission links
+//     to the submitting student's `StudentEnrollment` snapshot (same as
+//     AttendanceRecord) so mid-session transfers never rewrite history.
+//     `@@unique([*, enrollmentId])` enforces one submission per student/task;
+//     resubmission is a controlled UPDATE. `attachmentUrl` mirrors `photoUrl`
+//     — file storage itself is deferred.
+//   - Teacher ownership: a TEACHER-role user may only manage homework for their
+//     own Teacher profile (`Teacher.userId`), and the target class/section and
+//     subject must be covered by that teacher's `TeacherClass`/`TeacherSubject`
+//     rows. Admins (SUPER_ADMIN/SCHOOL_ADMIN/PRINCIPAL-create) may create for
+//     any in-school teacher; all targets remain school-scoped.
+// ────────────────────────────────────────────────────────────────────────────
+
+model Homework {
+  id                String      @id @default(uuid())
+  schoolId          String
+  academicSessionId String
+  classId           String
+  sectionId         String?
+  subjectId         String
+  teacherId         String
+  title             String
+  instructions      String?
+  dueDate           DateTime    @db.Date
+  status            TaskStatus  @default(DRAFT)
+  publishedAt       DateTime?
+  createdBy         String?
+  updatedBy         String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  school          School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicSession AcademicSession @relation(fields: [academicSessionId], references: [id], onDelete: Cascade)
+  class           Class           @relation(fields: [classId], references: [id], onDelete: Cascade)
+  section         Section?        @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  subject         Subject         @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  teacher         Teacher         @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  createdByUser   User?           @relation("HomeworkCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  updatedByUser   User?           @relation("HomeworkUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  submissions HomeworkSubmission[]
+
+  @@index([schoolId, academicSessionId])
+  @@index([schoolId, classId, sectionId])
+  @@index([schoolId, subjectId])
+  @@index([schoolId, teacherId])
+  @@index([schoolId, status, dueDate])
+}
+
+model Assignment {
+  id                String      @id @default(uuid())
+  schoolId          String
+  academicSessionId String
+  classId           String
+  sectionId         String?
+  subjectId         String
+  teacherId         String
+  title             String
+  instructions      String?
+  dueDate           DateTime    @db.Date
+  status            TaskStatus  @default(DRAFT)
+  publishedAt       DateTime?
+  createdBy         String?
+  updatedBy         String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  school          School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicSession AcademicSession @relation(fields: [academicSessionId], references: [id], onDelete: Cascade)
+  class           Class           @relation(fields: [classId], references: [id], onDelete: Cascade)
+  section         Section?        @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  subject         Subject         @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  teacher         Teacher         @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  createdByUser   User?           @relation("AssignmentCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  updatedByUser   User?           @relation("AssignmentUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  submissions AssignmentSubmission[]
+
+  @@index([schoolId, academicSessionId])
+  @@index([schoolId, classId, sectionId])
+  @@index([schoolId, subjectId])
+  @@index([schoolId, teacherId])
+  @@index([schoolId, status, dueDate])
+}
+
+model HomeworkSubmission {
+  id            String             @id @default(uuid())
+  schoolId      String
+  homeworkId    String
+  studentId     String
+  enrollmentId  String
+  content       String?
+  attachmentUrl String?
+  status        TaskSubmissionStatus @default(SUBMITTED)
+  marks         Decimal?            @db.Decimal(7, 2)
+  feedback      String?
+  gradedBy      String?
+  gradedAt      DateTime?
+  submittedAt   DateTime           @default(now())
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  school       School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  homework     Homework          @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
+  student      Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  enrollment   StudentEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  gradedByUser User?             @relation("HomeworkGradedBy", fields: [gradedBy], references: [id], onDelete: SetNull)
+
+  @@unique([homeworkId, enrollmentId])
+  @@index([schoolId, homeworkId])
+  @@index([schoolId, studentId])
+}
+
+model AssignmentSubmission {
+  id            String             @id @default(uuid())
+  schoolId      String
+  assignmentId  String
+  studentId     String
+  enrollmentId  String
+  content       String?
+  attachmentUrl String?
+  status        TaskSubmissionStatus @default(SUBMITTED)
+  marks         Decimal?            @db.Decimal(7, 2)
+  feedback      String?
+  gradedBy      String?
+  gradedAt      DateTime?
+  submittedAt   DateTime           @default(now())
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  school       School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  assignment   Assignment        @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  student      Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  enrollment   StudentEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  gradedByUser User?             @relation("AssignmentGradedBy", fields: [gradedBy], references: [id], onDelete: SetNull)
+
+  @@unique([assignmentId, enrollmentId])
+  @@index([schoolId, assignmentId])
+  @@index([schoolId, studentId])
 }

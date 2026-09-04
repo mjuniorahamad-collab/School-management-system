@@ -32,6 +32,7 @@ export interface TeacherClassAssignment {
 }
 
 export interface TeacherDetail extends TeacherListItem {
+  userId: string | null
   dateOfBirth: string | null
   address: string | null
   qualification: string | null
@@ -82,6 +83,7 @@ export interface TeacherFormPayload {
   experience?: number | null
   joiningDate: string
   status?: string
+  userId?: string | null
   subjectIds?: string[]
   classAssignments?: { classId: string; sectionId?: string | null }[]
 }

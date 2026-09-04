@@ -46,6 +46,10 @@ const TimetablePage = lazy(() =>
 const AttendancePage = lazy(() =>
   import("@/pages/attendance/AttendancePage").then((m) => ({ default: m.AttendancePage })),
 )
+const HomeworkPage = lazy(() => import("@/pages/homework").then((m) => ({ default: m.HomeworkPage })))
+const AssignmentsPage = lazy(() =>
+  import("@/pages/assignments").then((m) => ({ default: m.AssignmentsPage })),
+)
 
 const DASHBOARD_PATH = "/dashboard"
 const IMPLEMENTED_PATHS = new Set([
@@ -63,6 +67,8 @@ const IMPLEMENTED_PATHS = new Set([
   "/settings",
   "/timetable",
   "/attendance",
+  "/homework",
+  "/assignments",
 ])
 
 export const router = createBrowserRouter([
@@ -106,6 +112,8 @@ export const router = createBrowserRouter([
           { path: "/settings", element: <SettingsPage /> },
           { path: "/timetable", element: <TimetablePage /> },
           { path: "/attendance", element: <AttendancePage /> },
+          { path: "/homework", element: <HomeworkPage /> },
+          { path: "/assignments", element: <AssignmentsPage /> },
           // Remaining unimplemented modules from the navigation registry.
           ...getAllNavItems()
             .filter((item) => !IMPLEMENTED_PATHS.has(item.path) && !item.path.startsWith("/students"))
