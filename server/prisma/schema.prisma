@@ -1,11 +1,12 @@
 // School Management System — Prisma schema.
 //
-// Current milestone: Homework & Assignments (Phase 5).
+// Current milestone: Exams & Results (Phase 6).
 //
 //   School, AcademicSession, User, Role, Permission, UserRole, RolePermission,
 //   Session(auth tokens), Student, Teacher, Staff, Class, Section, Subject,
 //   PeriodSlot, TimetableEntry, AttendanceRecord, Homework, Assignment,
-//   HomeworkSubmission, AssignmentSubmission.
+//   HomeworkSubmission, AssignmentSubmission, Exam, ExamSubject, ExamResult,
+//   ExamMark.
 //
 // Decisions:
 //   - `User` is a pure authentication identity (email + password hash). Domain
@@ -108,6 +109,13 @@ enum TaskSubmissionStatus {
   GRADED
 }
 
+enum ExamStatus {
+  DRAFT
+  PUBLISHED
+  FINAL
+  ARCHIVED
+}
+
 model School {
   id                          String       @id @default(uuid())
   name                        String
@@ -149,6 +157,9 @@ model School {
   assignments          Assignment[]
   homeworkSubmissions  HomeworkSubmission[]
   assignmentSubmissions AssignmentSubmission[]
+  exams                Exam[]
+  examResults          ExamResult[]
+  examMarks            ExamMark[]
 }
 
 model AcademicSession {
@@ -171,6 +182,7 @@ model AcademicSession {
   attendanceRecords     AttendanceRecord[]
   homeworks             Homework[]
   assignments           Assignment[]
+  exams                 Exam[]
 
   @@unique([schoolId, code])
   @@index([schoolId, status])
@@ -221,6 +233,11 @@ model User {
   updatedAssignments Assignment[] @relation("AssignmentUpdatedBy")
   gradedHomeworkAssignments HomeworkSubmission[] @relation("HomeworkGradedBy")
   gradedAssignmentAssignments AssignmentSubmission[] @relation("AssignmentGradedBy")
+
+  createdExams  Exam[]      @relation("ExamCreatedBy")
+  updatedExams  Exam[]      @relation("ExamUpdatedBy")
+  enteredExamMarks ExamMark[] @relation("ExamMarkEnteredBy")
+  updatedExamMarks ExamMark[] @relation("ExamMarkUpdatedBy")
 
   @@index([schoolId])
   @@index([email])
@@ -356,6 +373,8 @@ model Class {
   homeworks             Homework[]
   assignments           Assignment[]
 
+  exams Exam[]
+
   @@unique([schoolId, name])
   @@index([schoolId])
 }
@@ -376,6 +395,8 @@ model Section {
   homeworks             Homework[]
   assignments           Assignment[]
 
+  exams Exam[]
+
   @@unique([classId, name])
   @@index([classId])
 }
@@ -395,6 +416,8 @@ model Subject {
   timetableEntries TimetableEntry[]
   homeworks        Homework[]
   assignments      Assignment[]
+
+  examSubjects ExamSubject[]
 
   @@unique([schoolId, code])
   @@index([schoolId])
@@ -477,6 +500,8 @@ model Student {
   homeworkSubmissions       HomeworkSubmission[]
   assignmentSubmissions     AssignmentSubmission[]
 
+  examResults ExamResult[]
+
   @@unique([schoolId, admissionNumber])
   @@index([schoolId, status])
   @@index([schoolId, lastName])
@@ -498,6 +523,8 @@ model StudentEnrollment {
   attendanceRecords AttendanceRecord[]
   homeworkSubmissions   HomeworkSubmission[]
   assignmentSubmissions AssignmentSubmission[]
+
+  examResults ExamResult[]
 
   @@unique([studentId, academicSessionId])
   @@index([academicSessionId])
@@ -554,6 +581,8 @@ model Teacher {
   user            User?            @relation("TeacherUser", fields: [userId], references: [id], onDelete: SetNull)
   homeworks       Homework[]
   assignments     Assignment[]
+
+  examSubjects ExamSubject[]
 
   @@unique([schoolId, employeeId])
   @@index([schoolId, status])
@@ -714,6 +743,8 @@ model ExamType {
   updatedAt DateTime @updatedAt
 
   school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  exams Exam[]
 
   @@unique([schoolId, code])
   @@index([schoolId])
@@ -1174,4 +1205,146 @@ model AssignmentSubmission {
   @@unique([assignmentId, enrollmentId])
   @@index([schoolId, assignmentId])
   @@index([schoolId, studentId])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Exams & Results (Phase 6).
+//
+// Decisions:
+//   - Exams are class-scoped definitions: one `Exam` row per class (+ optional
+//     section). A "school-wide" exam (e.g. Term 1) is represented as one Exam
+//     row per participating class sharing `examTypeId`/`name`/session, grouped
+//     for reporting by (academicSessionId, examTypeId). Per-class `ExamSubject`
+//     lists mean the subject set is naturally class-specific, and marks entry /
+//     ranking / report cards are per-class operations.
+//   - `ExamSubject.maxMarks`/`passMarks` are per-subject; `examTypeId` reuses
+//     the existing tenant-scoped ExamType master; letters come from the existing
+//     GradingBand table. Neither config table changes in this phase.
+//   - `ExamResult` is the per-(exam, enrollment) aggregate and pins the
+//     `enrollmentId` snapshot (AttendanceRecord/HomeworkSubmission precedent):
+//     a student's later class/section/enrollment change never rewrites history.
+//     `rank` is server-computed and cached at finalize (PUBLISHED → FINAL).
+//   - `ExamMark` holds per-subject marks; every derived value (percentage,
+//     grade, isPass) is server-computed. Absent = no marks, excluded from
+//     totals and rank (never recorded as zero).
+//   - Lifecycle: DRAFT (config) → PUBLISHED (marks entry) → FINAL (frozen;
+//     aggregates/rank computed) → ARCHIVED (history). Correction path is
+//     reopen (FINAL → PUBLISHED) then re-finalize; timestamps are server-set.
+//   - Teacher ownership mirrors Tasks: a TEACHER actor manages/enters only
+//     exams/subjects covered by their TeacherSubject/TeacherClass rows, and
+//     marks entry is limited to the responsible teacher listed on ExamSubject.
+// ────────────────────────────────────────────────────────────────────────────
+
+model Exam {
+  id                String     @id @default(uuid())
+  schoolId          String
+  academicSessionId String
+  examTypeId        String
+  name              String
+  classId           String
+  sectionId         String?
+  startDate         DateTime   @db.Date
+  endDate           DateTime   @db.Date
+  status            ExamStatus @default(DRAFT)
+  publishedAt       DateTime?
+  finalizedAt       DateTime?
+  createdBy         String?
+  updatedBy         String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  school          School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicSession AcademicSession @relation(fields: [academicSessionId], references: [id], onDelete: Cascade)
+  examType        ExamType        @relation(fields: [examTypeId], references: [id], onDelete: Cascade)
+  class           Class           @relation(fields: [classId], references: [id], onDelete: Cascade)
+  section         Section?        @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  createdByUser   User?           @relation("ExamCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  updatedByUser   User?           @relation("ExamUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  subjects ExamSubject[]
+  results  ExamResult[]
+
+  @@unique([schoolId, academicSessionId, examTypeId, classId, sectionId], map: "exam_same_instance_unique")
+  @@index([schoolId, academicSessionId])
+  @@index([schoolId, classId, sectionId])
+  @@index([schoolId, status])
+}
+
+model ExamSubject {
+  id        String   @id @default(uuid())
+  examId    String
+  subjectId String
+  teacherId String
+  maxMarks  Decimal  @db.Decimal(7, 2)
+  passMarks Decimal  @db.Decimal(7, 2)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  exam    Exam    @relation(fields: [examId], references: [id], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  teacher Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  marks ExamMark[]
+
+  @@unique([examId, subjectId])
+  @@index([examId])
+  @@index([subjectId])
+  @@index([teacherId])
+}
+
+model ExamResult {
+  id             String    @id @default(uuid())
+  schoolId       String
+  examId         String
+  studentId      String
+  enrollmentId   String
+  totalObtained  Decimal?  @db.Decimal(7, 2)
+  totalMaxMarks  Decimal?  @db.Decimal(7, 2)
+  totalPercentage Decimal? @db.Decimal(5, 2)
+  grade          String?
+  isPass         Boolean?
+  rank           Int?
+  isComplete     Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  school     School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  exam       Exam              @relation(fields: [examId], references: [id], onDelete: Cascade)
+  student    Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  enrollment StudentEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  marks ExamMark[]
+
+  @@unique([examId, enrollmentId])
+  @@index([schoolId, examId])
+  @@index([schoolId, studentId])
+  @@index([examId, rank])
+}
+
+model ExamMark {
+  id            String    @id @default(uuid())
+  schoolId      String
+  examResultId  String
+  examSubjectId String
+  obtainedMarks Decimal?  @db.Decimal(7, 2)
+  isAbsent      Boolean   @default(false)
+  percentage    Decimal?  @db.Decimal(5, 2)
+  grade         String?
+  isPass        Boolean?
+  remarks       String?
+  enteredBy     String?
+  enteredAt     DateTime?
+  updatedBy     String?
+  updatedAt     DateTime  @updatedAt
+
+  school     School      @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  examResult ExamResult  @relation(fields: [examResultId], references: [id], onDelete: Cascade)
+  examSubject ExamSubject @relation(fields: [examSubjectId], references: [id], onDelete: Cascade)
+  enteredByUser User?    @relation("ExamMarkEnteredBy", fields: [enteredBy], references: [id], onDelete: SetNull)
+  updatedByUser User?    @relation("ExamMarkUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@unique([examResultId, examSubjectId])
+  @@index([schoolId, examSubjectId])
+  @@index([schoolId, examResultId])
 }

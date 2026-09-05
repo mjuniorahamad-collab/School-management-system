@@ -44,6 +44,28 @@ const SUBJECT_SEEDS: { code: string; name: string; sortOrder: number }[] = [
   { code: "CS", name: "Computer Science", sortOrder: 6 },
 ]
 
+const EXAM_TYPE_SEEDS: { code: string; name: string; sortOrder: number }[] = [
+  { code: "TERM_1", name: "Term 1 Examination", sortOrder: 1 },
+  { code: "TERM_2", name: "Term 2 Examination", sortOrder: 2 },
+  { code: "MIDTERM", name: "Midterm Examination", sortOrder: 3 },
+  { code: "FINAL", name: "Final Examination", sortOrder: 4 },
+]
+
+const GRADING_BAND_SEEDS: {
+  minPercent: number
+  maxPercent: number
+  grade: string
+  description: string
+  sortOrder: number
+}[] = [
+  { minPercent: 90, maxPercent: 100, grade: "A+", description: "Outstanding", sortOrder: 1 },
+  { minPercent: 80, maxPercent: 89, grade: "A", description: "Excellent", sortOrder: 2 },
+  { minPercent: 70, maxPercent: 79, grade: "B", description: "Good", sortOrder: 3 },
+  { minPercent: 60, maxPercent: 69, grade: "C", description: "Satisfactory", sortOrder: 4 },
+  { minPercent: 50, maxPercent: 59, grade: "D", description: "Pass", sortOrder: 5 },
+  { minPercent: 0, maxPercent: 49, grade: "F", description: "Fail", sortOrder: 6 },
+]
+
 interface GuardianSeed {
   name: string
   email: string
@@ -288,6 +310,36 @@ async function seedSubjects(schoolId: string): Promise<void> {
   }
 }
 
+/** Idempotent default exam types + grading bands for the seeded school (Phase 6). */
+async function seedExamsAndResultsDefaults(schoolId: string): Promise<void> {
+  for (const seed of EXAM_TYPE_SEEDS) {
+    await prisma.examType.upsert({
+      where: { schoolId_code: { schoolId, code: seed.code } },
+      update: { name: seed.name, sortOrder: seed.sortOrder },
+      create: { schoolId, code: seed.code, name: seed.name, sortOrder: seed.sortOrder },
+    })
+  }
+  for (const seed of GRADING_BAND_SEEDS) {
+    await prisma.gradingBand.upsert({
+      where: { schoolId_minPercent: { schoolId, minPercent: seed.minPercent } },
+      update: {
+        maxPercent: seed.maxPercent,
+        grade: seed.grade,
+        description: seed.description,
+        sortOrder: seed.sortOrder,
+      },
+      create: {
+        schoolId,
+        minPercent: seed.minPercent,
+        maxPercent: seed.maxPercent,
+        grade: seed.grade,
+        description: seed.description,
+        sortOrder: seed.sortOrder,
+      },
+    })
+  }
+}
+
 async function seedGuardians(schoolId: string): Promise<void> {
   const existing = await prisma.guardian.count({ where: { schoolId } })
   if (existing > 0) return
@@ -435,6 +487,7 @@ async function main(): Promise<void> {
 
   await seedAcademicStructure(school.id)
   await seedSubjects(school.id)
+  await seedExamsAndResultsDefaults(school.id)
   await seedGuardians(school.id)
   await seedStudents(
     school.id,
