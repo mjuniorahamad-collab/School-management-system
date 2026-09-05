@@ -23,6 +23,18 @@ export function buildReceiptNumber(year: number, sequence: number): string {
   return buildYearlyNumber(RECEIPT_PREFIX, year, sequence)
 }
 
+/** Fee invoice number format, e.g. `INV-2026-0001`. */
+export const INVOICE_PREFIX = "INV"
+export function buildInvoiceNumber(year: number, sequence: number): string {
+  return buildYearlyNumber(INVOICE_PREFIX, year, sequence)
+}
+
+/** Fee payment number format, e.g. `PAY-2026-0001`. */
+export const PAYMENT_PREFIX = "PAY"
+export function buildPaymentNumber(year: number, sequence: number): string {
+  return buildYearlyNumber(PAYMENT_PREFIX, year, sequence)
+}
+
 /** Admission application number format, e.g. `APP-2026-0001`. */
 export const ADMISSION_APPLICATION_PREFIX = "APP"
 export function buildAdmissionApplicationNumber(year: number, sequence: number): string {
