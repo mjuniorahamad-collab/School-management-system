@@ -1,3 +1,4 @@
+import { Banknote, Presentation, School, Users } from "lucide-react"
 import { PageContainer } from "@/components/layout/PageContainer"
 import { StatCard } from "@/components/dashboard/StatCard"
 import { AttendanceOverview } from "@/components/dashboard/AttendanceOverview"
@@ -11,6 +12,17 @@ import { FeeCollectionStatus } from "@/components/dashboard/FeeCollectionStatus"
 import { BirthdayStudents } from "@/components/dashboard/BirthdayStudents"
 import { RecentActivity } from "@/components/dashboard/RecentActivity"
 import { useDashboardStats } from "@/hooks/useDashboardData"
+import type { DashboardStatTone } from "@/types/dashboard"
+
+const STAT_PRESENTATION: Record<
+  string,
+  { icon: typeof Users; tone: DashboardStatTone }
+> = {
+  "total-students": { icon: Users, tone: "primary" },
+  "total-teachers": { icon: Presentation, tone: "emerald" },
+  "total-classes": { icon: School, tone: "sky" },
+  "fees-collection": { icon: Banknote, tone: "amber" },
+}
 
 export function DashboardPage() {
   const { data: stats, isPending, isError } = useDashboardStats()
@@ -27,7 +39,9 @@ export function DashboardPage() {
             </div>
           ))}
         {isError && <div className="sr-only">Could not load dashboard statistics.</div>}
-        {stats?.map((stat) => <StatCard key={stat.id} stat={stat} />)}
+        {stats?.map((stat) => (
+          <StatCard key={stat.id} stat={stat} presentation={STAT_PRESENTATION[stat.id]} />
+        ))}
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">

@@ -24,7 +24,7 @@ import { useFeeAnalytics } from "@/hooks/useDashboardData"
 import { useTheme } from "@/theme/useTheme"
 import { cn } from "@/lib/utils"
 import { formatINR, formatINRCompact } from "@/lib/format"
-import type { FeePeriod } from "@/types"
+import type { FeePeriod } from "@/types/dashboard"
 
 const PERIODS: { value: FeePeriod; label: string }[] = [
   { value: "month", label: "This Month" },
@@ -64,7 +64,7 @@ export function FeesCollectionCard({ className }: FeesCollectionCardProps) {
       <CardHeader>
         <CardTitle>Fees Collection</CardTitle>
         <CardDescription data-slot="card-description">
-          Collection trend — illustrative figures
+          Collection trend
         </CardDescription>
         <CardAction>
           <Tabs value={period} onValueChange={(value) => setPeriod(value as FeePeriod)}>

@@ -14,9 +14,9 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useImportantNotices } from "@/hooks/useDashboardData"
 import { cn } from "@/lib/utils"
 import { timeAgo } from "@/lib/format"
-import type { NoticePriority } from "@/types"
+import type { DashboardNoticePriority } from "@/types/dashboard"
 
-const priorityMeta: Record<NoticePriority, { label: string; dot: string }> = {
+const priorityMeta: Record<DashboardNoticePriority, { label: string; dot: string }> = {
   high: { label: "High priority", dot: "bg-red-500" },
   medium: { label: "Medium priority", dot: "bg-amber-500" },
   low: { label: "Low priority", dot: "bg-slate-400" },

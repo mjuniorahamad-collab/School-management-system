@@ -14,7 +14,7 @@ import { ChartTooltip } from "@/components/charts/ChartTooltip"
 import { useAttendance } from "@/hooks/useDashboardData"
 import { cn } from "@/lib/utils"
 import { formatPercent } from "@/lib/format"
-import type { AttendancePeriod } from "@/types"
+import type { AttendancePeriod } from "@/types/dashboard"
 
 const PERIODS: { value: AttendancePeriod; label: string }[] = [
   { value: "today", label: "Today" },
@@ -50,7 +50,7 @@ export function AttendanceOverview({ className }: AttendanceOverviewProps) {
       <CardHeader>
         <CardTitle>Attendance Overview</CardTitle>
         <CardDescription data-slot="card-description">
-          {PERIODS.find((option) => option.value === period)?.label} snapshot — illustrative figures
+          {PERIODS.find((option) => option.value === period)?.label} snapshot
         </CardDescription>
         <CardAction>
           <Tabs value={period} onValueChange={(value) => setPeriod(value as AttendancePeriod)}>
@@ -82,7 +82,13 @@ export function AttendanceOverview({ className }: AttendanceOverviewProps) {
           </div>
         )}
 
-        {data && (
+        {data && data.total === 0 && (
+          <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed py-10 text-sm text-muted-foreground">
+            No attendance records in this period yet.
+          </div>
+        )}
+
+        {data && data.total > 0 && (
           <>
             <div className="relative mx-auto my-2 h-48 w-full max-w-60">
               <ResponsiveContainer width="100%" height="100%">

@@ -4,9 +4,10 @@ A premium, production-oriented School Management System for a real school client
 (current placeholder brand: **Bright Future International School**).
 Completed: **engineering foundation** — premium admin dashboard, Express API, a real
 authentication + RBAC layer (DB-backed login, opaque refresh/access cookie sessions,
-roles + permissions), and the first end-to-end domain module (**Students**: directory, academic placement,
-guardians, CSV export). Additional domain modules come next, each
-with its own written specification.
+roles + permissions), the first end-to-end domain module (**Students**: directory, academic placement,
+guardians, CSV export), and the **Dashboard real-data milestone** (the home screen now reads
+tenant-scoped, read-only aggregations under `/api/v1/dashboard`). Additional domain
+modules come next, each with its own written specification.
 
 ## Stack
 
@@ -35,7 +36,7 @@ src/            Frontend
   pages/        Route pages (incl. LoginPage)
   data/         TEMPORARY mock data (clearly labeled, never in UI components)
   services/     Service facade — components talk to this, never to mock data
-                (authService.ts → real API; dashboardService → mock until live)
+                (authService → real API · dashboardService → real API)
   hooks/        Data/composition hooks
   types/        Domain types + API envelope types (src/types/api.ts)
   lib/          Utilities (formatting, cn, apiClient.ts)
@@ -63,14 +64,25 @@ permissions/ Canonical permission catalog (98 codes, 11 roles)
 
 ```
 UI components
-   └─ hooks → services (authService → real API · dashboardService → mock)
-         └─ data layer (mock now → REST API + database per module)
+   └─ hooks → services (authService · dashboardService → real REST API)
+         └─ data layer (real DB rows via /api/v1 · only out-of-scope
+            header/command-palette mocks remain in src/data)
 ```
 
 Components never import mock data or call `fetch` directly. Module data flows
-through `src/lib/apiClient.ts` → `/api/v1` once a real endpoint exists; the
-dashboard keeps its validated mock service until each module gains a real endpoint
-—— never wrapped in fake HTTP.
+through `src/lib/apiClient.ts` → `/api/v1` once a real endpoint exists. Remaining
+`src/data` mocks (`searchableStudents` for the command palette, header
+notifications/messages) are explicitly labeled TEMPORARY MOCK and converted when
+their features gain real endpoints — never wrapped in fake HTTP.
+
+## Dashboard real-data (Insights Foundation)
+
+The home screen is powered by real, tenant-scoped, read-only aggregations under
+`/api/v1/dashboard` (guarded by `dashboard:view`): headline stats with creation-based
+trends, attendance today/week/month, fee analytics + active-session fee status,
+top-performing classes (ranked within one comparable finalized-exam context),
+recent students, upcoming events, published notices, recent creates, and birthdays.
+No schema changes were required. Spec: [`docs/dashboard-real-data.md`](docs/dashboard-real-data.md).
 
 ## Students module (implemented)
 
@@ -169,7 +181,7 @@ check: `GET http://localhost:4000/api/v1/health`.
 ### Tests against a real database
 
 `npm test` runs DB-free by default. To also run the DB-backed integration tests
-(students, auth), create a dedicated test database and export its URL:
+(students, dashboard, auth, …), create a dedicated test database and export its URL:
 
 ```
 createdb school_management_test   # your usual tooling

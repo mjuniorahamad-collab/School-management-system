@@ -28,6 +28,7 @@ import { feeStructuresRouter } from "../modules/fee-structures/fee-structure.rou
 import { feeInvoicesRouter } from "../modules/fee-invoices/fee-invoice.route.js"
 import { paymentsRouter } from "../modules/payments/payment.route.js"
 import { receiptsRouter } from "../modules/receipts/receipt.route.js"
+import { dashboardRouter } from "../modules/dashboard/dashboard.route.js"
 
 // Feature modules register their routers here (e.g. apiRouter.use(studentsRouter)).
 export const apiRouter: Router = Router()
@@ -61,3 +62,4 @@ apiRouter.use("/fees/structures", feeStructuresRouter)
 apiRouter.use("/fees/invoices", feeInvoicesRouter)
 apiRouter.use("/payments", paymentsRouter)
 apiRouter.use("/receipts", receiptsRouter)
+apiRouter.use("/dashboard", dashboardRouter)

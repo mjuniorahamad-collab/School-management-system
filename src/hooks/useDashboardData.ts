@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { dashboardService } from "@/services/dashboardService"
-import type { AttendancePeriod, FeePeriod } from "@/types"
+import type { AttendancePeriod, FeePeriod } from "@/types/dashboard"
 
 const QUERY_KEYS = {
   stats: ["dashboard", "stats"] as const,
@@ -9,7 +9,6 @@ const QUERY_KEYS = {
   feeStatus: ["dashboard", "fee-status"] as const,
   recentStudents: ["dashboard", "recent-students"] as const,
   topClasses: ["dashboard", "top-classes"] as const,
-  quickActions: ["dashboard", "quick-actions"] as const,
   events: ["dashboard", "events"] as const,
   notices: ["dashboard", "notices"] as const,
   activities: ["dashboard", "activities"] as const,
@@ -52,13 +51,6 @@ export function useTopPerformingClasses() {
   return useQuery({
     queryKey: QUERY_KEYS.topClasses,
     queryFn: dashboardService.getTopPerformingClasses,
-  })
-}
-
-export function useQuickActions() {
-  return useQuery({
-    queryKey: QUERY_KEYS.quickActions,
-    queryFn: dashboardService.getQuickActions,
   })
 }
 

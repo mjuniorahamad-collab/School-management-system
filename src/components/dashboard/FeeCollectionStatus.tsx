@@ -43,7 +43,7 @@ export function FeeCollectionStatus({ className }: FeeCollectionStatusProps) {
           </div>
         )}
 
-        {data && (
+        {data && data.total > 0 && (
           <div className="flex flex-1 flex-col justify-center gap-4">
             <div>
               <div className="flex items-baseline gap-2">
@@ -77,6 +77,12 @@ export function FeeCollectionStatus({ className }: FeeCollectionStatusProps) {
                 <dd className="mt-1 text-sm font-semibold tabular-nums">{formatINR(data.total)}</dd>
               </div>
             </dl>
+          </div>
+        )}
+
+        {data && data.total === 0 && (
+          <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed py-10 text-sm text-muted-foreground">
+            No fee invoices for the active session yet.
           </div>
         )}
       </CardContent>

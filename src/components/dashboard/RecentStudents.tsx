@@ -10,11 +10,38 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { StatusBadge } from "@/components/shared/StatusBadge"
 import { StudentAvatar } from "@/components/shared/StudentAvatar"
 import { useRecentStudents } from "@/hooks/useDashboardData"
 import { cn } from "@/lib/utils"
+import type { DashboardRecentStudent } from "@/types/dashboard"
+
+const studentStatusMeta: Record<
+  DashboardRecentStudent["status"],
+  { label: string; className: string }
+> = {
+  ACTIVE: {
+    label: "Active",
+    className: "bg-emerald-50 text-emerald-700 border-transparent dark:bg-emerald-500/15 dark:text-emerald-300",
+  },
+  INACTIVE: {
+    label: "Inactive",
+    className: "bg-slate-200 text-slate-700 border-transparent dark:bg-slate-500/15 dark:text-slate-300",
+  },
+  TRANSFERRED: {
+    label: "Transferred",
+    className: "bg-sky-50 text-sky-700 border-transparent dark:bg-sky-500/15 dark:text-sky-300",
+  },
+  WITHDRAWN: {
+    label: "Withdrawn",
+    className: "bg-amber-50 text-amber-700 border-transparent dark:bg-amber-500/15 dark:text-amber-300",
+  },
+  GRADUATED: {
+    label: "Graduated",
+    className: "bg-indigo-50 text-indigo-700 border-transparent dark:bg-indigo-500/15 dark:text-indigo-300",
+  },
+}
 
 interface RecentStudentsProps {
   className?: string
@@ -67,7 +94,13 @@ export function RecentStudents({ className }: RecentStudentsProps) {
                     Class {student.studentClass} · {student.section}
                   </p>
                 </div>
-                <StatusBadge status={student.status} />
+                <Badge variant="secondary" className={`gap-1.5 font-medium ${studentStatusMeta[student.status].className}`}>
+                  <span
+                    className="size-1.5 rounded-full bg-current opacity-60"
+                    aria-hidden="true"
+                  />
+                  {studentStatusMeta[student.status].label}
+                </Badge>
               </li>
             ))}
           </ul>

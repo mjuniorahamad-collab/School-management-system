@@ -15,9 +15,9 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useRecentActivities } from "@/hooks/useDashboardData"
 import { cn } from "@/lib/utils"
 import { timeAgo } from "@/lib/format"
-import type { ActivityTone } from "@/types"
+import type { DashboardActivityTone } from "@/types/dashboard"
 
-const toneIcon: Record<ActivityTone, { icon: typeof Info; className: string }> = {
+const toneIcon: Record<DashboardActivityTone, { icon: typeof Info; className: string }> = {
   success: { icon: CircleCheck, className: "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300" },
   info: { icon: Info, className: "bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-300" },
   warning: { icon: CircleAlert, className: "bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300" },

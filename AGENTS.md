@@ -46,6 +46,12 @@ Completed:
   per-session enrollment placement, guardians, status lifecycle, CSV export,
   RBAC-guarded REST under `/api/v1/students`, full frontend, unit + DB-backed
   integration tests.
+- Dashboard real-data ("Insights Foundation"): the dashboard now reads real,
+  tenant-scoped, read-only aggregations under `/api/v1/dashboard` (stats,
+  attendance, fee analytics + active-session fee status, top-performing classes,
+  recent students, events, notices, activity, birthdays) guarded by
+  `dashboard:view`; dashboard mock files removed (spec in
+  `docs/dashboard-real-data.md`).
 - Testing: vitest + supertest (DB-free unit tests always run; DB-backed
   integration suites opt in via `TEST_DATABASE_URL`).
 
@@ -78,9 +84,10 @@ Layered, dependency flows downward only:
 `types → data (mock) → services (facade) → hooks → components → pages → routes`
 
 - Components NEVER import `src/data` directly and NEVER call `fetch`.
-- `src/services/*` is the single data seam. The dashboard service currently resolves
-  mock data; future modules call the REST API through `src/lib/apiClient.ts`. When a
-  real endpoint exists, swap a method's implementation — never fake an API layer.
+- `src/services/*` is the single data seam. The dashboard service resolves real
+  DB-backed data through `@/lib/apiClient.ts`; other modules follow the same path
+  once their real endpoints exist. Never call `fetch` from components and never
+  fake an API layer.
 - `src/routes/navigation.ts` is the single source of truth for navigation and route
   generation. Unimplemented modules render `ModulePlaceholderPage`.
 - Protected baseline: the completed dashboard and `src/components/ui/*` are stable;
@@ -236,6 +243,12 @@ Fresh-clone setup:
 - Do not extend mock data into new modules. When a module has a real endpoint, its
   data comes from the API.
 - Mock timestamps are date-anchored; keep them moving/relative-safe.
+- The dashboard milestone mocks were removed with the real-data conversion. The
+  only remaining dashboard-adjacent mocks are intentionally out-of-scope providers:
+  `src/data/students.ts` → `searchableStudents` (global command palette) and
+  `src/data/notifications.ts` (header), plus `moduleMeta.ts`/`messages.ts` —
+  each labeled TEMPORARY MOCK, each consumed only through its service/hook seam.
+  Convert these per-feature when their real endpoints exist; never extend them.
 
 ## 17. Error-handling rules
 

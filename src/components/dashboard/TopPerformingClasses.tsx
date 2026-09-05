@@ -28,13 +28,17 @@ interface TopPerformingClassesProps {
 
 export function TopPerformingClasses({ className }: TopPerformingClassesProps) {
   const { data, isPending, isError } = useTopPerformingClasses()
+  const classes = data?.classes ?? []
+  const context = data?.context
 
   return (
     <Card className={cn("flex h-full flex-col", className)}>
       <CardHeader>
         <CardTitle>Top Performing Classes</CardTitle>
         <CardDescription data-slot="card-description">
-          Average score in the latest term
+          {context
+            ? `${context.examName ?? "Latest exam"} · ${context.academicSessionName}`
+            : "Average score in a comparable finalized exam"}
         </CardDescription>
         <CardAction>
           <Button asChild variant="ghost" size="sm">
@@ -64,9 +68,15 @@ export function TopPerformingClasses({ className }: TopPerformingClassesProps) {
           </div>
         )}
 
-        {data && (
+        {data && classes.length === 0 && (
+          <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed py-10 text-sm text-muted-foreground">
+            No comparable finalized exam yet.
+          </div>
+        )}
+
+        {classes.length > 0 && (
           <ul className="divide-y">
-            {data.map((entry) => (
+            {classes.map((entry) => (
               <li key={entry.rank} className="flex items-center gap-3 py-3">
                 <span
                   className={cn(

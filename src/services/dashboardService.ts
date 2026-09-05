@@ -1,86 +1,70 @@
-import { attendanceData } from "@/data/attendance"
-import { recentActivities } from "@/data/activities"
-import { topPerformingClasses } from "@/data/classes"
-import {
-  birthdayStudents,
-  dashboardStats,
-  feeCollectionStatus,
-} from "@/data/dashboard"
-import { upcomingEvents } from "@/data/events"
-import { feeAnalyticsData } from "@/data/fees"
-import { importantNotices } from "@/data/notices"
-import { quickActions } from "@/data/quickActions"
-import { recentStudents } from "@/data/students"
+import { api } from "@/lib/apiClient"
 import type {
-  Activity,
   AttendancePeriod,
-  AttendanceSummary,
-  BirthdayStudent,
-  ClassPerformance,
-  DashboardStat,
-  FeeAnalytics,
-  FeeCollectionStatus,
+  DashboardActivity,
+  DashboardAttendance,
+  DashboardBirthdayStudent,
+  DashboardFeeAnalytics,
+  DashboardFeeCollectionStatus,
+  DashboardNotice,
+  DashboardRecentStudent,
+  DashboardStatItem,
+  DashboardTopClasses,
+  DashboardUpcomingEvent,
   FeePeriod,
-  Notice,
-  QuickAction,
-  SchoolEvent,
-  Student,
-} from "@/types"
+} from "@/types/dashboard"
 
-// Service facade — the ONLY data entry point used by UI components and hooks.
-//
-// CURRENT STATE: every method resolves TEMPORARY mock data defined under src/data.
-// FUTURE STATE: these methods will call the REST API (fetch) without changing any
-// UI code. Components must never import src/data directly.
+// Data seam for the Dashboard module. Every method hits the read-only REST
+// aggregation API through the shared apiClient.
 
-const SIMULATED_LATENCY_MS = 260
-
-function delay<T>(value: T, ms = SIMULATED_LATENCY_MS): Promise<T> {
-  return new Promise((resolve) => setTimeout(() => resolve(value), ms))
+function queryString(params: Record<string, string>): string {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    search.set(key, value)
+  }
+  return search.toString()
 }
 
 export const dashboardService = {
-  getStats(): Promise<DashboardStat[]> {
-    return delay(dashboardStats)
+  getStats(): Promise<DashboardStatItem[]> {
+    return api
+      .get<{ stats: DashboardStatItem[] }>("/dashboard/stats")
+      .then((response) => response.stats)
   },
 
-  getAttendance(period: AttendancePeriod): Promise<AttendanceSummary> {
-    return delay(attendanceData[period])
+  getAttendance(period: AttendancePeriod): Promise<DashboardAttendance> {
+    return api.get<DashboardAttendance>(`/dashboard/attendance?${queryString({ period })}`)
   },
 
-  getFeeAnalytics(period: FeePeriod): Promise<FeeAnalytics> {
-    return delay(feeAnalyticsData[period])
+  getFeeAnalytics(period: FeePeriod): Promise<DashboardFeeAnalytics> {
+    return api.get<DashboardFeeAnalytics>(`/dashboard/fees?${queryString({ period })}`)
   },
 
-  getFeeCollectionStatus(): Promise<FeeCollectionStatus> {
-    return delay(feeCollectionStatus)
+  getFeeCollectionStatus(): Promise<DashboardFeeCollectionStatus> {
+    return api.get<DashboardFeeCollectionStatus>("/dashboard/fee-status")
   },
 
-  getRecentStudents(): Promise<Student[]> {
-    return delay(recentStudents)
+  getRecentStudents(): Promise<DashboardRecentStudent[]> {
+    return api.get<DashboardRecentStudent[]>("/dashboard/recent-students")
   },
 
-  getTopPerformingClasses(): Promise<ClassPerformance[]> {
-    return delay(topPerformingClasses)
+  getTopPerformingClasses(): Promise<DashboardTopClasses> {
+    return api.get<DashboardTopClasses>("/dashboard/top-classes")
   },
 
-  getQuickActions(): Promise<QuickAction[]> {
-    return delay(quickActions, 40)
+  getUpcomingEvents(): Promise<DashboardUpcomingEvent[]> {
+    return api.get<DashboardUpcomingEvent[]>("/dashboard/events")
   },
 
-  getUpcomingEvents(): Promise<SchoolEvent[]> {
-    return delay(upcomingEvents)
+  getImportantNotices(): Promise<DashboardNotice[]> {
+    return api.get<DashboardNotice[]>("/dashboard/notices")
   },
 
-  getImportantNotices(): Promise<Notice[]> {
-    return delay(importantNotices)
+  getRecentActivities(): Promise<DashboardActivity[]> {
+    return api.get<DashboardActivity[]>("/dashboard/activity")
   },
 
-  getRecentActivities(): Promise<Activity[]> {
-    return delay(recentActivities)
-  },
-
-  getBirthdayStudents(): Promise<BirthdayStudent[]> {
-    return delay(birthdayStudents)
+  getBirthdayStudents(): Promise<DashboardBirthdayStudent[]> {
+    return api.get<DashboardBirthdayStudent[]>("/dashboard/birthdays")
   },
 }
