@@ -67,13 +67,6 @@ export const moduleMeta: Record<string, ModuleMeta> = {
     purpose: "Predefined and custom reports across academic and financial data.",
     futureConnection: "Connects to the Reports API and report definitions in the database.",
   },
-  "/users": {
-    path: "/users",
-    label: "Users & Roles",
-    status: "planned",
-    purpose: "User accounts, roles, and permission assignments.",
-    futureConnection: "Connects to the Users API, roles and permissions tables in the database.",
-  },
   "/backups": {
     path: "/backups",
     label: "Backups",
