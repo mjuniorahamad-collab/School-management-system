@@ -2,6 +2,8 @@ import { Prisma } from "@prisma/client"
 import type { Guardian } from "@prisma/client"
 import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import type { AuthUser } from "../../types/auth.js"
+import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import { buildAdmissionNumber } from "./admission-number.js"
 import { normalizeGuardianPrimaries, resolveActiveSession, resolveClassAndSection } from "./student-rules.js"
 import type { CreateStudentInput, GuardianInput, ListStudentsQuery, UpdateStudentInput } from "./student.schema.js"
@@ -76,7 +78,7 @@ export async function getStudentById(id: string, schoolId: string): Promise<Stud
 export async function createStudent(
   input: CreateStudentInput,
   schoolId: string,
-  actorId: string,
+  actor: AuthUser,
 ): Promise<StudentDetail> {
   const prisma = await requirePrisma()
   const status = input.status ?? "ACTIVE"
@@ -86,6 +88,7 @@ export async function createStudent(
 
   const session = await resolveActiveSession(prisma, schoolId, input.academicSessionId)
   const { classId, sectionId } = await resolveClassAndSection(prisma, schoolId, input.classId, input.sectionId)
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
   try {
     const created = await prisma.$transaction(async (tx) => {
@@ -119,8 +122,8 @@ export async function createStudent(
           admissionDate,
           emergencyContactName: input.emergencyContactName ?? null,
           emergencyContactPhone: input.emergencyContactPhone ?? null,
-          createdBy: actorId,
-          updatedBy: actorId,
+          createdBy: actor.id,
+          updatedBy: actor.id,
         },
       })
 
@@ -147,6 +150,26 @@ export async function createStudent(
         })),
       })
 
+      await recordAudit(tx, {
+        schoolId,
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: "CREATE",
+        entityType: "STUDENT",
+        entityId: student.id,
+        summary: `Admitted student ${student.firstName} ${student.lastName ?? ""} (${admissionNumber})`,
+        metadata: {
+          admissionNumber,
+          status,
+          academicSessionId: session.id,
+          classId,
+          sectionId: sectionId ?? null,
+          guardianCount: guardians.length,
+        },
+      })
+
       return student
     })
 
@@ -163,7 +186,7 @@ export async function updateStudent(
   id: string,
   input: UpdateStudentInput,
   schoolId: string,
-  actorId: string,
+  actor: AuthUser,
 ): Promise<StudentDetail> {
   const prisma = await requirePrisma()
   await assertStudentExists(prisma, id, schoolId)
@@ -173,6 +196,8 @@ export async function updateStudent(
   if (wantsPlacementChange && classId === undefined) {
     throw badRequestError("Changing placement requires a class")
   }
+
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
   await prisma.$transaction(async (tx) => {
     if (wantsPlacementChange) {
@@ -190,7 +215,7 @@ export async function updateStudent(
       })
     }
 
-    const data: Prisma.StudentUncheckedUpdateInput = { updatedBy: actorId }
+    const data: Prisma.StudentUncheckedUpdateInput = { updatedBy: actor.id }
     const scalarFields = [
       "firstName",
       "middleName",
@@ -257,6 +282,34 @@ export async function updateStudent(
         })),
       })
     }
+
+    const diffFields: { field: string; before?: unknown; after?: unknown }[] = []
+    if (input.status) {
+      diffFields.push({ field: "status", before: undefined, after: input.status })
+    }
+    if (wantsPlacementChange) {
+      diffFields.push({
+        field: "placement",
+        after: { classId: classId!, sectionId: sectionId ?? null },
+      })
+    }
+    if (input.guardians) {
+      diffFields.push({ field: "guardians", after: { count: input.guardians.length } })
+    }
+    await recordAudit(tx, {
+      schoolId,
+      actorId: auditActor.id,
+      actorName: auditActor.name,
+      actorRole: auditActor.role,
+      actorEmail: auditActor.email,
+      action: input.status ? "STATUS_CHANGE" : "UPDATE",
+      entityType: "STUDENT",
+      entityId: id,
+      summary: input.status
+        ? `Changed student status to ${input.status}`
+        : `Updated student record`,
+      diff: diffFields.length > 0 ? { fields: diffFields } : null,
+    })
   })
 
   return getStudentById(id, schoolId)

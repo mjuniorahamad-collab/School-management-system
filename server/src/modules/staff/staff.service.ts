@@ -1,6 +1,8 @@
 import { Prisma } from "@prisma/client"
 import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import type { AuthUser } from "../../types/auth.js"
+import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import type { CreateStaffInput, ListStaffsQuery, UpdateStaffInput } from "./staff.schema.js"
 import { mapStaffDetail, mapStaffListItem } from "./staff.mapper.js"
 import type { StaffDetail, StaffListResult, StaffMeta } from "./staff.types.js"
@@ -73,8 +75,10 @@ export async function getStaffMeta(schoolId: string): Promise<StaffMeta> {
 export async function createStaff(
   input: CreateStaffInput,
   schoolId: string,
+  actor: AuthUser,
 ): Promise<StaffDetail> {
   const prisma = await requirePrisma()
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
   try {
     return await prisma.$transaction(async (tx) => {
@@ -113,6 +117,23 @@ export async function createStaff(
         },
       })
 
+      await recordAudit(tx, {
+        schoolId,
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: "CREATE",
+        entityType: "STAFF",
+        entityId: staff.id,
+        summary: `Added staff member ${staff.firstName} ${staff.lastName ?? ""} (${employeeId})`,
+        metadata: {
+          employeeId,
+          department: staff.department,
+          designation: staff.designation,
+        },
+      })
+
       return mapStaffDetail(staff)
     })
   } catch (error) {
@@ -127,10 +148,12 @@ export async function updateStaff(
   id: string,
   input: UpdateStaffInput,
   schoolId: string,
+  actor: AuthUser,
 ): Promise<StaffDetail> {
   const prisma = await requirePrisma()
   const existing = await prisma.staff.findFirst({ where: { id, schoolId }, select: { id: true } })
   if (!existing) throw notFoundError("Staff member not found")
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
   const data: Prisma.StaffUncheckedUpdateInput = {}
   if (input.firstName !== undefined) data.firstName = input.firstName
@@ -153,7 +176,39 @@ export async function updateStaff(
   if (input.emergencyContactPhone !== undefined) data.emergencyContactPhone = input.emergencyContactPhone ?? null
 
   try {
-    const updated = await prisma.staff.update({ where: { id }, data })
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.staff.update({ where: { id }, data })
+
+      await recordAudit(tx, {
+        schoolId,
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: input.status !== undefined ? "STATUS_CHANGE" : "UPDATE",
+        entityType: "STAFF",
+        entityId: id,
+        summary:
+          input.status !== undefined
+            ? `Changed staff status to ${input.status}`
+            : "Updated staff record",
+        diff: {
+          fields: [
+            ...(input.status !== undefined
+              ? [{ field: "status", before: undefined, after: input.status }]
+              : []),
+            ...(input.department !== undefined
+              ? [{ field: "department", after: input.department }]
+              : []),
+            ...(input.designation !== undefined
+              ? [{ field: "designation", after: input.designation }]
+              : []),
+          ],
+        },
+      })
+
+      return row
+    })
     return mapStaffDetail(updated)
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {

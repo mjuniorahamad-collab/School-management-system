@@ -34,6 +34,9 @@ export default defineConfig({
     environment: "node",
     include: ["server/tests/**/*.test.ts", "src/**/*.test.ts"],
     env: integrationEnv,
+    // The audit-logs suite runs `prisma migrate deploy` on a cold test DB in
+    // beforeAll, which can exceed the default 10s hook timeout.
+    hookTimeout: 120_000,
     // The DB-backed integration suites share a single TEST_DATABASE_URL and each
     // reset the tables in beforeAll; run files serially to avoid cross-file
     // races on the shared schema.

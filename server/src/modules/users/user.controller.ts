@@ -32,8 +32,8 @@ export const getUserHandler: RequestHandler = async (req, res) => {
 
 export const createUserHandler: RequestHandler = async (req, res) => {
   const input = parseWithZod(createUserSchema, req.body, "Invalid user data")
-  const { schoolId } = requireAuth(req)
-  const created = await userService.createUser(input, schoolId)
+  const { schoolId, auth } = requireAuth(req)
+  const created = await userService.createUser(input, schoolId, auth)
   res.status(201).json(ok(created))
 }
 

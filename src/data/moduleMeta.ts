@@ -74,11 +74,4 @@ export const moduleMeta: Record<string, ModuleMeta> = {
     purpose: "Automatic and on-demand database backups with restore.",
     futureConnection: "Connects to the Backup API and backup job records in the database.",
   },
-  "/audit-logs": {
-    path: "/audit-logs",
-    label: "Audit Logs",
-    status: "planned",
-    purpose: "Immutable trail of administrative actions for compliance.",
-    futureConnection: "Connects to the Audit Logs API and audit log table in the database.",
-  },
 }

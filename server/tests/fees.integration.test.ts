@@ -597,6 +597,43 @@ const payments = await adminAgent.get("/api/v1/payments")
     })
   })
 
+  describe("financial mutations write a transactional audit trail", () => {
+    it("records RECORD_PAYMENT rows attributed to the acting admin", async () => {
+      const rows = await prisma.auditLog.findMany({
+        where: { schoolId: fixtures.schoolId, action: "RECORD_PAYMENT", entityType: "FEE_PAYMENT" },
+      })
+      expect(rows.length).toBeGreaterThan(0)
+      for (const row of rows) {
+        expect(row.actorName).toBe("Fees Admin")
+        expect(row.actorRole).toBe(SUPER_ADMIN_ROLE)
+        expect(row.entityId).toMatch(/^[0-9a-f-]{36}$/)
+        const metadata = row.metadata as { amount?: number; paymentNumber?: string }
+        expect(metadata.amount).toBe(500)
+        expect(metadata.paymentNumber).toBeTruthy()
+      }
+    })
+
+    it("records ISSUE_RECEIPT rows with the receipt number", async () => {
+      const rows = await prisma.auditLog.findMany({
+        where: { schoolId: fixtures.schoolId, action: "ISSUE_RECEIPT", entityType: "FEE_RECEIPT" },
+      })
+      expect(rows.length).toBeGreaterThan(0)
+      for (const row of rows) {
+        expect(row.entityId).toMatch(/^[0-9a-f-]{36}$/)
+        const metadata = row.metadata as { receiptNumber?: string; balanceAfter?: number }
+        expect(metadata.receiptNumber).toBeTruthy()
+        expect(typeof metadata.balanceAfter).toBe("number")
+      }
+    })
+
+    it("does not audit denied or rejected payment attempts", async () => {
+      const viewerRows = await prisma.auditLog.findMany({
+        where: { schoolId: fixtures.schoolId, actorName: "Fees Viewer", entityType: "FEE_PAYMENT" },
+      })
+      expect(viewerRows.length).toBe(0)
+    })
+  })
+
   describe("schema presence (database-free within suite)", () => {
     it("exposes the phase 7B models on the generated client", () => {
       expect(Object.keys(Prisma.FeePaymentScalarFieldEnum)).toEqual(
@@ -626,6 +663,7 @@ const payments = await adminAgent.get("/api/v1/payments")
 })
 
 async function resetAllTables(prisma: PrismaClient): Promise<void> {
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "AuditLog" CASCADE')
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeReceipt" CASCADE')
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeePayment" CASCADE')
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeInstallment" CASCADE')

@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client"
 import { badRequestError, forbiddenError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import { recordAudit } from "../audit-logs/audit-log.service.js"
 import {
   assertTeacherAssignmentFit,
   isTaskAdminActor,
@@ -34,6 +35,8 @@ interface ActorContext {
   schoolId: string
   userId: string
   roles: readonly string[]
+  name: string
+  email: string
 }
 
 async function requirePrisma(): Promise<PrismaClient> {
@@ -138,23 +141,42 @@ export async function createHomework(
   })
 
   const status = input.status ?? "DRAFT"
-  const created = await prisma.homework.create({
-    data: {
+  const created = await prisma.$transaction(async (tx) => {
+    const row = await tx.homework.create({
+      data: {
+        schoolId: actor.schoolId,
+        academicSessionId: input.academicSessionId,
+        classId: input.classId,
+        sectionId,
+        subjectId: input.subjectId,
+        teacherId: input.teacherId,
+        title: input.title,
+        instructions: input.instructions ?? null,
+        dueDate: new Date(input.dueDate),
+        status,
+        publishedAt: status === "PUBLISHED" ? new Date() : null,
+        createdBy: actor.userId,
+        updatedBy: actor.userId,
+      },
+      include: DETAIL_INCLUDE,
+    })
+
+    await recordAudit(tx, {
       schoolId: actor.schoolId,
-      academicSessionId: input.academicSessionId,
-      classId: input.classId,
-      sectionId,
-      subjectId: input.subjectId,
-      teacherId: input.teacherId,
-      title: input.title,
-      instructions: input.instructions ?? null,
-      dueDate: new Date(input.dueDate),
-      status,
-      publishedAt: status === "PUBLISHED" ? new Date() : null,
-      createdBy: actor.userId,
-      updatedBy: actor.userId,
-    },
-    include: DETAIL_INCLUDE,
+      actorId: actor.userId,
+      actorName: actor.name,
+      actorRole: actor.roles[0] ?? "USER",
+      actorEmail: actor.email,
+      action: status === "PUBLISHED" ? "PUBLISH" : "CREATE",
+      entityType: "HOMEWORK",
+      entityId: row.id,
+      summary: status === "PUBLISHED"
+        ? `Published homework "${row.title}"`
+        : `Created homework "${row.title}"`,
+      metadata: { status },
+    })
+
+    return row
   })
   return toHomeworkListItem(created, todayLocalDate())
 }
@@ -220,7 +242,35 @@ export async function updateHomework(
   data.status = nextStatus
   data.publishedAt = publishedAt
 
-  const updated = await prisma.homework.update({ where: { id }, data, include: DETAIL_INCLUDE })
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.homework.update({ where: { id }, data, include: DETAIL_INCLUDE })
+
+    const publishedNow = nextStatus === "PUBLISHED" && existing.status !== "PUBLISHED"
+    const diffFields: { field: string; before?: unknown; after?: unknown }[] = []
+    if (nextStatus !== existing.status) {
+      diffFields.push({ field: "status", before: existing.status, after: nextStatus })
+    }
+    if (input.title !== undefined) diffFields.push({ field: "title", after: input.title })
+
+    await recordAudit(tx, {
+      schoolId: actor.schoolId,
+      actorId: actor.userId,
+      actorName: actor.name,
+      actorRole: actor.roles[0] ?? "USER",
+      actorEmail: actor.email,
+      action: publishedNow ? "PUBLISH" : nextStatus !== existing.status ? "STATUS_CHANGE" : "UPDATE",
+      entityType: "HOMEWORK",
+      entityId: id,
+      summary: publishedNow
+        ? `Published homework "${row.title}"`
+        : nextStatus !== existing.status
+          ? `Changed homework status to ${nextStatus}`
+          : `Updated homework "${row.title}"`,
+      diff: diffFields.length > 0 ? { fields: diffFields } : null,
+    })
+
+    return row
+  })
   return toHomeworkListItem(updated, todayLocalDate())
 }
 
@@ -245,7 +295,20 @@ export async function deleteHomework(
     throw forbiddenError("Teachers may only delete their own homework")
   }
 
-  await prisma.homework.delete({ where: { id } })
+  await prisma.$transaction(async (tx) => {
+    await tx.homework.delete({ where: { id } })
+    await recordAudit(tx, {
+      schoolId: actor.schoolId,
+      actorId: actor.userId,
+      actorName: actor.name,
+      actorRole: actor.roles[0] ?? "USER",
+      actorEmail: actor.email,
+      action: "DELETE",
+      entityType: "HOMEWORK",
+      entityId: id,
+      summary: "Deleted draft homework",
+    })
+  })
   return { deleted: true }
 }
 

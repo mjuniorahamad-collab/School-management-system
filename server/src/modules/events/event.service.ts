@@ -1,6 +1,9 @@
 import { Prisma } from "@prisma/client"
+import type { Event } from "@prisma/client"
 import { notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import type { AuthUser } from "../../types/auth.js"
+import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import type { CreateEventInput, ListEventsQuery, UpdateEventInput } from "./event.schema.js"
 import { toEventDetail, toEventListItem } from "./event.mapper.js"
 import type { EventDetail, EventListResult } from "./event.types.js"
@@ -53,21 +56,40 @@ export async function getEventById(id: string, schoolId: string): Promise<EventD
 export async function createEvent(
   input: CreateEventInput,
   schoolId: string,
-  actorId: string,
+  actor: AuthUser,
 ): Promise<EventDetail> {
   const prisma = await requirePrisma()
-  const created = await prisma.event.create({
-    data: {
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
+
+  const created = await prisma.$transaction(async (tx) => {
+    const row = await tx.event.create({
+      data: {
+        schoolId,
+        title: input.title,
+        description: input.description ?? null,
+        category: input.category ?? "GENERAL",
+        status: input.status ?? "SCHEDULED",
+        startAt: new Date(input.startAt),
+        endAt: new Date(input.endAt),
+        location: input.location ?? null,
+        createdBy: actor.id,
+      },
+    })
+
+    await recordAudit(tx, {
       schoolId,
-      title: input.title,
-      description: input.description ?? null,
-      category: input.category ?? "GENERAL",
-      status: input.status ?? "SCHEDULED",
-      startAt: new Date(input.startAt),
-      endAt: new Date(input.endAt),
-      location: input.location ?? null,
-      createdBy: actorId,
-    },
+      actorId: auditActor.id,
+      actorName: auditActor.name,
+      actorRole: auditActor.role,
+      actorEmail: auditActor.email,
+      action: "CREATE",
+      entityType: "EVENT",
+      entityId: row.id,
+      summary: `Created event "${row.title}"`,
+      metadata: { category: row.category, status: row.status },
+    })
+
+    return row
   })
   return toEventDetail(created)
 }
@@ -76,10 +98,13 @@ export async function updateEvent(
   id: string,
   input: UpdateEventInput,
   schoolId: string,
-  actorId: string,
+  actor: AuthUser,
 ): Promise<EventDetail> {
   const prisma = await requirePrisma()
-  const existing = await prisma.event.findFirst({ where: { id, schoolId }, select: { id: true } })
+  const existing = await prisma.event.findFirst({
+    where: { id, schoolId },
+    select: { id: true, title: true, status: true },
+  })
   if (!existing) throw notFoundError("Event not found")
 
   const data: Prisma.EventUncheckedUpdateInput = {
@@ -90,16 +115,61 @@ export async function updateEvent(
     ...(input.startAt !== undefined && { startAt: new Date(input.startAt) }),
     ...(input.endAt !== undefined && { endAt: new Date(input.endAt) }),
     ...(input.location !== undefined && { location: input.location ?? null }),
-    updatedBy: actorId,
+    updatedBy: actor.id,
   }
 
-  const updated = await prisma.event.update({ where: { id }, data })
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
+  const nextStatus = (input.status ?? existing.status) as Event["status"]
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.event.update({ where: { id }, data })
+
+    const diffFields: { field: string; before?: unknown; after?: unknown }[] = []
+    if (input.status !== undefined && existing.status !== nextStatus) {
+      diffFields.push({ field: "status", before: existing.status, after: nextStatus })
+    }
+    if (input.title !== undefined && existing.title !== input.title) {
+      diffFields.push({ field: "title", before: existing.title, after: input.title })
+    }
+
+    await recordAudit(tx, {
+      schoolId,
+      actorId: auditActor.id,
+      actorName: auditActor.name,
+      actorRole: auditActor.role,
+      actorEmail: auditActor.email,
+      action: input.status !== undefined ? "STATUS_CHANGE" : "UPDATE",
+      entityType: "EVENT",
+      entityId: id,
+      summary:
+        input.status !== undefined
+          ? `Changed event status to ${nextStatus}`
+          : `Updated event "${existing.title}"`,
+      diff: diffFields.length > 0 ? { fields: diffFields } : null,
+    })
+
+    return row
+  })
   return toEventDetail(updated)
 }
 
-export async function deleteEvent(id: string, schoolId: string): Promise<void> {
+export async function deleteEvent(id: string, schoolId: string, actor: AuthUser): Promise<void> {
   const prisma = await requirePrisma()
-  const event = await prisma.event.findFirst({ where: { id, schoolId }, select: { id: true } })
+  const event = await prisma.event.findFirst({ where: { id, schoolId }, select: { id: true, title: true } })
   if (!event) throw notFoundError("Event not found")
-  await prisma.event.delete({ where: { id } })
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
+  await prisma.$transaction(async (tx) => {
+    await tx.event.delete({ where: { id } })
+    await recordAudit(tx, {
+      schoolId,
+      actorId: auditActor.id,
+      actorName: auditActor.name,
+      actorRole: auditActor.role,
+      actorEmail: auditActor.email,
+      action: "DELETE",
+      entityType: "EVENT",
+      entityId: id,
+      summary: `Deleted event "${event.title}"`,
+    })
+  })
 }

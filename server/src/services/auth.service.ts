@@ -15,6 +15,7 @@ import {
   unauthorizedError,
 } from "../lib/ApiError.js"
 import { getPrisma } from "../lib/database.js"
+import { recordAuditAfterCommit } from "../modules/audit-logs/audit-log.service.js"
 import {
   resolveRolePermissions,
   resolveUserPermissions,
@@ -89,10 +90,37 @@ export async function doLogin(input: LoginInput): Promise<LoginResult> {
     : verifyPassword(input.password, DUMMY_PASSWORD_HASH)
 
   if (!user || !passwordMatches) {
+    // Best-effort failed-login audit. Records the attempted identity even when
+    // the account is unknown (constant-time response limits enumeration risk).
+    await recordAuditAfterCommit({
+      schoolId: null,
+      actorId: user ? user.id : email,
+      actorName: email,
+      actorRole: "GUEST",
+      actorEmail: email,
+      action: "FAILED_LOGIN",
+      entityType: "AUTH",
+      entityId: null,
+      summary: "Failed sign-in attempt",
+      metadata: { email },
+    })
     throw invalidCredentialsError()
   }
 
   if (user.status !== "ACTIVE") {
+    // Rejected sign-in for a known but non-active account.
+    await recordAuditAfterCommit({
+      schoolId: null,
+      actorId: user.id,
+      actorName: user.name,
+      actorRole: "USER",
+      actorEmail: user.email,
+      action: "FAILED_LOGIN",
+      entityType: "AUTH",
+      entityId: null,
+      summary: "Sign-in blocked: account is not active",
+      metadata: { email },
+    })
     throw accountDisabledError()
   }
 
@@ -113,6 +141,19 @@ export async function doLogin(input: LoginInput): Promise<LoginResult> {
     principal.permissions,
   )
 
+  // Best-effort sign-in audit — never blocks the login path.
+  await recordAuditAfterCommit({
+    schoolId: principal.school.id,
+    actorId: user.id,
+    actorName: principal.user.name,
+    actorRole: principal.roles[0] ?? "USER",
+    actorEmail: user.email,
+    action: "LOGIN",
+    entityType: "AUTH",
+    entityId: null,
+    summary: "User signed in",
+  })
+
   return { user: authUser, tokens }
 }
 
@@ -121,10 +162,35 @@ export async function doLogout(accessToken: string | undefined): Promise<void> {
   const prisma = await requirePrisma()
   const accessTokenHash = hashToken(accessToken)
 
-  const session = await prisma.session.findUnique({ where: { accessTokenHash } })
+  const session = await prisma.session.findUnique({
+    where: { accessTokenHash },
+    include: { user: { select: { id: true, name: true, email: true } } },
+  })
   if (!session || session.revokedAt) return
 
   await prisma.session.update({ where: { id: session.id }, data: { revokedAt: new Date() } })
+
+  if (!session.user) return
+  let role = "USER"
+  let schoolId: string | null = null
+  try {
+    const principal = await loadPrincipalContext(session.user.id)
+    role = principal.roles[0] ?? "USER"
+    schoolId = principal.school?.id ?? null
+  } catch {
+    // Principal resolution is best-effort for the audit snapshot.
+  }
+  await recordAuditAfterCommit({
+    schoolId,
+    actorId: session.user.id,
+    actorName: session.user.name,
+    actorRole: role,
+    actorEmail: session.user.email,
+    action: "LOGOUT",
+    entityType: "AUTH",
+    entityId: null,
+    summary: "User signed out",
+  })
 }
 
 export async function doRefresh(refreshToken: string): Promise<SessionTokens> {

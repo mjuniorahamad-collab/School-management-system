@@ -226,6 +226,58 @@ describe.skipIf(!TEST_DATABASE_URL)("Users & Roles (integration)", () => {
     })
   })
 
+  describe("user management mutations are audited", () => {
+    it("records a CREATE + USER row attributed to the acting admin", async () => {
+      const row = await prisma.auditLog.findFirst({
+        where: { schoolId: schoolA.id, action: "CREATE", entityType: "USER" },
+        orderBy: { createdAt: "desc" },
+      })
+      expect(row).not.toBeNull()
+      expect(row!.actorId).toBe(adminAUserId)
+      expect(row!.actorRole).toBe("SCHOOL_ADMIN")
+      expect(row!.summary).toContain("New A User")
+      const metadata = row!.metadata as { roleName?: string }
+      expect(metadata.roleName).toBeTruthy()
+    })
+
+    it("records MEMBER_ROLE_CHANGE on TENANT_MEMBERSHIP with a diff", async () => {
+      const rows = await prisma.auditLog.findMany({
+        where: { schoolId: schoolA.id, action: "MEMBER_ROLE_CHANGE", entityType: "TENANT_MEMBERSHIP" },
+        orderBy: { createdAt: "desc" },
+      })
+      expect(rows.length).toBeGreaterThan(0)
+      const row = rows[0]
+      expect(row!.actorId).toBe(adminAUserId)
+      const diff = row!.diff as { fields: { field: string; before?: string; after?: string }[] }
+      const roleDiff = diff.fields.find((field) => field.field === "roleId")
+      expect(roleDiff).toBeDefined()
+      expect(roleDiff!.after).toBe(teacherRoleId)
+    })
+
+    it("records MEMBER_STATUS_CHANGE when a membership is deactivated", async () => {
+      const rows = await prisma.auditLog.findMany({
+        where: { schoolId: schoolA.id, action: "MEMBER_STATUS_CHANGE", entityType: "TENANT_MEMBERSHIP" },
+        orderBy: { createdAt: "desc" },
+      })
+      expect(rows.length).toBeGreaterThan(0)
+      for (const row of rows) {
+        expect(row!.actorId).toBe(adminAUserId)
+      }
+      const deactivated = rows.find((row) => {
+        const diff = row.diff as { fields: { field: string; after?: string }[] }
+        return diff.fields.find((field) => field.field === "status")?.after === "INACTIVE"
+      })
+      expect(deactivated).toBeDefined()
+    })
+
+    it("does not audit actions that were rejected before any write", async () => {
+      const sneaky = await prisma.auditLog.findFirst({
+        where: { schoolId: schoolA.id, summary: { contains: "Wannabe Super" } },
+      })
+      expect(sneaky).toBeNull()
+    })
+  })
+
   describe("cross-tenant isolation", () => {
     it("tenant A admin cannot view tenant B users in the list", async () => {
       const res = await adminAAgent.get("/api/v1/users?search=admin.b%40example.com")
@@ -346,6 +398,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Users & Roles (integration)", () => {
 })
 
 async function resetAllTables(prisma: PrismaClient): Promise<void> {
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "AuditLog" CASCADE')
   await prisma.timetableEntry.deleteMany()
   await prisma.attendanceRecord.deleteMany()
   await prisma.periodSlot.deleteMany()

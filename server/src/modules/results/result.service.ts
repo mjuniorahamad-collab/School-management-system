@@ -1,6 +1,7 @@
 import { Prisma, type ExamMark } from "@prisma/client"
 import { badRequestError, forbiddenError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import { recordAudit } from "../audit-logs/audit-log.service.js"
 import { isExamMarksScopedActor } from "../exams/exam.service.js"
 import {
   canFinalizeExam,
@@ -31,6 +32,8 @@ interface ActorContext {
   schoolId: string
   userId: string
   roles: readonly string[]
+  name: string
+  email: string
 }
 
 async function requirePrisma(): Promise<PrismaClient> {
@@ -325,6 +328,19 @@ export async function putSubjectMarks(
       })
     }
 
+    await recordAudit(tx, {
+      schoolId: actor.schoolId,
+      actorId: actor.userId,
+      actorName: actor.name,
+      actorRole: actor.roles[0] ?? "USER",
+      actorEmail: actor.email,
+      action: "UPDATE",
+      entityType: "EXAM_RESULT",
+      entityId: touched[0] ?? null,
+      summary: `Saved marks for ${touched.length} student(s) in ${examSubject.subject.name}`,
+      metadata: { saved: touched.length, examId, examSubjectId },
+    })
+
     return touched.length
   })
 
@@ -338,7 +354,7 @@ export async function finalizeExam(
   const prisma = await requirePrisma()
   const exam = await prisma.exam.findFirst({
     where: { id: examId, schoolId: actor.schoolId },
-    select: { id: true, status: true, academicSessionId: true, classId: true, sectionId: true },
+    select: { id: true, name: true, status: true, academicSessionId: true, classId: true, sectionId: true },
   })
   if (!exam) throw notFoundError("Exam not found")
   if (!canFinalizeExam(exam.status)) {
@@ -440,6 +456,21 @@ export async function finalizeExam(
       where: { id: examId },
       data: { status: "FINAL", finalizedAt: new Date(), updatedBy: actor.userId },
     })
+
+    await recordAudit(tx, {
+      schoolId: actor.schoolId,
+      actorId: actor.userId,
+      actorName: actor.name,
+      actorRole: actor.roles[0] ?? "USER",
+      actorEmail: actor.email,
+      action: "REVIEW",
+      entityType: "EXAM",
+      entityId: examId,
+      summary: `Finalized exam "${exam.name}"`,
+      metadata: { ranked: rankedCount, rosterCount: enrollments.length },
+      diff: { fields: [{ field: "status", before: exam.status, after: "FINAL" }] },
+    })
+
     return rankedCount
   })
 
@@ -453,7 +484,7 @@ export async function reopenExam(
   const prisma = await requirePrisma()
   const exam = await prisma.exam.findFirst({
     where: { id: examId, schoolId: actor.schoolId },
-    select: { id: true, status: true },
+    select: { id: true, name: true, status: true },
   })
   if (!exam) throw notFoundError("Exam not found")
   if (!canReopenExam(exam.status)) {
@@ -465,6 +496,18 @@ export async function reopenExam(
     await tx.exam.update({
       where: { id: examId },
       data: { status: "PUBLISHED", finalizedAt: null, updatedBy: actor.userId },
+    })
+    await recordAudit(tx, {
+      schoolId: actor.schoolId,
+      actorId: actor.userId,
+      actorName: actor.name,
+      actorRole: actor.roles[0] ?? "USER",
+      actorEmail: actor.email,
+      action: "STATUS_CHANGE",
+      entityType: "EXAM",
+      entityId: examId,
+      summary: `Reopened exam "${exam.name}" for mark corrections`,
+      diff: { fields: [{ field: "status", before: exam.status, after: "PUBLISHED" }] },
     })
   })
 

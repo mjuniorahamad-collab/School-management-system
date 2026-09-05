@@ -2,6 +2,8 @@ import { Prisma } from "@prisma/client"
 import { ROLE_NAMES } from "../../permissions/permissions.js"
 import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import type { AuthUser } from "../../types/auth.js"
+import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import type { CreateTeacherInput, ListTeachersQuery, UpdateTeacherInput } from "./teacher.schema.js"
 import { DETAIL_INCLUDE, mapTeacherDetail, mapTeacherListItem } from "./teacher.mapper.js"
 import type { TeacherDetail, TeacherListResult, TeacherMeta } from "./teacher.types.js"
@@ -120,6 +122,7 @@ export async function getTeacherMeta(schoolId: string): Promise<TeacherMeta> {
 export async function createTeacher(
   input: CreateTeacherInput,
   schoolId: string,
+  actor: AuthUser,
 ): Promise<TeacherDetail> {
   const prisma = await requirePrisma()
 
@@ -162,6 +165,7 @@ export async function createTeacher(
 
   // Validate the optional user link (ACTIVE TEACHER membership, not already linked).
   const userId = await resolveTeacherUserId(prisma, schoolId, input.userId)
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
   try {
     return await prisma.$transaction(async (tx) => {
@@ -219,6 +223,25 @@ export async function createTeacher(
         })
       }
 
+      await recordAudit(tx, {
+        schoolId,
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: "CREATE",
+        entityType: "TEACHER",
+        entityId: teacher.id,
+        summary: `Added teacher ${teacher.firstName} ${teacher.lastName ?? ""} (${employeeId})`,
+        metadata: {
+          employeeId,
+          designation: teacher.designation,
+          subjectCount: subjectIds.length,
+          classCount: classAssignments.length,
+          userId: userId ?? null,
+        },
+      })
+
       return mapTeacherDetail(
         await tx.teacher.findFirstOrThrow({
           where: { id: teacher.id },
@@ -238,6 +261,7 @@ export async function updateTeacher(
   id: string,
   input: UpdateTeacherInput,
   schoolId: string,
+  actor: AuthUser,
 ): Promise<TeacherDetail> {
   const prisma = await requirePrisma()
   const existing = await prisma.teacher.findFirst({ where: { id, schoolId }, select: { id: true } })
@@ -246,6 +270,7 @@ export async function updateTeacher(
   const subjectIds = input.subjectIds
   const classAssignments = input.classAssignments
   const userId = await resolveTeacherUserId(prisma, schoolId, input.userId, id)
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
   try {
     return await prisma.$transaction(async (tx) => {
@@ -328,6 +353,32 @@ export async function updateTeacher(
           })
         }
       }
+
+      await recordAudit(tx, {
+        schoolId,
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: input.status !== undefined ? "STATUS_CHANGE" : "UPDATE",
+        entityType: "TEACHER",
+        entityId: id,
+        summary:
+          input.status !== undefined
+            ? `Changed teacher status to ${input.status}`
+            : "Updated teacher record",
+        diff: {
+          fields: [
+            ...(input.status !== undefined
+              ? [{ field: "status", before: undefined, after: input.status }]
+              : []),
+            ...(subjectIds !== undefined ? [{ field: "subjects", after: { count: subjectIds.length } }] : []),
+            ...(classAssignments !== undefined
+              ? [{ field: "classes", after: { count: classAssignments.length } }]
+              : []),
+          ],
+        },
+      })
 
       return mapTeacherDetail(
         await tx.teacher.findFirstOrThrow({

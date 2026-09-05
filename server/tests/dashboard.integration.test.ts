@@ -651,6 +651,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Dashboard API (integration)", () => {
 })
 
 async function resetAllTables(prisma: PrismaClient): Promise<void> {
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "AuditLog" CASCADE')
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeReceipt" CASCADE')
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeePayment" CASCADE')
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeInstallment" CASCADE')

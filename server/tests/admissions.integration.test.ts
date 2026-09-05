@@ -467,6 +467,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Admissions API (integration)", () => {
 })
 
 async function resetAllTables(prisma: PrismaClient): Promise<void> {
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "AuditLog" CASCADE')
   await prisma.timetableEntry.deleteMany()
   await prisma.attendanceRecord.deleteMany()
   await prisma.periodSlot.deleteMany()

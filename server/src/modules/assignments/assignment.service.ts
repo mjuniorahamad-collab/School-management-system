@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client"
 import { badRequestError, forbiddenError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import { recordAudit } from "../audit-logs/audit-log.service.js"
 import {
   assertTeacherAssignmentFit,
   isTaskAdminActor,
@@ -34,6 +35,8 @@ interface ActorContext {
   schoolId: string
   userId: string
   roles: readonly string[]
+  name: string
+  email: string
 }
 
 async function requirePrisma(): Promise<PrismaClient> {
@@ -138,23 +141,42 @@ export async function createAssignment(
   })
 
   const status = input.status ?? "DRAFT"
-  const created = await prisma.assignment.create({
-    data: {
+  const created = await prisma.$transaction(async (tx) => {
+    const row = await tx.assignment.create({
+      data: {
+        schoolId: actor.schoolId,
+        academicSessionId: input.academicSessionId,
+        classId: input.classId,
+        sectionId,
+        subjectId: input.subjectId,
+        teacherId: input.teacherId,
+        title: input.title,
+        instructions: input.instructions ?? null,
+        dueDate: new Date(input.dueDate),
+        status,
+        publishedAt: status === "PUBLISHED" ? new Date() : null,
+        createdBy: actor.userId,
+        updatedBy: actor.userId,
+      },
+      include: DETAIL_INCLUDE,
+    })
+
+    await recordAudit(tx, {
       schoolId: actor.schoolId,
-      academicSessionId: input.academicSessionId,
-      classId: input.classId,
-      sectionId,
-      subjectId: input.subjectId,
-      teacherId: input.teacherId,
-      title: input.title,
-      instructions: input.instructions ?? null,
-      dueDate: new Date(input.dueDate),
-      status,
-      publishedAt: status === "PUBLISHED" ? new Date() : null,
-      createdBy: actor.userId,
-      updatedBy: actor.userId,
-    },
-    include: DETAIL_INCLUDE,
+      actorId: actor.userId,
+      actorName: actor.name,
+      actorRole: actor.roles[0] ?? "USER",
+      actorEmail: actor.email,
+      action: status === "PUBLISHED" ? "PUBLISH" : "CREATE",
+      entityType: "ASSIGNMENT",
+      entityId: row.id,
+      summary: status === "PUBLISHED"
+        ? `Published assignment "${row.title}"`
+        : `Created assignment "${row.title}"`,
+      metadata: { status },
+    })
+
+    return row
   })
   return toAssignmentListItem(created, todayLocalDate())
 }
@@ -220,7 +242,35 @@ export async function updateAssignment(
   data.status = nextStatus
   data.publishedAt = publishedAt
 
-  const updated = await prisma.assignment.update({ where: { id }, data, include: DETAIL_INCLUDE })
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.assignment.update({ where: { id }, data, include: DETAIL_INCLUDE })
+
+    const publishedNow = nextStatus === "PUBLISHED" && existing.status !== "PUBLISHED"
+    const diffFields: { field: string; before?: unknown; after?: unknown }[] = []
+    if (nextStatus !== existing.status) {
+      diffFields.push({ field: "status", before: existing.status, after: nextStatus })
+    }
+    if (input.title !== undefined) diffFields.push({ field: "title", after: input.title })
+
+    await recordAudit(tx, {
+      schoolId: actor.schoolId,
+      actorId: actor.userId,
+      actorName: actor.name,
+      actorRole: actor.roles[0] ?? "USER",
+      actorEmail: actor.email,
+      action: publishedNow ? "PUBLISH" : nextStatus !== existing.status ? "STATUS_CHANGE" : "UPDATE",
+      entityType: "ASSIGNMENT",
+      entityId: id,
+      summary: publishedNow
+        ? `Published assignment "${row.title}"`
+        : nextStatus !== existing.status
+          ? `Changed assignment status to ${nextStatus}`
+          : `Updated assignment "${row.title}"`,
+      diff: diffFields.length > 0 ? { fields: diffFields } : null,
+    })
+
+    return row
+  })
   return toAssignmentListItem(updated, todayLocalDate())
 }
 
@@ -245,7 +295,20 @@ export async function deleteAssignment(
     throw forbiddenError("Teachers may only delete their own assignments")
   }
 
-  await prisma.assignment.delete({ where: { id } })
+  await prisma.$transaction(async (tx) => {
+    await tx.assignment.delete({ where: { id } })
+    await recordAudit(tx, {
+      schoolId: actor.schoolId,
+      actorId: actor.userId,
+      actorName: actor.name,
+      actorRole: actor.roles[0] ?? "USER",
+      actorEmail: actor.email,
+      action: "DELETE",
+      entityType: "ASSIGNMENT",
+      entityId: id,
+      summary: "Deleted draft assignment",
+    })
+  })
   return { deleted: true }
 }
 

@@ -1,6 +1,7 @@
 import type { RequestHandler } from "express"
 import { ok } from "../../lib/response.js"
 import { parseWithZod } from "../../lib/validation.js"
+import type { AuthUser } from "../../types/auth.js"
 import {
   createFeeStructureSchema,
   listFeeStructuresQuerySchema,
@@ -8,12 +9,13 @@ import {
 } from "./fee-structure.schema.js"
 import * as feeStructureService from "./fee-structure.service.js"
 
-function requireAuth(req: { auth?: { id: string; school: { id: string } } }): {
+function requireAuth(req: { auth?: AuthUser }): {
   id: string
   schoolId: string
+  auth: AuthUser
 } {
   if (!req.auth) throw new Error("Expected authenticated request")
-  return { id: req.auth.id, schoolId: req.auth.school.id }
+  return { id: req.auth.id, schoolId: req.auth.school.id, auth: req.auth }
 }
 
 function routeParam(value: string | string[] | undefined): string {
@@ -34,14 +36,14 @@ export const getFeeStructureHandler: RequestHandler = async (req, res) => {
 
 export const createFeeStructureHandler: RequestHandler = async (req, res) => {
   const input = parseWithZod(createFeeStructureSchema, req.body, "Invalid fee structure data")
-  const { schoolId } = requireAuth(req)
-  const created = await feeStructureService.createFeeStructure(input, schoolId)
+  const { schoolId, auth } = requireAuth(req)
+  const created = await feeStructureService.createFeeStructure(input, schoolId, auth)
   res.status(201).json(ok(created))
 }
 
 export const updateFeeStructureHandler: RequestHandler = async (req, res) => {
   const input = parseWithZod(updateFeeStructureSchema, req.body, "Invalid fee structure data")
-  const { schoolId } = requireAuth(req)
-  const updated = await feeStructureService.updateFeeStructure(routeParam(req.params.id), input, schoolId)
+  const { schoolId, auth } = requireAuth(req)
+  const updated = await feeStructureService.updateFeeStructure(routeParam(req.params.id), input, schoolId, auth)
   res.json(ok(updated))
 }

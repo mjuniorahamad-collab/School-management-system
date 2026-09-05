@@ -1,6 +1,8 @@
 import { Prisma } from "@prisma/client"
 import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import type { AuthUser } from "../../types/auth.js"
+import { recordAudit, recordAuditAfterCommit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import { computeAttendancePercent } from "./attendance.rules.js"
 import type {
   AttendanceSummaryQueryInput,
@@ -80,10 +82,11 @@ export async function getAttendanceRecordById(
 export async function markAttendance(
   input: MarkAttendanceInput,
   schoolId: string,
-  userId: string,
+  actor: AuthUser,
 ): Promise<AttendanceRecordDetail> {
   const prisma = await requirePrisma()
   const date = new Date(input.date)
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
   const enrollment = await findEnrollment(
     prisma,
@@ -95,32 +98,57 @@ export async function markAttendance(
   )
 
   try {
-    const record = await prisma.attendanceRecord.upsert({
-      where: {
-        schoolId_enrollmentId_date: {
-          schoolId,
-          enrollmentId: enrollment.id,
-          date,
+    const record = await prisma.$transaction(async (tx) => {
+      const existing = await tx.attendanceRecord.findFirst({
+        where: { schoolId, enrollmentId: enrollment.id, date },
+        select: { id: true },
+      })
+
+      const row = await tx.attendanceRecord.upsert({
+        where: {
+          schoolId_enrollmentId_date: {
+            schoolId,
+            enrollmentId: enrollment.id,
+            date,
+          },
         },
-      },
-      create: {
+        create: {
+          schoolId,
+          academicSessionId: input.academicSessionId,
+          classId: enrollment.classId,
+          sectionId: enrollment.sectionId,
+          date,
+          studentId: input.studentId,
+          enrollmentId: enrollment.id,
+          status: input.status,
+          note: input.note ?? null,
+          markedBy: actor.id,
+        },
+        update: {
+          status: input.status,
+          note: input.note ?? null,
+          markedBy: actor.id,
+        },
+        include: RECORD_INCLUDE,
+      })
+
+      const studentName = [row.student.firstName, row.student.lastName].filter(Boolean).join(" ")
+      await recordAudit(tx, {
         schoolId,
-        academicSessionId: input.academicSessionId,
-        classId: enrollment.classId,
-        sectionId: enrollment.sectionId,
-        date,
-        studentId: input.studentId,
-        enrollmentId: enrollment.id,
-        status: input.status,
-        note: input.note ?? null,
-        markedBy: userId,
-      },
-      update: {
-        status: input.status,
-        note: input.note ?? null,
-        markedBy: userId,
-      },
-      include: RECORD_INCLUDE,
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: existing ? "UPDATE" : "CREATE",
+        entityType: "ATTENDANCE_RECORD",
+        entityId: row.id,
+        summary: existing
+          ? `Updated attendance for ${studentName}`
+          : `Marked attendance for ${studentName}`,
+        metadata: { date: input.date, status: input.status, studentId: input.studentId },
+      })
+
+      return row
     })
     return toAttendanceRecordDetail(record)
   } catch (error) {
@@ -134,10 +162,11 @@ export async function markAttendance(
 export async function bulkMarkAttendance(
   input: BulkMarkAttendanceInput,
   schoolId: string,
-  userId: string,
+  actor: AuthUser,
 ): Promise<{ marked: number }> {
   const prisma = await requirePrisma()
   const date = new Date(input.date)
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
   const studentIds = input.records.map((r) => r.studentId)
   const enrollments = await prisma.studentEnrollment.findMany({
@@ -183,12 +212,12 @@ export async function bulkMarkAttendance(
           enrollmentId: enrollment.id,
           status: record.status,
           note: record.note ?? null,
-          markedBy: userId,
+          markedBy: actor.id,
         },
         update: {
           status: record.status,
           note: record.note ?? null,
-          markedBy: userId,
+          markedBy: actor.id,
         },
       })
       marked++
@@ -198,6 +227,26 @@ export async function bulkMarkAttendance(
     }
   }
 
+  await recordAuditAfterCommit({
+    schoolId,
+    actorId: auditActor.id,
+    actorName: auditActor.name,
+    actorRole: auditActor.role,
+    actorEmail: auditActor.email,
+    action: "UPDATE",
+    entityType: "ATTENDANCE_RECORD",
+    entityId: null,
+    summary: `Bulk-marked attendance for ${marked} student(s)`,
+    metadata: {
+      marked,
+      requested: input.records.length,
+      academicSessionId: input.academicSessionId,
+      classId: input.classId,
+      sectionId: input.sectionId ?? null,
+      date: input.date,
+    },
+  })
+
   return { marked }
 }
 
@@ -205,11 +254,13 @@ export async function updateAttendanceRecord(
   id: string,
   input: UpdateAttendanceInput,
   schoolId: string,
+  actor: AuthUser,
 ): Promise<AttendanceRecordDetail> {
   const prisma = await requirePrisma()
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
   const existing = await prisma.attendanceRecord.findFirst({
     where: { id, schoolId },
-    select: { id: true },
+    select: { id: true, status: true, note: true },
   })
   if (!existing) throw notFoundError("Attendance record not found")
 
@@ -221,22 +272,66 @@ export async function updateAttendanceRecord(
     return getAttendanceRecordById(id, schoolId)
   }
 
-  const updated = await prisma.attendanceRecord.update({
-    where: { id },
-    data,
-    include: RECORD_INCLUDE,
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.attendanceRecord.update({
+      where: { id },
+      data,
+      include: RECORD_INCLUDE,
+    })
+
+    const diffFields: { field: string; before?: unknown; after?: unknown }[] = []
+    if (input.status !== undefined && existing.status !== input.status) {
+      diffFields.push({ field: "status", before: existing.status, after: input.status })
+    }
+    if (input.note !== undefined && existing.note !== input.note) {
+      diffFields.push({ field: "note", before: existing.note ?? null, after: input.note ?? null })
+    }
+    const studentName = [row.student.firstName, row.student.lastName].filter(Boolean).join(" ")
+
+    await recordAudit(tx, {
+      schoolId,
+      actorId: auditActor.id,
+      actorName: auditActor.name,
+      actorRole: auditActor.role,
+      actorEmail: auditActor.email,
+      action: "UPDATE",
+      entityType: "ATTENDANCE_RECORD",
+      entityId: id,
+      summary: `Updated attendance record for ${studentName}`,
+      diff: diffFields.length > 0 ? { fields: diffFields } : null,
+    })
+
+    return row
   })
   return toAttendanceRecordDetail(updated)
 }
 
-export async function deleteAttendanceRecord(id: string, schoolId: string): Promise<void> {
+export async function deleteAttendanceRecord(
+  id: string,
+  schoolId: string,
+  actor: AuthUser,
+): Promise<void> {
   const prisma = await requirePrisma()
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
   const existing = await prisma.attendanceRecord.findFirst({
     where: { id, schoolId },
-    select: { id: true },
+    select: { id: true, date: true },
   })
   if (!existing) throw notFoundError("Attendance record not found")
-  await prisma.attendanceRecord.delete({ where: { id } })
+  await prisma.$transaction(async (tx) => {
+    await tx.attendanceRecord.delete({ where: { id } })
+    await recordAudit(tx, {
+      schoolId,
+      actorId: auditActor.id,
+      actorName: auditActor.name,
+      actorRole: auditActor.role,
+      actorEmail: auditActor.email,
+      action: "DELETE",
+      entityType: "ATTENDANCE_RECORD",
+      entityId: id,
+      summary: `Deleted attendance record for ${existing.date.toISOString().slice(0, 10)}`,
+    })
+  })
 }
 
 export async function getAttendanceSummary(

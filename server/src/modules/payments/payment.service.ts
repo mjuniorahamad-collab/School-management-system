@@ -3,6 +3,8 @@ import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
 import { buildPaymentNumber, buildReceiptNumber } from "../../lib/id-generators.js"
 import { roundMoney, toMoney } from "../../lib/money.js"
+import type { AuthUser } from "../../types/auth.js"
+import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import {
   deriveInstallmentStatus,
   deriveInvoiceStatus,
@@ -87,8 +89,10 @@ export async function createPayment(
   schoolId: string,
   userId: string,
   userName: string,
+  actor: AuthUser,
 ): Promise<CreatePaymentResult> {
   const prisma = await requirePrisma()
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
   const invoice = await prisma.feeInvoice.findFirst({
     where: { id: input.invoiceId, schoolId },
@@ -192,7 +196,7 @@ export async function createPayment(
         idempotencyKey: input.idempotencyKey,
         recordedBy: userId,
       },
-      select: { id: true },
+      select: { id: true, paymentNumber: true },
     })
 
     const receiptCounter = await tx.school.update({
@@ -200,10 +204,10 @@ export async function createPayment(
       data: { feeReceiptCounter: { increment: 1 } },
       select: { feeReceiptCounter: true },
     })
-    await tx.feeReceipt.create({
-data: {
-          schoolId,
-          paymentId: paymentRow.id,
+    const receiptRow = await tx.feeReceipt.create({
+      data: {
+        schoolId,
+        paymentId: paymentRow.id,
         invoiceId: invoice.id,
         receiptNumber: buildReceiptNumber(paymentDate.getFullYear(), receiptCounter.feeReceiptCounter),
         studentId: invoice.student.id,
@@ -223,6 +227,7 @@ data: {
         receivedBy: userId,
         receivedByName: userName,
       },
+      select: { id: true, receiptNumber: true },
     })
 
     for (const update of installmentUpdates) {
@@ -235,6 +240,46 @@ data: {
     await tx.feeInvoice.update({
       where: { id: invoice.id },
       data: { amountPaid: invoiceAmountPaid, balance: invoiceBalance, status: invoiceStatus },
+    })
+
+    await recordAudit(tx, {
+      schoolId,
+      actorId: auditActor.id,
+      actorName: auditActor.name,
+      actorEmail: auditActor.email,
+      actorRole: auditActor.role,
+      action: "RECORD_PAYMENT",
+      entityType: "FEE_PAYMENT",
+      entityId: paymentRow.id,
+      summary: `Recorded payment of ${paymentAmount} on invoice ${invoice.invoiceNumber}`,
+      metadata: {
+        paymentNumber: paymentRow.paymentNumber,
+        amount: paymentAmount,
+        method: input.method,
+        invoiceId: invoice.id,
+        studentId: invoice.student.id,
+        installments: installmentUpdates.map((update) => update.id),
+      },
+    })
+
+    await recordAudit(tx, {
+      schoolId,
+      actorId: auditActor.id,
+      actorName: auditActor.name,
+      actorEmail: auditActor.email,
+      actorRole: auditActor.role,
+      action: "ISSUE_RECEIPT",
+      entityType: "FEE_RECEIPT",
+      entityId: receiptRow.id,
+      summary: `Issued receipt to ${studentName} for payment of ${paymentAmount} on ${invoice.invoiceNumber}`,
+      metadata: {
+        receiptNumber: receiptRow.receiptNumber,
+        paymentNumber: paymentRow.paymentNumber,
+        amount: paymentAmount,
+        balanceAfter: invoiceBalance,
+        studentId: invoice.student.id,
+        admissionNumber: invoice.student.admissionNumber,
+      },
     })
 
     return paymentRow

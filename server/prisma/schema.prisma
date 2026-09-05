@@ -170,6 +170,7 @@ model School {
   exams                Exam[]
   examResults          ExamResult[]
   examMarks            ExamMark[]
+  auditLogs            AuditLog[]
 }
 
 model AcademicSession {
@@ -1552,4 +1553,109 @@ model ExamMark {
   @@unique([examResultId, examSubjectId])
   @@index([schoolId, examSubjectId])
   @@index([schoolId, examResultId])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Audit Logs (Phase 8 — immutable, tenant-scoped audit trail).
+//
+// Decisions:
+//   - `AuditLog` is an append-only record of *who did what, to which entity,
+//     when, and what changed*. It is a compliance/forensic store, distinct from
+//     the Dashboard recent-activity feed and from application console logging.
+//   - `schoolId` is nullable ONLY for genuine platform-level actions performed
+//     by a SUPER_ADMIN outside any tenant; for every tenant action it is
+//     required and server-derived from the authenticated membership.
+//   - `actorId`/`actorName`/`actorRole` are stored as plain snapshots (no FK)
+//     so the trail survives a user leaving the tenant or a cascade delete.
+//   - `diff` holds a bounded, redacted before/after of the fields that changed
+//     (never full entity dumps, never secrets). `metadata` holds bounded
+//     request/summary context (counts, amounts, IP/UA for AUTH events only).
+//   - There are deliberately NO update/delete operations in the API. The school
+//     relation uses `onDelete: Restrict` so a School cannot be deleted to hide
+//     its trail.
+//   - Failure semantics: critical/security/financial mutations write the audit
+//     row inside the SAME transaction as the business write (strong
+//     consistency); non-critical/bulk events use a best-effort post-commit
+//     insert that never fails the business operation.
+// ────────────────────────────────────────────────────────────────────────────
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  STATUS_CHANGE
+  PUBLISH
+  ARCHIVE
+  REVIEW
+  CONVERT
+  GENERATE
+  RECORD_PAYMENT
+  ISSUE_RECEIPT
+  LOGIN
+  FAILED_LOGIN
+  LOGOUT
+  PERMISSION_CHANGE
+  MEMBER_ROLE_CHANGE
+  MEMBER_STATUS_CHANGE
+  MEMBER_REMOVED
+  SETTING_CHANGE
+  EXPORT
+  CORRECT
+}
+
+enum AuditEntityType {
+  STUDENT
+  TEACHER
+  STAFF
+  ADMISSION
+  USER
+  ROLE
+  TENANT_MEMBERSHIP
+  ACADEMIC_SESSION
+  CLASS
+  SECTION
+  SUBJECT
+  FEE_HEAD
+  FEE_STRUCTURE
+  FEE_INVOICE
+  FEE_INSTALLMENT
+  FEE_PAYMENT
+  FEE_RECEIPT
+  PERIOD_SLOT
+  TIMETABLE_ENTRY
+  ATTENDANCE_RECORD
+  HOMEWORK
+  ASSIGNMENT
+  EXAM
+  EXAM_RESULT
+  EXAM_MARK
+  EXAM_TYPE
+  GRADING_BAND
+  NOTICE
+  EVENT
+  SCHOOL_SETTING
+  AUTH
+}
+
+model AuditLog {
+  id         String           @id @default(uuid())
+  schoolId   String?
+  actorId    String
+  actorName  String
+  actorRole  String
+  actorEmail String?
+  action     AuditAction
+  entityType AuditEntityType
+  entityId   String?
+  summary    String
+  metadata   Json?
+  diff       Json?
+  createdAt  DateTime         @default(now())
+
+  school School? @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+
+  @@index([schoolId, createdAt])
+  @@index([schoolId, actorId, createdAt])
+  @@index([schoolId, entityType, createdAt])
+  @@index([schoolId, entityId, createdAt])
 }

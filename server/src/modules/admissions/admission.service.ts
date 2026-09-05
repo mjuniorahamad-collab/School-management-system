@@ -2,6 +2,8 @@ import { Prisma } from "@prisma/client"
 import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
 import { buildAdmissionApplicationNumber } from "../../lib/id-generators.js"
+import type { AuthUser } from "../../types/auth.js"
+import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import { buildAdmissionNumber } from "../students/admission-number.js"
 import {
   resolveActiveSession,
@@ -112,10 +114,11 @@ export async function listAdmissions(
 export async function createAdmission(
   input: CreateAdmissionInput,
   schoolId: string,
-  actorId: string,
+  actor: AuthUser,
 ): Promise<AdmissionDetail> {
   const prisma = await requirePrisma()
   await validatePreferences(prisma, schoolId, input)
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
   try {
     const created = await prisma.$transaction(async (tx) => {
@@ -127,7 +130,7 @@ export async function createAdmission(
         new Date().getUTCFullYear(),
         school.admissionApplicationCounter,
       )
-      return tx.admissionApplication.create({
+      const application = await tx.admissionApplication.create({
         data: {
           schoolId,
           applicationNumber,
@@ -150,11 +153,26 @@ export async function createAdmission(
           guardianPhone: input.guardianPhone ?? null,
           guardianEmail: input.guardianEmail ?? null,
           guardianRelationshipType: input.guardianRelationshipType ?? "PARENT",
-          createdBy: actorId,
-          updatedBy: actorId,
+          createdBy: actor.id,
+          updatedBy: actor.id,
         },
         include: DETAIL_INCLUDE,
       })
+
+      await recordAudit(tx, {
+        schoolId,
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: "CREATE",
+        entityType: "ADMISSION",
+        entityId: application.id,
+        summary: `Received admission application ${applicationNumber} for ${application.firstName} ${application.lastName ?? ""}`,
+        metadata: { applicationNumber, guardianName: application.guardianName },
+      })
+
+      return application
     })
     return toAdmissionDetail(created)
   } catch (error) {
@@ -169,7 +187,7 @@ export async function updateAdmission(
   id: string,
   input: UpdateAdmissionInput,
   schoolId: string,
-  actorId: string,
+  actor: AuthUser,
 ): Promise<AdmissionDetail> {
   const prisma = await requirePrisma()
   const current = await findApplication(prisma, id, schoolId)
@@ -179,8 +197,9 @@ export async function updateAdmission(
   }
 
   await validatePreferences(prisma, schoolId, input)
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
-  const data: Prisma.AdmissionApplicationUncheckedUpdateInput = { updatedBy: actorId }
+  const data: Prisma.AdmissionApplicationUncheckedUpdateInput = { updatedBy: actor.id }
   const scalarFields = [
     "firstName",
     "middleName",
@@ -235,10 +254,26 @@ export async function updateAdmission(
     if (value !== undefined) data[key] = (value ?? null) as never
   }
 
-  const updated = await prisma.admissionApplication.update({
-    where: { id },
-    data,
-    include: DETAIL_INCLUDE,
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.admissionApplication.update({
+      where: { id },
+      data,
+      include: DETAIL_INCLUDE,
+    })
+
+    await recordAudit(tx, {
+      schoolId,
+      actorId: auditActor.id,
+      actorName: auditActor.name,
+      actorRole: auditActor.role,
+      actorEmail: auditActor.email,
+      action: "UPDATE",
+      entityType: "ADMISSION",
+      entityId: id,
+      summary: `Updated admission application ${row.applicationNumber}`,
+    })
+
+    return row
   })
   return toAdmissionDetail(updated)
 }
@@ -247,7 +282,7 @@ export async function reviewAdmission(
   id: string,
   input: ReviewAdmissionInput,
   schoolId: string,
-  actorId: string,
+  actor: AuthUser,
 ): Promise<AdmissionDetail> {
   const prisma = await requirePrisma()
   const current = await findApplication(prisma, id, schoolId)
@@ -261,16 +296,40 @@ export async function reviewAdmission(
         ? "REJECTED"
         : "WITHDRAWN"
 
-  const updated = await prisma.admissionApplication.update({
-    where: { id },
-    data: {
-      status,
-      reviewNote: input.note?.trim() ? input.note.trim() : null,
-      reviewedBy: actorId,
-      reviewedAt: new Date(),
-      updatedBy: actorId,
-    },
-    include: DETAIL_INCLUDE,
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.admissionApplication.update({
+      where: { id },
+      data: {
+        status,
+        reviewNote: input.note?.trim() ? input.note.trim() : null,
+        reviewedBy: actor.id,
+        reviewedAt: new Date(),
+        updatedBy: actor.id,
+      },
+      include: DETAIL_INCLUDE,
+    })
+
+    await recordAudit(tx, {
+      schoolId,
+      actorId: auditActor.id,
+      actorName: auditActor.name,
+      actorRole: auditActor.role,
+      actorEmail: auditActor.email,
+      action: "REVIEW",
+      entityType: "ADMISSION",
+      entityId: id,
+      summary: `Reviewed admission application ${row.applicationNumber} as ${status}`,
+      diff: {
+        fields: [
+          { field: "status", before: current.status, after: status },
+          ...(input.note?.trim() ? [{ field: "reviewNote", after: input.note.trim() }] : []),
+        ],
+      },
+    })
+
+    return row
   })
   return toAdmissionDetail(updated)
 }
@@ -279,7 +338,7 @@ export async function convertAdmission(
   id: string,
   input: ConvertAdmissionInput,
   schoolId: string,
-  actorId: string,
+  actor: AuthUser,
 ): Promise<AdmissionConvertResult> {
   const prisma = await requirePrisma()
   const current = await findApplication(prisma, id, schoolId)
@@ -295,6 +354,7 @@ export async function convertAdmission(
     input.classId,
     input.sectionId,
   )
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -331,8 +391,8 @@ export async function convertAdmission(
           state: current.state,
           postalCode: current.postalCode,
           admissionDate: new Date(),
-          createdBy: actorId,
-          updatedBy: actorId,
+          createdBy: actor.id,
+          updatedBy: actor.id,
         },
       })
 
@@ -368,11 +428,31 @@ export async function convertAdmission(
         data: {
           status: "CONVERTED",
           convertedStudentId: student.id,
-          convertedBy: actorId,
+          convertedBy: actor.id,
           convertedAt: new Date(),
-          updatedBy: actorId,
+          updatedBy: actor.id,
         },
         include: DETAIL_INCLUDE,
+      })
+
+      await recordAudit(tx, {
+        schoolId,
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: "CONVERT",
+        entityType: "ADMISSION",
+        entityId: id,
+        summary: `Converted admission ${updatedApplication.applicationNumber} to student ${admissionNumber}`,
+        metadata: {
+          applicationNumber: updatedApplication.applicationNumber,
+          studentId: student.id,
+          admissionNumber,
+          academicSessionId: session.id,
+          classId,
+          sectionId: sectionId ?? null,
+        },
       })
 
       return { application: updatedApplication, student, classRow, sectionRow }
@@ -400,11 +480,30 @@ export async function convertAdmission(
   }
 }
 
-export async function deleteAdmission(id: string, schoolId: string): Promise<void> {
+export async function deleteAdmission(
+  id: string,
+  schoolId: string,
+  actor: AuthUser,
+): Promise<void> {
   const prisma = await requirePrisma()
   const application = await prisma.admissionApplication.findFirst({ where: { id, schoolId } })
   if (!application) throw notFoundError("Admission application not found")
-  await prisma.admissionApplication.delete({ where: { id } })
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
+  await prisma.$transaction(async (tx) => {
+    await tx.admissionApplication.delete({ where: { id } })
+    await recordAudit(tx, {
+      schoolId,
+      actorId: auditActor.id,
+      actorName: auditActor.name,
+      actorRole: auditActor.role,
+      actorEmail: auditActor.email,
+      action: "DELETE",
+      entityType: "ADMISSION",
+      entityId: id,
+      summary: `Deleted admission application ${application.applicationNumber}`,
+      metadata: { applicationNumber: application.applicationNumber },
+    })
+  })
 }
 
 export async function getAdmissionsMeta(schoolId: string): Promise<AdmissionMeta> {

@@ -1,6 +1,8 @@
 import { Prisma } from "@prisma/client"
 import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import type { AuthUser } from "../../types/auth.js"
+import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import type {
   CreateSectionInput,
   ListSectionsQuery,
@@ -73,13 +75,32 @@ export async function getSectionById(id: string, schoolId: string): Promise<Sect
 export async function createSection(
   input: CreateSectionInput,
   schoolId: string,
+  actor: AuthUser,
 ): Promise<SectionDetail> {
   const prisma = await requirePrisma()
   await resolveClass(prisma, schoolId, input.classId)
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
   try {
-    const created = await prisma.section.create({
-      data: { classId: input.classId, name: input.name },
+    const created = await prisma.$transaction(async (tx) => {
+      const row = await tx.section.create({
+        data: { classId: input.classId, name: input.name },
+      })
+
+      await recordAudit(tx, {
+        schoolId,
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: "CREATE",
+        entityType: "SECTION",
+        entityId: row.id,
+        summary: `Created section ${row.name}`,
+        metadata: { classId: row.classId },
+      })
+
+      return row
     })
     return getSectionById(created.id, schoolId)
   } catch (error) {
@@ -94,6 +115,7 @@ export async function updateSection(
   id: string,
   input: UpdateSectionInput,
   schoolId: string,
+  actor: AuthUser,
 ): Promise<SectionDetail> {
   const prisma = await requirePrisma()
   const existing = await getScopedSection(prisma, id, schoolId)
@@ -106,8 +128,33 @@ export async function updateSection(
     data.classId = input.classId
   }
 
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
+
   try {
-    await prisma.section.update({ where: { id }, data })
+    await prisma.$transaction(async (tx) => {
+      await tx.section.update({ where: { id }, data })
+
+      const diffFields: { field: string; before?: unknown; after?: unknown }[] = []
+      if (input.name !== undefined && existing.name !== input.name) {
+        diffFields.push({ field: "name", before: existing.name, after: input.name })
+      }
+      if (input.classId !== undefined && existing.classId !== input.classId) {
+        diffFields.push({ field: "classId", before: existing.classId, after: input.classId })
+      }
+
+      await recordAudit(tx, {
+        schoolId,
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: "UPDATE",
+        entityType: "SECTION",
+        entityId: id,
+        summary: `Updated section ${existing.name}`,
+        diff: diffFields.length > 0 ? { fields: diffFields } : null,
+      })
+    })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       throw badRequestError("A section with this name already exists in the selected class")

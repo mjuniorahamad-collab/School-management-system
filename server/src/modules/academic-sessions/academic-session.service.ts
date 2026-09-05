@@ -2,6 +2,8 @@ import { Prisma } from "@prisma/client"
 import type { AcademicSessionStatus } from "@prisma/client"
 import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import type { AuthUser } from "../../types/auth.js"
+import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import { validateDateRange } from "./academic-session.rules.js"
 import type {
   CreateSessionInput,
@@ -25,12 +27,17 @@ async function countActiveSessions(prisma: PrismaClient, schoolId: string, exclu
   })
 }
 
-async function assertSessionExists(prisma: PrismaClient, id: string, schoolId: string): Promise<void> {
+async function assertSessionExists(
+  prisma: PrismaClient,
+  id: string,
+  schoolId: string,
+): Promise<{ id: string; name: string; code: string; status: AcademicSessionStatus }> {
   const session = await prisma.academicSession.findFirst({
     where: { id, schoolId },
-    select: { id: true },
+    select: { id: true, name: true, code: true, status: true },
   })
   if (!session) throw notFoundError("Academic session not found")
+  return session
 }
 
 export async function listSessions(
@@ -74,7 +81,11 @@ export async function getSessionById(id: string, schoolId: string): Promise<Acad
  * ACTIVE session to place students, so a session that was created ACTIVE must
  * not collide with another ACTIVE session.
  */
-export async function createSession(input: CreateSessionInput, schoolId: string): Promise<AcademicSessionDetail> {
+export async function createSession(
+  input: CreateSessionInput,
+  schoolId: string,
+  actor: AuthUser,
+): Promise<AcademicSessionDetail> {
   const prisma = await requirePrisma()
   validateDateRange(input.startDate, input.endDate)
 
@@ -86,16 +97,35 @@ export async function createSession(input: CreateSessionInput, schoolId: string)
     }
   }
 
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
+
   try {
-    const session = await prisma.academicSession.create({
-      data: {
+    const session = await prisma.$transaction(async (tx) => {
+      const row = await tx.academicSession.create({
+        data: {
+          schoolId,
+          name: input.name,
+          code: input.code,
+          startDate: new Date(`${input.startDate}T00:00:00.000Z`),
+          endDate: new Date(`${input.endDate}T00:00:00.000Z`),
+          status,
+        },
+      })
+
+      await recordAudit(tx, {
         schoolId,
-        name: input.name,
-        code: input.code,
-        startDate: new Date(`${input.startDate}T00:00:00.000Z`),
-        endDate: new Date(`${input.endDate}T00:00:00.000Z`),
-        status,
-      },
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: "CREATE",
+        entityType: "ACADEMIC_SESSION",
+        entityId: row.id,
+        summary: `Created academic session ${row.name} (${row.code})`,
+        metadata: { code: row.code, status: row.status },
+      })
+
+      return row
     })
     return toAcademicSessionDetail(session)
   } catch (error) {
@@ -110,9 +140,10 @@ export async function updateSession(
   id: string,
   input: UpdateSessionInput,
   schoolId: string,
+  actor: AuthUser,
 ): Promise<AcademicSessionDetail> {
   const prisma = await requirePrisma()
-  await assertSessionExists(prisma, id, schoolId)
+  const current = await assertSessionExists(prisma, id, schoolId)
 
   const data: Prisma.AcademicSessionUncheckedUpdateInput = {}
   if (input.name !== undefined) data.name = input.name
@@ -142,8 +173,41 @@ export async function updateSession(
     if (startDate && endDate) validateDateRange(startDate.toISOString().slice(0, 10), endDate.toISOString().slice(0, 10))
   }
 
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
+
   try {
-    const updated = await prisma.academicSession.update({ where: { id }, data })
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.academicSession.update({ where: { id }, data })
+
+      const diffFields: { field: string; before?: unknown; after?: unknown }[] = []
+      if (nextActive !== undefined && current.status !== nextActive) {
+        diffFields.push({ field: "status", before: current.status, after: nextActive })
+      }
+      if (input.name !== undefined && current.name !== input.name) {
+        diffFields.push({ field: "name", before: current.name, after: input.name })
+      }
+      if (input.code !== undefined && current.code !== input.code) {
+        diffFields.push({ field: "code", before: current.code, after: input.code })
+      }
+
+      await recordAudit(tx, {
+        schoolId,
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: nextActive !== undefined && current.status !== nextActive ? "STATUS_CHANGE" : "UPDATE",
+        entityType: "ACADEMIC_SESSION",
+        entityId: id,
+        summary:
+          nextActive !== undefined && current.status !== nextActive
+            ? `Changed academic session status to ${nextActive}`
+            : `Updated academic session ${current.name}`,
+        diff: diffFields.length > 0 ? { fields: diffFields } : null,
+      })
+
+      return row
+    })
     return toAcademicSessionDetail(updated)
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {

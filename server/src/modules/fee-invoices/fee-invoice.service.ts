@@ -4,6 +4,8 @@ import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
 import { buildInvoiceNumber } from "../../lib/id-generators.js"
 import { roundMoney, toMoney } from "../../lib/money.js"
+import type { AuthUser } from "../../types/auth.js"
+import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import {
   FEE_INVOICE_DETAIL_INCLUDE,
   FEE_INVOICE_LIST_INCLUDE,
@@ -223,8 +225,10 @@ export async function generateInvoices(
   input: GenerateInvoicesInput,
   schoolId: string,
   userId: string,
+  actor: AuthUser,
 ): Promise<GenerateInvoicesResult> {
   const prisma = await requirePrisma()
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
   const resolved = await resolveSessionAndClass(prisma, schoolId, input.sessionId, input.classId)
   const structure = await loadActiveStructure(prisma, schoolId, resolved.sessionId, resolved.classId)
   const installments = planInstallments(input, structure.totalAmount, resolved.endDate)
@@ -322,6 +326,28 @@ export async function generateInvoices(
 
       generated += 1
       invoiceNumbers.push(invoiceNumber)
+    }
+
+    if (generated > 0) {
+      await recordAudit(tx, {
+        schoolId,
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorEmail: auditActor.email,
+        actorRole: auditActor.role,
+        action: "GENERATE",
+        entityType: "FEE_INVOICE",
+        summary: `Generated ${generated} fee invoices for ${resolved.sessionName} / ${className}`,
+        metadata: {
+          generated,
+          skippedExisting: totalEnrolled - generated,
+          sessionId: resolved.sessionId,
+          classId: resolved.classId,
+          feeStructureId: structure.id,
+          totalAmount: structure.totalAmount,
+          firstInvoice: invoiceNumbers[0] ?? null,
+        },
+      })
     }
   })
 

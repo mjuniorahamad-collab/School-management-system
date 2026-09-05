@@ -1,5 +1,6 @@
 import type { RequestHandler } from "express"
 import { ok } from "../../lib/response.js"
+import type { AuthUser } from "../../types/auth.js"
 import { parseWithZod } from "../../lib/validation.js"
 import {
   putSubjectMarksSchema,
@@ -8,10 +9,16 @@ import {
 import * as resultService from "./result.service.js"
 
 function requireAuth(req: {
-  auth?: { id: string; roles: string[]; school: { id: string } }
-}): { schoolId: string; userId: string; roles: string[] } {
+  auth?: AuthUser
+}): { schoolId: string; userId: string; roles: string[]; name: string; email: string } {
   if (!req.auth) throw new Error("Expected authenticated request")
-  return { schoolId: req.auth.school.id, userId: req.auth.id, roles: req.auth.roles }
+  return {
+    schoolId: req.auth.school.id,
+    userId: req.auth.id,
+    roles: req.auth.roles,
+    name: req.auth.name,
+    email: req.auth.email,
+  }
 }
 
 function routeParam(value: string | string[] | undefined): string {

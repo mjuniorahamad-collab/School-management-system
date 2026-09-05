@@ -1,6 +1,8 @@
 import { Prisma } from "@prisma/client"
 import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import type { AuthUser } from "../../types/auth.js"
+import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import { normalizeSubjectCode } from "./subject.rules.js"
 import type { CreateSubjectInput, ListSubjectsQuery, UpdateSubjectInput } from "./subject.schema.js"
 import { toSubjectDetail, toSubjectListItem } from "./subject.mapper.js"
@@ -52,16 +54,34 @@ export async function getSubjectById(id: string, schoolId: string): Promise<Subj
 export async function createSubject(
   input: CreateSubjectInput,
   schoolId: string,
+  actor: AuthUser,
 ): Promise<SubjectDetail> {
   const prisma = await requirePrisma()
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
   try {
-    const created = await prisma.subject.create({
-      data: {
+    const created = await prisma.$transaction(async (tx) => {
+      const row = await tx.subject.create({
+        data: {
+          schoolId,
+          code: normalizeSubjectCode(input.code),
+          name: input.name,
+          sortOrder: input.sortOrder ?? 0,
+        },
+      })
+
+      await recordAudit(tx, {
         schoolId,
-        code: normalizeSubjectCode(input.code),
-        name: input.name,
-        sortOrder: input.sortOrder ?? 0,
-      },
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: "CREATE",
+        entityType: "SUBJECT",
+        entityId: row.id,
+        summary: `Created subject ${row.name}`,
+      })
+
+      return row
     })
     return toSubjectDetail(created)
   } catch (error) {
@@ -76,9 +96,13 @@ export async function updateSubject(
   id: string,
   input: UpdateSubjectInput,
   schoolId: string,
+  actor: AuthUser,
 ): Promise<SubjectDetail> {
   const prisma = await requirePrisma()
-  const existing = await prisma.subject.findFirst({ where: { id, schoolId }, select: { id: true } })
+  const existing = await prisma.subject.findFirst({
+    where: { id, schoolId },
+    select: { id: true, name: true, code: true, sortOrder: true },
+  })
   if (!existing) throw notFoundError("Subject not found")
 
   const data: Prisma.SubjectUncheckedUpdateInput = {}
@@ -86,8 +110,38 @@ export async function updateSubject(
   if (input.code !== undefined) data.code = normalizeSubjectCode(input.code)
   if (input.sortOrder !== undefined) data.sortOrder = input.sortOrder
 
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
+
   try {
-    const updated = await prisma.subject.update({ where: { id }, data })
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.subject.update({ where: { id }, data })
+
+      const diffFields: { field: string; before?: unknown; after?: unknown }[] = []
+      if (input.name !== undefined && existing.name !== input.name) {
+        diffFields.push({ field: "name", before: existing.name, after: input.name })
+      }
+      if (input.code !== undefined && existing.code !== normalizeSubjectCode(input.code)) {
+        diffFields.push({ field: "code", before: existing.code, after: normalizeSubjectCode(input.code) })
+      }
+      if (input.sortOrder !== undefined && existing.sortOrder !== input.sortOrder) {
+        diffFields.push({ field: "sortOrder", before: existing.sortOrder, after: input.sortOrder })
+      }
+
+      await recordAudit(tx, {
+        schoolId,
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: "UPDATE",
+        entityType: "SUBJECT",
+        entityId: id,
+        summary: `Updated subject ${existing.name}`,
+        diff: diffFields.length > 0 ? { fields: diffFields } : null,
+      })
+
+      return row
+    })
     return toSubjectDetail(updated)
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {

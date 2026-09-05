@@ -1,4 +1,6 @@
 import { getPrisma } from "../../lib/database.js"
+import type { AuthUser } from "../../types/auth.js"
+import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import type { SchoolSettings, UpdateSettingsInput } from "./setting.schema.js"
 import type { SettingsResponse } from "./setting.types.js"
 
@@ -109,18 +111,35 @@ export async function getSettings(schoolId: string): Promise<SettingsResponse> {
 export async function updateSettings(
   input: UpdateSettingsInput,
   schoolId: string,
+  actor: AuthUser,
 ): Promise<SettingsResponse> {
   const prisma = await requirePrisma()
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
   const entries = Object.entries(input) as [keyof SchoolSettings, unknown][]
-  for (const [key, value] of entries) {
-    const raw = settingToStored(value)
-    await prisma.schoolSetting.upsert({
-      where: { schoolId_key: { schoolId, key } },
-      update: { value: raw },
-      create: { schoolId, key, value: raw },
+  await prisma.$transaction(async (tx) => {
+    for (const [key, value] of entries) {
+      const raw = settingToStored(value)
+      await tx.schoolSetting.upsert({
+        where: { schoolId_key: { schoolId, key } },
+        update: { value: raw },
+        create: { schoolId, key, value: raw },
+      })
+    }
+
+    await recordAudit(tx, {
+      schoolId,
+      actorId: auditActor.id,
+      actorName: auditActor.name,
+      actorRole: auditActor.role,
+      actorEmail: auditActor.email,
+      action: "SETTING_CHANGE",
+      entityType: "SCHOOL_SETTING",
+      entityId: null,
+      summary: `Updated ${entries.length} school setting(s)`,
+      metadata: { keys: entries.map(([key]) => key) },
     })
-  }
+  })
 
   return getSettings(schoolId)
 }

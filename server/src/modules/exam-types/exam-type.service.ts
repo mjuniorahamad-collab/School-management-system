@@ -1,6 +1,8 @@
 import { Prisma } from "@prisma/client"
 import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import type { AuthUser } from "../../types/auth.js"
+import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import { normalizeExamTypeCode } from "./exam-type.rules.js"
 import type {
   CreateExamTypeInput,
@@ -50,16 +52,34 @@ export async function getExamTypeById(id: string, schoolId: string): Promise<Exa
 export async function createExamType(
   input: CreateExamTypeInput,
   schoolId: string,
+  actor: AuthUser,
 ): Promise<ExamTypeDetail> {
   const prisma = await requirePrisma()
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
   try {
-    const created = await prisma.examType.create({
-      data: {
+    const created = await prisma.$transaction(async (tx) => {
+      const row = await tx.examType.create({
+        data: {
+          schoolId,
+          code: normalizeExamTypeCode(input.code),
+          name: input.name,
+          sortOrder: input.sortOrder ?? 0,
+        },
+      })
+
+      await recordAudit(tx, {
         schoolId,
-        code: normalizeExamTypeCode(input.code),
-        name: input.name,
-        sortOrder: input.sortOrder ?? 0,
-      },
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: "CREATE",
+        entityType: "EXAM_TYPE",
+        entityId: row.id,
+        summary: `Created exam type ${row.name}`,
+      })
+
+      return row
     })
     return toExamTypeDetail(created)
   } catch (error) {
@@ -74,9 +94,13 @@ export async function updateExamType(
   id: string,
   input: UpdateExamTypeInput,
   schoolId: string,
+  actor: AuthUser,
 ): Promise<ExamTypeDetail> {
   const prisma = await requirePrisma()
-  const existing = await prisma.examType.findFirst({ where: { id, schoolId }, select: { id: true } })
+  const existing = await prisma.examType.findFirst({
+    where: { id, schoolId },
+    select: { id: true, name: true, code: true, sortOrder: true },
+  })
   if (!existing) throw notFoundError("Exam type not found")
 
   const data: Prisma.ExamTypeUncheckedUpdateInput = {}
@@ -84,8 +108,38 @@ export async function updateExamType(
   if (input.code !== undefined) data.code = normalizeExamTypeCode(input.code)
   if (input.sortOrder !== undefined) data.sortOrder = input.sortOrder
 
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
+
   try {
-    const updated = await prisma.examType.update({ where: { id }, data })
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.examType.update({ where: { id }, data })
+
+      const diffFields: { field: string; before?: unknown; after?: unknown }[] = []
+      if (input.name !== undefined && existing.name !== input.name) {
+        diffFields.push({ field: "name", before: existing.name, after: input.name })
+      }
+      if (input.code !== undefined && existing.code !== normalizeExamTypeCode(input.code)) {
+        diffFields.push({ field: "code", before: existing.code, after: normalizeExamTypeCode(input.code) })
+      }
+      if (input.sortOrder !== undefined && existing.sortOrder !== input.sortOrder) {
+        diffFields.push({ field: "sortOrder", before: existing.sortOrder, after: input.sortOrder })
+      }
+
+      await recordAudit(tx, {
+        schoolId,
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: "UPDATE",
+        entityType: "EXAM_TYPE",
+        entityId: id,
+        summary: `Updated exam type ${existing.name}`,
+        diff: diffFields.length > 0 ? { fields: diffFields } : null,
+      })
+
+      return row
+    })
     return toExamTypeDetail(updated)
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {

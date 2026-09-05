@@ -1,6 +1,8 @@
 import { Prisma } from "@prisma/client"
 import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import type { AuthUser } from "../../types/auth.js"
+import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import { normalizeFeeHeadCode } from "./fee-head.rules.js"
 import type {
   CreateFeeHeadInput,
@@ -50,16 +52,34 @@ export async function getFeeHeadById(id: string, schoolId: string): Promise<FeeH
 export async function createFeeHead(
   input: CreateFeeHeadInput,
   schoolId: string,
+  actor: AuthUser,
 ): Promise<FeeHeadDetail> {
   const prisma = await requirePrisma()
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
   try {
-    const created = await prisma.feeHead.create({
-      data: {
+    const created = await prisma.$transaction(async (tx) => {
+      const row = await tx.feeHead.create({
+        data: {
+          schoolId,
+          code: normalizeFeeHeadCode(input.code),
+          name: input.name,
+          isRecurring: input.isRecurring ?? false,
+        },
+      })
+
+      await recordAudit(tx, {
         schoolId,
-        code: normalizeFeeHeadCode(input.code),
-        name: input.name,
-        isRecurring: input.isRecurring ?? false,
-      },
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: "CREATE",
+        entityType: "FEE_HEAD",
+        entityId: row.id,
+        summary: `Created fee head ${row.name}`,
+      })
+
+      return row
     })
     return toFeeHeadDetail(created)
   } catch (error) {
@@ -74,9 +94,13 @@ export async function updateFeeHead(
   id: string,
   input: UpdateFeeHeadInput,
   schoolId: string,
+  actor: AuthUser,
 ): Promise<FeeHeadDetail> {
   const prisma = await requirePrisma()
-  const existing = await prisma.feeHead.findFirst({ where: { id, schoolId }, select: { id: true } })
+  const existing = await prisma.feeHead.findFirst({
+    where: { id, schoolId },
+    select: { id: true, name: true, code: true, isRecurring: true },
+  })
   if (!existing) throw notFoundError("Fee head not found")
 
   const data: Prisma.FeeHeadUncheckedUpdateInput = {}
@@ -84,8 +108,38 @@ export async function updateFeeHead(
   if (input.code !== undefined) data.code = normalizeFeeHeadCode(input.code)
   if (input.isRecurring !== undefined) data.isRecurring = input.isRecurring
 
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
+
   try {
-    const updated = await prisma.feeHead.update({ where: { id }, data })
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.feeHead.update({ where: { id }, data })
+
+      const diffFields: { field: string; before?: unknown; after?: unknown }[] = []
+      if (input.name !== undefined && existing.name !== input.name) {
+        diffFields.push({ field: "name", before: existing.name, after: input.name })
+      }
+      if (input.code !== undefined && existing.code !== normalizeFeeHeadCode(input.code)) {
+        diffFields.push({ field: "code", before: existing.code, after: normalizeFeeHeadCode(input.code) })
+      }
+      if (input.isRecurring !== undefined && existing.isRecurring !== input.isRecurring) {
+        diffFields.push({ field: "isRecurring", before: existing.isRecurring, after: input.isRecurring })
+      }
+
+      await recordAudit(tx, {
+        schoolId,
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: "UPDATE",
+        entityType: "FEE_HEAD",
+        entityId: id,
+        summary: `Updated fee head ${existing.name}`,
+        diff: diffFields.length > 0 ? { fields: diffFields } : null,
+      })
+
+      return row
+    })
     return toFeeHeadDetail(updated)
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {

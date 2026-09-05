@@ -1,6 +1,8 @@
 import { Prisma } from "@prisma/client"
 import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import type { AuthUser } from "../../types/auth.js"
+import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import {
   FEE_STRUCTURE_DETAIL_INCLUDE,
   FEE_STRUCTURE_LIST_INCLUDE,
@@ -145,8 +147,10 @@ export async function getFeeStructureById(id: string, schoolId: string): Promise
 export async function createFeeStructure(
   input: CreateFeeStructureInput,
   schoolId: string,
+  actor: AuthUser,
 ): Promise<FeeStructureDetail> {
   const prisma = await requirePrisma()
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
   const resolved = await resolveSessionAndClass(prisma, schoolId, input.sessionId, input.classId)
   await assertFeeHeadsBelongToSchool(prisma, schoolId, input.items)
 
@@ -171,6 +175,24 @@ export async function createFeeStructure(
         data: itemRows.map((item) => ({ ...item, feeStructureId: structure.id })),
       })
       await tx.feeStructure.update({ where: { id: structure.id }, data: { totalAmount } })
+
+      await recordAudit(tx, {
+        schoolId,
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorEmail: auditActor.email,
+        actorRole: auditActor.role,
+        action: "CREATE",
+        entityType: "FEE_STRUCTURE",
+        entityId: structure.id,
+        summary: `Created fee structure '${input.name}'`,
+        metadata: {
+          sessionId: resolved.sessionId,
+          classId: resolved.classId,
+          totalAmount,
+          itemCount: input.items.length,
+        },
+      })
     })
     return getFeeStructureById(structureId, schoolId)
   } catch (error) {
@@ -185,11 +207,13 @@ export async function updateFeeStructure(
   id: string,
   input: UpdateFeeStructureInput,
   schoolId: string,
+  actor: AuthUser,
 ): Promise<FeeStructureDetail> {
   const prisma = await requirePrisma()
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
   const existing = await prisma.feeStructure.findFirst({
     where: { id, schoolId },
-    select: { id: true, sessionId: true, classId: true },
+    select: { id: true, name: true, isActive: true, sessionId: true, classId: true },
   })
   if (!existing) throw notFoundError("Fee structure not found")
 
@@ -206,6 +230,7 @@ export async function updateFeeStructure(
 
     const totalAmount = sumItemAmounts(input.items)
     const itemRows = toItemRows(input.items, resolved.sessionEndDate)
+    const itemCount = input.items.length
 
     try {
       await prisma.$transaction(async (tx: Tx) => {
@@ -214,6 +239,36 @@ export async function updateFeeStructure(
           data: itemRows.map((item) => ({ ...item, feeStructureId: id })),
         })
         await tx.feeStructure.update({ where: { id }, data: { ...data, totalAmount } })
+
+        await recordAudit(tx, {
+          schoolId,
+          actorId: auditActor.id,
+          actorName: auditActor.name,
+          actorEmail: auditActor.email,
+          actorRole: auditActor.role,
+          action: "UPDATE",
+          entityType: "FEE_STRUCTURE",
+          entityId: id,
+          summary: `Updated fee structure '${existing.name}'`,
+          metadata: { sessionId: resolved.sessionId, classId: resolved.classId, totalAmount },
+          diff: {
+            fields: [
+              ...(input.name !== undefined && input.name !== existing.name
+                ? [{ field: "name", before: existing.name, after: input.name }]
+                : []),
+              ...(input.isActive !== undefined && input.isActive !== existing.isActive
+                ? [{ field: "isActive", before: existing.isActive, after: input.isActive }]
+                : []),
+              ...(resolved.sessionId !== existing.sessionId
+                ? [{ field: "sessionId", before: existing.sessionId, after: resolved.sessionId }]
+                : []),
+              ...(resolved.classId !== existing.classId
+                ? [{ field: "classId", before: existing.classId, after: resolved.classId }]
+                : []),
+              { field: "items", before: null, after: `replaced with ${itemCount} items` },
+            ],
+          },
+        })
       })
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -228,7 +283,39 @@ export async function updateFeeStructure(
       data.classId = resolved.classId
     }
     try {
-      await prisma.feeStructure.update({ where: { id }, data })
+      await prisma.$transaction(async (tx: Tx) => {
+        await tx.feeStructure.update({ where: { id }, data })
+
+        const diff = {
+          fields: [
+            ...(input.name !== undefined && input.name !== existing.name
+              ? [{ field: "name", before: existing.name, after: input.name }]
+              : []),
+            ...(input.isActive !== undefined && input.isActive !== existing.isActive
+              ? [{ field: "isActive", before: existing.isActive, after: input.isActive }]
+              : []),
+            ...(data.sessionId !== undefined && data.sessionId !== existing.sessionId
+              ? [{ field: "sessionId", before: existing.sessionId, after: data.sessionId }]
+              : []),
+            ...(data.classId !== undefined && data.classId !== existing.classId
+              ? [{ field: "classId", before: existing.classId, after: data.classId }]
+              : []),
+          ],
+        }
+
+        await recordAudit(tx, {
+          schoolId,
+          actorId: auditActor.id,
+          actorName: auditActor.name,
+          actorEmail: auditActor.email,
+          actorRole: auditActor.role,
+          action: "UPDATE",
+          entityType: "FEE_STRUCTURE",
+          entityId: id,
+          summary: `Updated fee structure '${existing.name}'`,
+          diff: diff.fields.length > 0 ? diff : null,
+        })
+      })
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         throw badRequestError("A fee structure already exists for this academic session and class")

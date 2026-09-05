@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client"
 import { badRequestError, forbiddenError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
 import { ROLE_NAMES } from "../../permissions/permissions.js"
+import { recordAudit } from "../audit-logs/audit-log.service.js"
 import {
   assertTeacherAssignmentFit,
   isTaskAdminActor,
@@ -51,6 +52,8 @@ interface ActorContext {
   schoolId: string
   userId: string
   roles: readonly string[]
+  name: string
+  email: string
 }
 
 interface ExamTargeting {
@@ -332,6 +335,23 @@ export async function createExam(input: CreateExamInput, actor: ActorContext): P
           sortOrder: index,
         })),
       })
+
+      await recordAudit(tx, {
+        schoolId: actor.schoolId,
+        actorId: actor.userId,
+        actorName: actor.name,
+        actorRole: actor.roles[0] ?? "USER",
+        actorEmail: actor.email,
+        action: status === "PUBLISHED" ? "PUBLISH" : "CREATE",
+        entityType: "EXAM",
+        entityId: exam.id,
+        summary:
+          status === "PUBLISHED"
+            ? `Published exam "${exam.name}"`
+            : `Created exam "${exam.name}"`,
+        metadata: { subjectCount: subjects.length, status },
+      })
+
       return tx.exam.findFirstOrThrow({
         where: { id: exam.id },
         include: DETAIL_WITH_SUBJECTS_INCLUDE,
@@ -353,6 +373,7 @@ export async function updateExam(
     where: { id, schoolId: actor.schoolId },
     select: {
       id: true,
+      name: true,
       academicSessionId: true,
       examTypeId: true,
       classId: true,
@@ -393,10 +414,37 @@ export async function updateExam(
   if (input.endDate !== undefined) data.endDate = new Date(`${input.endDate}T00:00:00.000Z`)
   if (input.sectionId !== undefined) data.sectionId = sectionId
 
-  const updated = await prisma.exam.update({
-    where: { id },
-    data,
-    include: DETAIL_WITH_SUBJECTS_INCLUDE,
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.exam.update({
+      where: { id },
+      data,
+      include: DETAIL_WITH_SUBJECTS_INCLUDE,
+    })
+
+    const diffFields: { field: string; before?: unknown; after?: unknown }[] = []
+    if (input.name !== undefined && existing.name !== input.name) {
+      diffFields.push({ field: "name", before: existing.name, after: input.name })
+    }
+    if (input.sectionId !== undefined && (existing.sectionId ?? null) !== sectionId) {
+      diffFields.push({ field: "sectionId", before: existing.sectionId ?? null, after: sectionId })
+    }
+    if (input.startDate !== undefined) diffFields.push({ field: "startDate", after: input.startDate })
+    if (input.endDate !== undefined) diffFields.push({ field: "endDate", after: input.endDate })
+
+    await recordAudit(tx, {
+      schoolId: actor.schoolId,
+      actorId: actor.userId,
+      actorName: actor.name,
+      actorRole: actor.roles[0] ?? "USER",
+      actorEmail: actor.email,
+      action: "UPDATE",
+      entityType: "EXAM",
+      entityId: id,
+      summary: `Updated draft exam "${existing.name}"`,
+      diff: diffFields.length > 0 ? { fields: diffFields } : null,
+    })
+
+    return row
   })
   return { ...toExamListItem(updated), subjects: updated.subjects.map(toExamSubjectItem) }
 }
@@ -467,6 +515,20 @@ export async function updateExamSubjects(
       where: { id },
       data: { updatedBy: actor.userId },
     })
+
+    await recordAudit(tx, {
+      schoolId: actor.schoolId,
+      actorId: actor.userId,
+      actorName: actor.name,
+      actorRole: actor.roles[0] ?? "USER",
+      actorEmail: actor.email,
+      action: "UPDATE",
+      entityType: "EXAM",
+      entityId: id,
+      summary: `Updated subject list for draft exam`,
+      metadata: { subjectCount: subjects.length },
+    })
+
     return tx.exam.findFirstOrThrow({ where: { id }, include: DETAIL_WITH_SUBJECTS_INCLUDE })
   })
   return { ...toExamListItem(updated), subjects: updated.subjects.map(toExamSubjectItem) }
@@ -494,14 +556,36 @@ export async function updateExamStatus(
 
   await requireActingTeacherOnExam(prisma, actor, id)
 
-  const updated = await prisma.exam.update({
-    where: { id },
-    data: {
-      status: input.status,
-      publishedAt: input.status === "PUBLISHED" ? existing.publishedAt ?? new Date() : existing.publishedAt,
-      updatedBy: actor.userId,
-    },
-    include: DETAIL_WITH_SUBJECTS_INCLUDE,
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.exam.update({
+      where: { id },
+      data: {
+        status: input.status,
+        publishedAt: input.status === "PUBLISHED" ? existing.publishedAt ?? new Date() : existing.publishedAt,
+        updatedBy: actor.userId,
+      },
+      include: DETAIL_WITH_SUBJECTS_INCLUDE,
+    })
+
+    await recordAudit(tx, {
+      schoolId: actor.schoolId,
+      actorId: actor.userId,
+      actorName: actor.name,
+      actorRole: actor.roles[0] ?? "USER",
+      actorEmail: actor.email,
+      action: input.status === "PUBLISHED" ? "PUBLISH" : input.status === "ARCHIVED" ? "ARCHIVE" : "STATUS_CHANGE",
+      entityType: "EXAM",
+      entityId: id,
+      summary:
+        input.status === "PUBLISHED"
+          ? `Published exam "${row.name}"`
+          : input.status === "ARCHIVED"
+            ? `Archived exam "${row.name}"`
+            : `Changed exam status to ${input.status}`,
+      diff: { fields: [{ field: "status", before: existing.status, after: input.status }] },
+    })
+
+    return row
   })
   return { ...toExamListItem(updated), subjects: updated.subjects.map(toExamSubjectItem) }
 }
@@ -510,7 +594,7 @@ export async function deleteExam(id: string, actor: ActorContext): Promise<{ del
   const prisma = await requirePrisma()
   const existing = await prisma.exam.findFirst({
     where: { id, schoolId: actor.schoolId },
-    select: { id: true, status: true },
+    select: { id: true, name: true, status: true },
   })
   if (!existing) throw notFoundError("Exam not found")
   if (existing.status !== "DRAFT") {
@@ -519,7 +603,20 @@ export async function deleteExam(id: string, actor: ActorContext): Promise<{ del
 
   await requireActingTeacherOnExam(prisma, actor, id)
 
-  await prisma.exam.delete({ where: { id } })
+  await prisma.$transaction(async (tx) => {
+    await tx.exam.delete({ where: { id } })
+    await recordAudit(tx, {
+      schoolId: actor.schoolId,
+      actorId: actor.userId,
+      actorName: actor.name,
+      actorRole: actor.roles[0] ?? "USER",
+      actorEmail: actor.email,
+      action: "DELETE",
+      entityType: "EXAM",
+      entityId: id,
+      summary: `Deleted draft exam "${existing.name}"`,
+    })
+  })
   return { deleted: true }
 }
 

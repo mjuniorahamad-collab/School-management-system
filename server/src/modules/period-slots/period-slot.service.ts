@@ -1,6 +1,8 @@
 import { Prisma } from "@prisma/client"
 import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import type { AuthUser } from "../../types/auth.js"
+import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import type {
   CreatePeriodSlotInput,
   ListPeriodSlotsQuery,
@@ -46,17 +48,35 @@ export async function getPeriodSlotById(id: string, schoolId: string): Promise<P
 export async function createPeriodSlot(
   input: CreatePeriodSlotInput,
   schoolId: string,
+  actor: AuthUser,
 ): Promise<PeriodSlotDetail> {
   const prisma = await requirePrisma()
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
   try {
-    const created = await prisma.periodSlot.create({
-      data: {
+    const created = await prisma.$transaction(async (tx) => {
+      const row = await tx.periodSlot.create({
+        data: {
+          schoolId,
+          name: input.name,
+          startTime: input.startTime,
+          endTime: input.endTime,
+          sortOrder: input.sortOrder ?? 0,
+        },
+      })
+
+      await recordAudit(tx, {
         schoolId,
-        name: input.name,
-        startTime: input.startTime,
-        endTime: input.endTime,
-        sortOrder: input.sortOrder ?? 0,
-      },
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: "CREATE",
+        entityType: "PERIOD_SLOT",
+        entityId: row.id,
+        summary: `Created period ${row.name}`,
+      })
+
+      return row
     })
     return toPeriodSlotDetail(created)
   } catch (error) {
@@ -71,9 +91,13 @@ export async function updatePeriodSlot(
   id: string,
   input: UpdatePeriodSlotInput,
   schoolId: string,
+  actor: AuthUser,
 ): Promise<PeriodSlotDetail> {
   const prisma = await requirePrisma()
-  const existing = await prisma.periodSlot.findFirst({ where: { id, schoolId }, select: { id: true } })
+  const existing = await prisma.periodSlot.findFirst({
+    where: { id, schoolId },
+    select: { id: true, name: true, startTime: true, endTime: true, sortOrder: true },
+  })
   if (!existing) throw notFoundError("Period not found")
 
   const data: Prisma.PeriodSlotUncheckedUpdateInput = {}
@@ -82,8 +106,41 @@ export async function updatePeriodSlot(
   if (input.endTime !== undefined) data.endTime = input.endTime
   if (input.sortOrder !== undefined) data.sortOrder = input.sortOrder
 
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
+
   try {
-    const updated = await prisma.periodSlot.update({ where: { id }, data })
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.periodSlot.update({ where: { id }, data })
+
+      const diffFields: { field: string; before?: unknown; after?: unknown }[] = []
+      if (input.name !== undefined && existing.name !== input.name) {
+        diffFields.push({ field: "name", before: existing.name, after: input.name })
+      }
+      if (input.startTime !== undefined && existing.startTime !== input.startTime) {
+        diffFields.push({ field: "startTime", before: existing.startTime, after: input.startTime })
+      }
+      if (input.endTime !== undefined && existing.endTime !== input.endTime) {
+        diffFields.push({ field: "endTime", before: existing.endTime, after: input.endTime })
+      }
+      if (input.sortOrder !== undefined && existing.sortOrder !== input.sortOrder) {
+        diffFields.push({ field: "sortOrder", before: existing.sortOrder, after: input.sortOrder })
+      }
+
+      await recordAudit(tx, {
+        schoolId,
+        actorId: auditActor.id,
+        actorName: auditActor.name,
+        actorRole: auditActor.role,
+        actorEmail: auditActor.email,
+        action: "UPDATE",
+        entityType: "PERIOD_SLOT",
+        entityId: id,
+        summary: `Updated period ${existing.name}`,
+        diff: diffFields.length > 0 ? { fields: diffFields } : null,
+      })
+
+      return row
+    })
     return toPeriodSlotDetail(updated)
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
