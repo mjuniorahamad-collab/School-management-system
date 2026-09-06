@@ -287,7 +287,7 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
     "library:view",
     "notices:view",
     "events:view",
-    "messages:view",
+    ...codes("messages", [VIEW, CREATE]),
   ],
 
   STUDENT: [

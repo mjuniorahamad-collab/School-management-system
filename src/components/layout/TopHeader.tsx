@@ -5,7 +5,6 @@ import {
   CalendarDays,
   CheckCheck,
   LogOut,
-  Mail,
   Menu,
   Settings,
   UserRound,
@@ -14,16 +13,15 @@ import { toast } from "sonner"
 import { branding } from "@/config/branding"
 import { findNavItem, getAllNavItems } from "@/routes/navigation"
 import { notifications } from "@/data/notifications"
-import { messagePreviews } from "@/data/messages"
 import { cn } from "@/lib/utils"
 import { getInitials, timeAgo } from "@/lib/format"
 import { useSidebar } from "@/hooks/useSidebar"
 import { useAuth } from "@/auth/useAuth"
 import { ThemeToggle } from "@/theme/ThemeToggle"
 import { GlobalSearch } from "@/components/layout/GlobalSearch"
+import { MessagesMenu } from "@/components/layout/MessagesMenu"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import {
   DropdownMenu,
@@ -163,47 +161,7 @@ export function TopHeader() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="relative hidden sm:inline-flex"
-              aria-label="Messages"
-            >
-              <Mail className="size-5" aria-hidden="true" />
-              {messagePreviews.some((item) => item.unread) && (
-                <span className="absolute top-1.5 right-1.5 flex size-2 rounded-full bg-destructive ring-2 ring-background" />
-              )}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-80 sm:min-w-96">
-            <DropdownMenuLabel className="px-2 py-1.5">Messages</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <div className="max-h-80 overflow-y-auto">
-              {messagePreviews.map((item) => (
-                <DropdownMenuItem
-                  key={item.id}
-                  className="flex flex-col items-start gap-1 py-2.5"
-                  onSelect={() => navigate("/messages")}
-                >
-                  <span className="flex w-full items-center justify-between gap-2">
-                    <span className="truncate text-sm font-medium">{item.subject}</span>
-                    {item.unread && <Badge variant="secondary">New</Badge>}
-                  </span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {item.sender} · {timeAgo(item.timestamp)}
-                  </span>
-                  <span className="line-clamp-1 text-xs text-muted-foreground/80">{item.preview}</span>
-                </DropdownMenuItem>
-              ))}
-            </div>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => navigate("/messages")}>
-              View all messages
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <MessagesMenu />
 
         <Button
           variant="ghost"

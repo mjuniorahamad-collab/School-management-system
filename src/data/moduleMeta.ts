@@ -53,13 +53,6 @@ export const moduleMeta: Record<string, ModuleMeta> = {
     purpose: "Hostel blocks, room allocation, and boarder management.",
     futureConnection: "Connects to the Hostel API and hostel tables in the database.",
   },
-  "/messages": {
-    path: "/messages",
-    label: "Messages",
-    status: "planned",
-    purpose: "In-app and SMS/email communications with parents and staff.",
-    futureConnection: "Connects to the Communications API and message logs in the database.",
-  },
   "/reports": {
     path: "/reports",
     label: "Reports",

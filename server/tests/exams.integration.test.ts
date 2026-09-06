@@ -717,6 +717,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Exams API (integration)", () => {
 
 async function resetAllTables(prisma: PrismaClient): Promise<void> {
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "AuditLog" CASCADE')
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Message" CASCADE')
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "ConversationParticipant" CASCADE')
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Conversation" CASCADE')
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "ExamMark" CASCADE')
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "ExamResult" CASCADE')
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "ExamSubject" CASCADE')

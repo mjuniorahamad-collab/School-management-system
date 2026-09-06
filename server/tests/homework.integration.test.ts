@@ -635,6 +635,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Homework API (integration)", () => {
 
 async function resetAllTables(prisma: PrismaClient): Promise<void> {
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "AuditLog" CASCADE')
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Message" CASCADE')
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "ConversationParticipant" CASCADE')
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Conversation" CASCADE')
   await prisma.homeworkSubmission.deleteMany()
   await prisma.assignmentSubmission.deleteMany()
   await prisma.homework.deleteMany()

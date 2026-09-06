@@ -61,6 +61,9 @@ const UsersPage = lazy(() => import("@/pages/users").then((m) => ({ default: m.U
 const AuditLogsPage = lazy(() =>
   import("@/pages/auditLogs").then((m) => ({ default: m.AuditLogsPage })),
 )
+const MessagesPage = lazy(() =>
+  import("@/pages/messages").then((m) => ({ default: m.MessagesPage })),
+)
 
 const DASHBOARD_PATH = "/dashboard"
 const IMPLEMENTED_PATHS = new Set([
@@ -87,6 +90,7 @@ const IMPLEMENTED_PATHS = new Set([
   "/receipts",
   "/users",
   "/audit-logs",
+  "/messages",
 ])
 
 export const router = createBrowserRouter([
@@ -139,6 +143,7 @@ export const router = createBrowserRouter([
           { path: "/receipts", element: <ReceiptsPage /> },
           { path: "/users", element: <UsersPage /> },
           { path: "/audit-logs", element: <AuditLogsPage /> },
+          { path: "/messages", element: <MessagesPage /> },
           // Remaining unimplemented modules from the navigation registry.
           ...getAllNavItems()
             .filter((item) => !IMPLEMENTED_PATHS.has(item.path) && !item.path.startsWith("/students"))

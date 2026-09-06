@@ -171,6 +171,8 @@ model School {
   examResults          ExamResult[]
   examMarks            ExamMark[]
   auditLogs            AuditLog[]
+  conversations        Conversation[]
+  messages             Message[]
 }
 
 model AcademicSession {
@@ -253,6 +255,11 @@ model User {
   updatedExams  Exam[]      @relation("ExamUpdatedBy")
   enteredExamMarks ExamMark[] @relation("ExamMarkEnteredBy")
   updatedExamMarks ExamMark[] @relation("ExamMarkUpdatedBy")
+
+  createdConversations    Conversation[]               @relation("ConversationCreatedBy")
+  lastMessageConversations Conversation[]              @relation("ConversationLastMessageSender")
+  conversationParticipants ConversationParticipant[]
+  sentMessages            Message[]
 
   @@index([schoolId])
   @@index([email])
@@ -1635,6 +1642,9 @@ enum AuditEntityType {
   EVENT
   SCHOOL_SETTING
   AUTH
+  CONVERSATION
+  CONVERSATION_PARTICIPANT
+  MESSAGE
 }
 
 model AuditLog {
@@ -1658,4 +1668,97 @@ model AuditLog {
   @@index([schoolId, actorId, createdAt])
   @@index([schoolId, entityType, createdAt])
   @@index([schoolId, entityId, createdAt])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Messages (Phase 9 — private, targeted, tenant-scoped conversations).
+//
+// Decisions:
+//   - Participants are TENANT USER ACCOUNTS (TenantMembership users), never
+//     domain profiles. Profile→account linking is a future portal milestone;
+//     v1 addresses people by their existing login account + role in the school,
+//     so no student/class/parent targeting tables exist yet.
+//   - `Conversation.type` is DIRECT (1:1, deduplicated via `directKey`) or
+//     GROUP (2..N participants, explicit title). A DIRECT conversation between
+//     the same two users always resolves to the same `directKey`, so starting a
+//     "new" 1:1 chat returns the existing thread instead of duplicating.
+//   - `Message` is immutable after send: no edit/delete/recall this phase.
+//     `body` is plain text; attachments are deferred (additive column later).
+//   - Read state is a per-participant cursor (`lastReadAt`), not per-message
+//     flags — unread counts stay O(1) per conversation and there is no
+//     read-receipt fan-out. Archive is per-participant too (`archivedAt`), so
+//     one user silencing a thread never affects the other participants.
+//   - `Conversation.lastMessageAt` / `lastMessagePreview` /
+//     `lastMessageSenderId` are denormalized in the same transaction as send so
+//     the conversation list is an index-served projection (no N+1 history
+//     scans). `lastMessagePreview` is the first N chars of the body, visible to
+//     participants only; bodies never enter audit rows.
+//   - Tenant isolation: `schoolId` is always server-derived; every read uses
+//     `findFirst({ id, schoolId })`, so cross-tenant ID access resolves to 404.
+//     Participants are validated against ACTIVE memberships whose role carries
+//     `messages:view` (capability matches visibility — no access by ID guess).
+// ────────────────────────────────────────────────────────────────────────────
+
+enum ConversationType {
+  DIRECT
+  GROUP
+}
+
+model Conversation {
+  id                  String           @id @default(uuid())
+  schoolId            String
+  type                ConversationType
+  title               String? // GROUP only; DIRECT derives a label client-side.
+  directKey           String? // DIRECT only: sorted "<lowUserId>:<highUserId>" pair key.
+  lastMessageAt       DateTime?
+  lastMessagePreview  String? // First ~160 chars of the last message body.
+  lastMessageSenderId String?
+  createdBy           String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  school          School                       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  createdByUser   User?                        @relation("ConversationCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  lastMessageUser User?                        @relation("ConversationLastMessageSender", fields: [lastMessageSenderId], references: [id], onDelete: SetNull)
+  participants    ConversationParticipant[]
+  messages        Message[]
+
+  @@unique([directKey])
+  @@index([schoolId, lastMessageAt])
+  @@index([schoolId, type])
+}
+
+model ConversationParticipant {
+  id             String    @id @default(uuid())
+  conversationId String
+  userId         String
+  role           String? // Tenant role snapshot at join time (display only).
+  lastReadAt     DateTime?
+  isArchived     Boolean   @default(false)
+  archivedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId, isArchived])
+  @@index([conversationId])
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  schoolId       String
+  conversationId String
+  senderId       String
+  body           String
+  createdAt      DateTime @default(now())
+
+  school       School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([schoolId, createdAt])
 }

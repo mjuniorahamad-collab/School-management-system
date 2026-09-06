@@ -664,6 +664,9 @@ const payments = await adminAgent.get("/api/v1/payments")
 
 async function resetAllTables(prisma: PrismaClient): Promise<void> {
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "AuditLog" CASCADE')
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Message" CASCADE')
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "ConversationParticipant" CASCADE')
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Conversation" CASCADE')
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeReceipt" CASCADE')
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeePayment" CASCADE')
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeInstallment" CASCADE')
