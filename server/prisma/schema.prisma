@@ -1,14 +1,16 @@
 // School Management System — Prisma schema.
 //
-// Current milestone: Fees + Payments + Receipts foundation (Phase 7A — fee
-// structures, session invoices and installments; Phase 7B adds payments and
-// receipts).
+// Current milestone: Library module (catalogue + circulation — first Services
+// module). Fees + Payments + Receipts foundation (Phase 7A/7B) and Messages
+// (Phase 9) are complete; Library is Phase 10.
 //
 //   School, AcademicSession, User, Role, Permission, UserRole, RolePermission,
 //   Session(auth tokens), Student, Teacher, Staff, Class, Section, Subject,
 //   PeriodSlot, TimetableEntry, AttendanceRecord, Homework, Assignment,
 //   HomeworkSubmission, AssignmentSubmission, Exam, ExamSubject, ExamResult,
-//   ExamMark, FeeStructure, FeeStructureItem, FeeInvoice, FeeInstallment.
+//   ExamMark, FeeStructure, FeeStructureItem, FeeInvoice, FeeInstallment,
+//   Conversation, ConversationParticipant, Message, LibraryBook,
+//   LibraryCopy, LibraryLoan.
 //
 // Decisions:
 //   - `User` is a pure authentication identity (email + password hash). Domain
@@ -136,6 +138,8 @@ model School {
   feeInvoiceCounter           Int          @default(1)
   // Server-side payment number sequence (see FeePayment).
   feePaymentCounter           Int          @default(1)
+  // Server-side copy code sequence (see LibraryCopy).
+  libraryCopyCounter          Int          @default(1)
   createdAt                   DateTime     @default(now())
   updatedAt                   DateTime     @updatedAt
 
@@ -173,6 +177,9 @@ model School {
   auditLogs            AuditLog[]
   conversations        Conversation[]
   messages             Message[]
+  libraryBooks         LibraryBook[]
+  libraryCopies        LibraryCopy[]
+  libraryLoans         LibraryLoan[]
 }
 
 model AcademicSession {
@@ -260,6 +267,9 @@ model User {
   lastMessageConversations Conversation[]              @relation("ConversationLastMessageSender")
   conversationParticipants ConversationParticipant[]
   sentMessages            Message[]
+
+  issuedLibraryLoans   LibraryLoan[] @relation("LibraryLoanIssuedBy")
+  returnedLibraryLoans LibraryLoan[] @relation("LibraryLoanReturnedBy")
 
   @@index([schoolId])
   @@index([email])
@@ -1608,6 +1618,8 @@ enum AuditAction {
   SETTING_CHANGE
   EXPORT
   CORRECT
+  ISSUE
+  RETURN
 }
 
 enum AuditEntityType {
@@ -1645,6 +1657,9 @@ enum AuditEntityType {
   CONVERSATION
   CONVERSATION_PARTICIPANT
   MESSAGE
+  LIBRARY_BOOK
+  LIBRARY_COPY
+  LIBRARY_LOAN
 }
 
 model AuditLog {
@@ -1761,4 +1776,123 @@ model Message {
 
   @@index([conversationId, createdAt])
   @@index([schoolId, createdAt])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Library (Phase 10 — catalogue + circulation, first Services module).
+//
+// Decisions:
+//   - `LibraryBook` is the bibliographic record (title/author/ISBN/category);
+//     `LibraryCopy` is one physical copy the school owns (status lifecycle);
+//     `LibraryLoan` is one issue/return transaction for one physical copy.
+//   - Copy codes are server-generated from a per-school atomic counter
+//     (`School.libraryCopyCounter`) with a `LIB-####` shape, matching the
+//     admission/employee number pattern.
+//   - A copy is exactly one of AVAILABLE / ISSUED / LOST / MAINTENANCE.
+//     Only AVAILABLE copies can be issued. A copy flips to/from ISSUED solely
+//     through the issue/return flow; manual status edits may only move a copy
+//     between AVAILABLE and LOST/MAINTENANCE (rules enforced in service).
+//   - Borrowers are polymorphic: ACTIVE Student / Teacher / Staff rows in the
+//     tenant (no separate member/user tables — profile accounts are future
+//     portal work). Name + code are snapshotted at issue time so history
+//     survives profile edits and works even if a profile is later removed.
+//   - Due logic is derived (`dueAt`, `returnedAt`), never a stored status, so
+//     an overdue loan needs no background job to become accurate.
+//   - Issue/return are audit-trailed (ISSUE/RETURN) in the SAME transaction as
+//     the business write.
+// ────────────────────────────────────────────────────────────────────────────
+
+enum LibraryCategory {
+  FICTION
+  NON_FICTION
+  REFERENCE
+  TEXTBOOK
+  MAGAZINE
+  JOURNAL
+  OTHER
+}
+
+enum LibraryCopyStatus {
+  AVAILABLE
+  ISSUED
+  LOST
+  MAINTENANCE
+}
+
+enum LibraryBorrowerType {
+  STUDENT
+  TEACHER
+  STAFF
+}
+
+model LibraryBook {
+  id          String          @id @default(uuid())
+  schoolId    String
+  title       String
+  author      String
+  isbn        String?
+  publisher   String?
+  edition     String?
+  category    LibraryCategory @default(OTHER)
+  language    String?
+  description String?
+  coverUrl    String?
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  school School         @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  copies LibraryCopy[]
+
+  @@unique([schoolId, isbn])
+  @@index([schoolId, category])
+  @@index([schoolId, title])
+  @@index([schoolId, isActive])
+}
+
+model LibraryCopy {
+  id        String            @id @default(uuid())
+  schoolId  String
+  bookId    String
+  copyCode  String
+  status    LibraryCopyStatus @default(AVAILABLE)
+  note      String?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  school School      @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  book   LibraryBook @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  loans  LibraryLoan[]
+
+  @@unique([schoolId, copyCode])
+  @@index([schoolId, status])
+  @@index([bookId])
+}
+
+model LibraryLoan {
+  id           String               @id @default(uuid())
+  schoolId     String
+  copyId       String
+  borrowerType LibraryBorrowerType
+  borrowerId   String
+  borrowerName String
+  borrowerCode String?
+  issuedAt     DateTime             @db.Date
+  dueAt        DateTime             @db.Date
+  returnedAt   DateTime?            @db.Date
+  issuedBy     String?
+  returnedBy   String?
+  notes        String?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  school     School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  copy       LibraryCopy  @relation(fields: [copyId], references: [id], onDelete: Cascade)
+  issuedByUser   User?    @relation("LibraryLoanIssuedBy", fields: [issuedBy], references: [id], onDelete: SetNull)
+  returnedByUser User?    @relation("LibraryLoanReturnedBy", fields: [returnedBy], references: [id], onDelete: SetNull)
+
+  @@index([schoolId, returnedAt])
+  @@index([schoolId, dueAt])
+  @@index([schoolId, borrowerType, borrowerId])
+  @@index([schoolId, copyId])
 }

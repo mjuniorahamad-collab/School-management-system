@@ -4,27 +4,6 @@ import type { ModuleMeta } from "@/types"
 // are not part of the current dashboard milestone. When a module is implemented,
 // remove its entry here and mount its real page in the route tree.
 export const moduleMeta: Record<string, ModuleMeta> = {
-  "/fees": {
-    path: "/fees",
-    label: "Fees Management",
-    status: "planned",
-    purpose: "Fee structures, invoices, dues tracking, and collection dashboards.",
-    futureConnection: "Connects to the Fees API and invoice table in the database.",
-  },
-  "/payments": {
-    path: "/payments",
-    label: "Payments",
-    status: "planned",
-    purpose: "Payment records across methods, reconciliation, and gateway integration.",
-    futureConnection: "Connects to the Payments API and payments table in the database.",
-  },
-  "/receipts": {
-    path: "/receipts",
-    label: "Receipts",
-    status: "planned",
-    purpose: "Receipt generation, re-printing, and payment history per student.",
-    futureConnection: "Connects to the Receipts API and receipts table in the database.",
-  },
   "/payroll": {
     path: "/payroll",
     label: "Payroll",

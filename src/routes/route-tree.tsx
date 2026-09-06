@@ -54,6 +54,9 @@ const ExaminationsPage = lazy(() =>
   import("@/pages/examinations").then((m) => ({ default: m.ExaminationsPage })),
 )
 const ResultsPage = lazy(() => import("@/pages/results").then((m) => ({ default: m.ResultsPage })))
+const LibraryPage = lazy(() =>
+  import("@/pages/library/LibraryPage").then((m) => ({ default: m.LibraryPage })),
+)
 const FeesPage = lazy(() => import("@/pages/fees").then((m) => ({ default: m.FeesPage })))
 const PaymentsPage = lazy(() => import("@/pages/payments").then((m) => ({ default: m.PaymentsPage })))
 const ReceiptsPage = lazy(() => import("@/pages/receipts").then((m) => ({ default: m.ReceiptsPage })))
@@ -86,6 +89,7 @@ const IMPLEMENTED_PATHS = new Set([
   "/examinations",
   "/results",
   "/fees",
+  "/library",
   "/payments",
   "/receipts",
   "/users",
@@ -138,6 +142,7 @@ export const router = createBrowserRouter([
           { path: "/assignments", element: <AssignmentsPage /> },
           { path: "/examinations", element: <ExaminationsPage /> },
           { path: "/results", element: <ResultsPage /> },
+          { path: "/library", element: <LibraryPage /> },
           { path: "/fees", element: <FeesPage /> },
           { path: "/payments", element: <PaymentsPage /> },
           { path: "/receipts", element: <ReceiptsPage /> },
