@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client"
 import type { Guardian } from "@prisma/client"
 import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import { rowsToCsv } from "../../lib/csv.js"
 import type { AuthUser } from "../../types/auth.js"
 import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import { buildAdmissionNumber } from "./admission-number.js"
@@ -470,10 +471,6 @@ export function studentListToCsv(items: StudentListItem[]): string {
     "Admission Date",
     "Date of Birth",
   ]
-  const escapeCell = (value: string | null | undefined): string => {
-    const text = value ?? ""
-    return `"${text.replace(/"/g, '""')}"`
-  }
   const rows = items.map((item) => [
     item.admissionNumber,
     item.name,
@@ -489,6 +486,5 @@ export function studentListToCsv(items: StudentListItem[]): string {
     item.admissionDate,
     item.dateOfBirth,
   ])
-  const body = [header, ...rows].map((row) => row.map(escapeCell).join(",")).join("\r\n")
-  return `\uFEFF${body}`
+  return rowsToCsv(header, rows)
 }

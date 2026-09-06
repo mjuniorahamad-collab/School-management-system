@@ -2,7 +2,6 @@ import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import {
   Banknote,
-  BarChart3,
   CalendarCheck2,
   GraduationCap,
   Megaphone,
@@ -14,7 +13,6 @@ import { AddTeacherDialog } from "@/components/dialogs/AddTeacherDialog"
 import { MarkAttendanceDialog } from "@/components/dialogs/MarkAttendanceDialog"
 import { CollectFeeDialog } from "@/components/dialogs/CollectFeeDialog"
 import { CreateNoticeDialog } from "@/components/dialogs/CreateNoticeDialog"
-import { GenerateReportDialog } from "@/components/dialogs/GenerateReportDialog"
 import { cn } from "@/lib/utils"
 import type { LucideIcon } from "lucide-react"
 
@@ -55,12 +53,6 @@ const QUICK_ACTIONS: QuickAction[] = [
     label: "Create Notice",
     description: "Publish a school notice",
     icon: Megaphone,
-  },
-  {
-    id: "generate-report",
-    label: "Generate Report",
-    description: "Build a custom report",
-    icon: BarChart3,
   },
 ]
 
@@ -132,10 +124,6 @@ export function QuickActions({ className }: QuickActionsProps) {
       <CreateNoticeDialog
         open={openDialog === "create-notice"}
         onOpenChange={(open) => setOpenDialog(open ? "create-notice" : null)}
-      />
-      <GenerateReportDialog
-        open={openDialog === "generate-report"}
-        onOpenChange={(open) => setOpenDialog(open ? "generate-report" : null)}
       />
     </Card>
   )

@@ -33,6 +33,7 @@ import { auditLogsRouter } from "../modules/audit-logs/audit-log.route.js"
 import { messagesRouter } from "../modules/messages/message.route.js"
 import { libraryRouter } from "../modules/library/library.route.js"
 import { transportRouter } from "../modules/transport/transport.route.js"
+import { reportsRouter } from "../modules/reports/report.route.js"
 
 // Feature modules register their routers here (e.g. apiRouter.use(studentsRouter)).
 export const apiRouter: Router = Router()
@@ -71,3 +72,4 @@ apiRouter.use("/audit-logs", auditLogsRouter)
 apiRouter.use("/messages", messagesRouter)
 apiRouter.use("/library", libraryRouter)
 apiRouter.use("/transport", transportRouter)
+apiRouter.use("/reports", reportsRouter)

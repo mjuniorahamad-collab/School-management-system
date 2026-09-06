@@ -1682,6 +1682,7 @@ enum AuditEntityType {
   TRANSPORT_STOP
   TRANSPORT_DRIVER
   TRANSPORT_ASSIGNMENT
+  REPORT
 }
 
 model AuditLog {

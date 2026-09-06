@@ -1,6 +1,7 @@
 import { Prisma, type AuditAction, type AuditEntityType } from "@prisma/client"
 import { notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import { rowsToCsv } from "../../lib/csv.js"
 import { logWarn } from "../../lib/logger.js"
 import { SUPER_ADMIN_ROLE } from "../../permissions/permissions.js"
 import type { AuthUser } from "../../types/auth.js"
@@ -204,24 +205,16 @@ export function auditLogsToCsv(items: AuditLogDetail[]): string {
     "Entity ID",
     "Summary",
   ]
-  const escapeCell = (value: string | null | undefined): string => {
-    const text = value ?? ""
-    return `"${text.replace(/"/g, '""')}"`
-  }
-  const lines = items.map((item) =>
-    [
-      item.createdAt,
-      item.actorName,
-      item.actorRole,
-      item.action,
-      item.entityType,
-      item.entityId,
-      item.summary,
-    ]
-      .map((cell) => escapeCell(cell as string | null | undefined))
-      .join(","),
-  )
-  return `\uFEFF${header.join(",")}\n${lines.join("\n")}\n`
+  const rows = items.map((item) => [
+    item.createdAt,
+    item.actorName,
+    item.actorRole,
+    item.action,
+    item.entityType,
+    item.entityId,
+    item.summary,
+  ])
+  return rowsToCsv(header, rows)
 }
 
 export async function exportAuditLogsCsv(
