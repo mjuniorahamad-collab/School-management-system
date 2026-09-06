@@ -1,8 +1,8 @@
 // School Management System — Prisma schema.
 //
-// Current milestone: Library module (catalogue + circulation — first Services
-// module). Fees + Payments + Receipts foundation (Phase 7A/7B) and Messages
-// (Phase 9) are complete; Library is Phase 10.
+// Current milestone: Transport module (vehicles, routes & stops, drivers,
+// student assignments). Library (catalogue + circulation), Fees + Payments +
+// Receipts (Phase 7A/7B) and Messages (Phase 9) are complete.
 //
 //   School, AcademicSession, User, Role, Permission, UserRole, RolePermission,
 //   Session(auth tokens), Student, Teacher, Staff, Class, Section, Subject,
@@ -10,7 +10,8 @@
 //   HomeworkSubmission, AssignmentSubmission, Exam, ExamSubject, ExamResult,
 //   ExamMark, FeeStructure, FeeStructureItem, FeeInvoice, FeeInstallment,
 //   Conversation, ConversationParticipant, Message, LibraryBook,
-//   LibraryCopy, LibraryLoan.
+//   LibraryCopy, LibraryLoan, TransportVehicle, TransportRoute,
+//   TransportStop, TransportDriver, TransportAssignment.
 //
 // Decisions:
 //   - `User` is a pure authentication identity (email + password hash). Domain
@@ -140,6 +141,8 @@ model School {
   feePaymentCounter           Int          @default(1)
   // Server-side copy code sequence (see LibraryCopy).
   libraryCopyCounter          Int          @default(1)
+  // Server-side transport vehicle code sequence (see TransportVehicle).
+  transportVehicleCounter     Int          @default(1)
   createdAt                   DateTime     @default(now())
   updatedAt                   DateTime     @updatedAt
 
@@ -180,6 +183,11 @@ model School {
   libraryBooks         LibraryBook[]
   libraryCopies        LibraryCopy[]
   libraryLoans         LibraryLoan[]
+  transportVehicles    TransportVehicle[]
+  transportRoutes      TransportRoute[]
+  transportStops       TransportStop[]
+  transportDrivers     TransportDriver[]
+  transportAssignments TransportAssignment[]
 }
 
 model AcademicSession {
@@ -204,6 +212,8 @@ model AcademicSession {
   homeworks             Homework[]
   assignments           Assignment[]
   exams                 Exam[]
+
+  transportAssignments TransportAssignment[]
 
   @@unique([schoolId, code])
   @@index([schoolId, status])
@@ -270,6 +280,8 @@ model User {
 
   issuedLibraryLoans   LibraryLoan[] @relation("LibraryLoanIssuedBy")
   returnedLibraryLoans LibraryLoan[] @relation("LibraryLoanReturnedBy")
+
+  transportDrivers TransportDriver[]
 
   @@index([schoolId])
   @@index([email])
@@ -536,6 +548,8 @@ model Student {
 
   examResults ExamResult[]
 
+  transportAssignments TransportAssignment[]
+
   @@unique([schoolId, admissionNumber])
   @@index([schoolId, status])
   @@index([schoolId, lastName])
@@ -682,6 +696,8 @@ model Staff {
 
   school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   user   User?  @relation("StaffUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  transportDrivers TransportDriver[]
 
   @@unique([schoolId, employeeId])
   @@index([schoolId, status])
@@ -1620,6 +1636,7 @@ enum AuditAction {
   CORRECT
   ISSUE
   RETURN
+  ASSIGN
 }
 
 enum AuditEntityType {
@@ -1660,6 +1677,11 @@ enum AuditEntityType {
   LIBRARY_BOOK
   LIBRARY_COPY
   LIBRARY_LOAN
+  TRANSPORT_VEHICLE
+  TRANSPORT_ROUTE
+  TRANSPORT_STOP
+  TRANSPORT_DRIVER
+  TRANSPORT_ASSIGNMENT
 }
 
 model AuditLog {
@@ -1825,6 +1847,25 @@ enum LibraryBorrowerType {
   STAFF
 }
 
+enum TransportVehicleType {
+  BUS
+  VAN
+  MINI_BUS
+  CAR
+  OTHER
+}
+
+enum TransportDirection {
+  TO_SCHOOL
+  FROM_SCHOOL
+  BOTH
+}
+
+enum TransportAssignmentStatus {
+  ACTIVE
+  INACTIVE
+}
+
 model LibraryBook {
   id          String          @id @default(uuid())
   schoolId    String
@@ -1895,4 +1936,143 @@ model LibraryLoan {
   @@index([schoolId, dueAt])
   @@index([schoolId, borrowerType, borrowerId])
   @@index([schoolId, copyId])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Transport (Phase 11 — vehicles, routes & stops, drivers, assignments).
+//
+// Decisions:
+//   - School transport management (not fleet ERP). No GPS/tracking, fuel,
+//     maintenance ERP, ticketing, or fee integration in this phase.
+//   - ONE logical transport unit per vehicle per school: `TransportRoute`
+//     carries `@@unique([schoolId, vehicleId])`. Swapping a vehicle to another
+//     route transactionally clears the previous route's vehicleId.
+//   - Assignments are SESSION-SCOPED and history-preserving: a change
+//     deactivates the prior ACTIVE row (status INACTIVE + deactivatedAt) and
+//     creates a fresh ACTIVE row in the same transaction. "One ACTIVE per
+//     (student, session, direction)" is enforced in the service (not as a DB
+//     unique) so many historical rows for the same triple remain legal.
+//   - Capacity is a hard ceiling sourced from the route's ACTIVE vehicle;
+//     assignments to routeless/inactive routes are rejected.
+//   - Drivers are THIN LINKS to existing Staff records (+ optional User login),
+//     never a new people model (decision 5). One driver row per staff member.
+//   - No destructive delete anywhere; status/isActive lifecycle only.
+//
+//   TransportVehicle:           VEH-#### vehicle code via School counter.
+//   TransportRoute:             optional vehicle; unique [schoolId, name].
+//   TransportStop:              ordered by sortOrder then name (reorder uses a
+//                               transaction-safe renumber; sortOrder not unique).
+//   TransportAssignment:        ACTIVE/INACTIVE; direction enum (+ BOTH).
+// ────────────────────────────────────────────────────────────────────────────
+
+model TransportVehicle {
+  id                 String                @id @default(uuid())
+  schoolId           String
+  registrationNumber String
+  vehicleCode        String
+  type               TransportVehicleType  @default(OTHER)
+  make               String?
+  model              String?
+  year               Int?
+  capacity           Int                   @default(0)
+  isActive           Boolean               @default(true)
+  notes              String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  school School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  routes TransportRoute[]
+
+  @@unique([schoolId, registrationNumber])
+  @@unique([schoolId, vehicleCode])
+  @@index([schoolId, isActive])
+}
+
+model TransportRoute {
+  id          String   @id @default(uuid())
+  schoolId    String
+  name        String
+  code        String?
+  vehicleId   String?
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  school      School               @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  vehicle     TransportVehicle?    @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  stops       TransportStop[]
+  drivers     TransportDriver[]
+  assignments TransportAssignment[]
+
+  @@unique([schoolId, name])
+  @@unique([schoolId, vehicleId])
+  @@index([schoolId, isActive])
+}
+
+model TransportStop {
+  id        String   @id @default(uuid())
+  schoolId  String
+  routeId   String
+  name      String
+  sortOrder Int
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school      School               @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  route       TransportRoute       @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  assignments TransportAssignment[]
+
+  @@unique([routeId, name])
+  @@index([schoolId, routeId])
+  @@index([schoolId, isActive])
+}
+
+model TransportDriver {
+  id        String   @id @default(uuid())
+  schoolId  String
+  routeId   String?
+  staffId   String
+  userId    String?
+  roleLabel String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  route  TransportRoute?   @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  staff  Staff             @relation(fields: [staffId], references: [id], onDelete: Restrict)
+  user   User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([schoolId, staffId])
+  @@index([schoolId, routeId])
+  @@index([schoolId, isActive])
+}
+
+model TransportAssignment {
+  id                String                    @id @default(uuid())
+  schoolId          String
+  studentId         String
+  academicSessionId String
+  routeId           String
+  stopId            String
+  direction         TransportDirection
+  status            TransportAssignmentStatus @default(ACTIVE)
+  assignedAt        DateTime                  @default(now())
+  deactivatedAt     DateTime?
+  notes             String?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+
+  school School         @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  session AcademicSession @relation(fields: [academicSessionId], references: [id], onDelete: Restrict)
+  route   TransportRoute @relation(fields: [routeId], references: [id], onDelete: Restrict)
+  stop    TransportStop  @relation(fields: [stopId], references: [id], onDelete: Restrict)
+
+  @@index([schoolId, academicSessionId, routeId, status])
+  @@index([schoolId, studentId, status])
+  @@index([studentId, academicSessionId, direction, status])
+  @@index([schoolId, routeId])
 }

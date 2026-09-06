@@ -18,13 +18,6 @@ export const moduleMeta: Record<string, ModuleMeta> = {
     purpose: "Catalogue, book issue/return, and borrower management.",
     futureConnection: "Connects to the Library API and books table in the database.",
   },
-  "/transport": {
-    path: "/transport",
-    label: "Transport",
-    status: "planned",
-    purpose: "Bus routes, stops, and student–route assignments.",
-    futureConnection: "Connects to the Transport API and routes table in the database.",
-  },
   "/hostel": {
     path: "/hostel",
     label: "Hostel",
