@@ -1641,6 +1641,7 @@ enum AuditAction {
 
 enum AuditEntityType {
   STUDENT
+  GUARDIAN
   TEACHER
   STAFF
   ADMISSION

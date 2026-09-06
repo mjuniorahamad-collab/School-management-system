@@ -13,6 +13,7 @@ import {
   ClipboardList,
   CreditCard,
   DatabaseBackup,
+  ExternalLink,
   LayoutDashboard,
   Library,
   Megaphone,
@@ -39,6 +40,8 @@ export const navigationSections: NavSection[] = [
     label: "Overview",
     items: [
       { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard, requiredPermission: "dashboard:view" },
+      { path: "/portal", label: "My Portal", icon: ExternalLink, requiredPermission: "portal:view" },
+      { path: "/portal/links", label: "Portal Accounts", icon: UserPlus, requiredPermission: "portal:update" },
     ],
   },
   {

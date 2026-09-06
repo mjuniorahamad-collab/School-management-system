@@ -5,9 +5,17 @@ import { ModulePlaceholderPage } from "@/components/placeholders/ModulePlacehold
 import { RouteFallback } from "@/components/shared/RouteFallback"
 import LoginPage from "@/pages/LoginPage"
 import { NotFoundPage } from "@/pages/NotFoundPage"
+import { useAuth } from "@/auth/useAuth"
+import { defaultLandingPath } from "@/auth/routing"
 import { ProtectedRoute } from "@/routes/ProtectedRoute"
 import { getAllNavItems } from "@/routes/navigation"
 import { moduleMeta } from "@/data/moduleMeta"
+
+/** Redirects the app root to the role-appropriate landing page. */
+function LandingRedirect() {
+  const { user } = useAuth()
+  return <Navigate to={defaultLandingPath(user)} replace />
+}
 
 // Feature pages are lazy-loaded so the initial login shell does not pull in
 // chart/reporting (recharts/d3), command-palette (cmdk) or other heavy modules
@@ -73,6 +81,18 @@ const TransportPage = lazy(() =>
 const ReportsPage = lazy(() =>
   import("@/pages/reports/ReportsPage").then((m) => ({ default: m.ReportsPage })),
 )
+const PortalHomePage = lazy(() =>
+  import("@/pages/portal/PortalHomePage").then((m) => ({ default: m.PortalHomePage })),
+)
+const PortalNoticesPage = lazy(() =>
+  import("@/pages/portal/PortalNoticesPage").then((m) => ({ default: m.PortalNoticesPage })),
+)
+const PortalChildPage = lazy(() =>
+  import("@/pages/portal/PortalChildPage").then((m) => ({ default: m.PortalChildPage })),
+)
+const PortalLinksPage = lazy(() =>
+  import("@/pages/portal/PortalLinksPage").then((m) => ({ default: m.PortalLinksPage })),
+)
 
 const DASHBOARD_PATH = "/dashboard"
 const IMPLEMENTED_PATHS = new Set([
@@ -103,6 +123,9 @@ const IMPLEMENTED_PATHS = new Set([
   "/messages",
   "/transport",
   "/reports",
+  "/portal",
+  "/portal/notices",
+  "/portal/links",
 ])
 
 export const router = createBrowserRouter([
@@ -117,7 +140,7 @@ export const router = createBrowserRouter([
       </ProtectedRoute>
     ),
     children: [
-      { index: true, element: <Navigate to={DASHBOARD_PATH} replace /> },
+      { index: true, element: <LandingRedirect /> },
       // Implemented modules use lazy-loaded pages inside a shared Suspense so
       // each chunk loads on demand with a lightweight, non-blocking fallback.
       {
@@ -159,6 +182,10 @@ export const router = createBrowserRouter([
           { path: "/messages", element: <MessagesPage /> },
           { path: "/transport", element: <TransportPage /> },
           { path: "/reports", element: <ReportsPage /> },
+          { path: "/portal", element: <PortalHomePage /> },
+          { path: "/portal/notices", element: <PortalNoticesPage /> },
+          { path: "/portal/links", element: <PortalLinksPage /> },
+          { path: "/portal/:studentId", element: <PortalChildPage /> },
           // Remaining unimplemented modules from the navigation registry.
           ...getAllNavItems()
             .filter((item) => !IMPLEMENTED_PATHS.has(item.path) && !item.path.startsWith("/students"))

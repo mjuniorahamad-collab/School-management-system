@@ -38,6 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (input: LoginInput) => {
       const { user: signedInUser } = await loginRequest(input)
       queryClient.setQueryData(ME_QUERY_KEY, { user: signedInUser })
+      return signedInUser
     },
     [queryClient],
   )

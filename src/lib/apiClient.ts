@@ -102,7 +102,11 @@ export const api = {
   patch<T>(path: string, body: unknown, options?: RequestOptions): Promise<T> {
     return request<T>(path, { method: "PATCH", body: JSON.stringify(body) }, options)
   },
-  delete<T>(path: string, options?: RequestOptions): Promise<T> {
-    return request<T>(path, { method: "DELETE" }, options)
+  delete<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
+    return request<T>(
+      path,
+      { method: "DELETE", ...(body !== undefined ? { body: JSON.stringify(body) } : {}) },
+      options,
+    )
   },
 }

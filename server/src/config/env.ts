@@ -16,6 +16,9 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1).optional(),
   SESSION_ACCESS_TTL_MINUTES: z.coerce.number().int().min(1).max(1440).default(15),
   SESSION_REFRESH_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(7),
+  // Rate limiting for public auth endpoints (brute-force / CPU-abuse defence).
+  AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000).default(20),
+  AUTH_RATE_LIMIT_WINDOW_MINUTES: z.coerce.number().int().min(1).max(60).default(10),
 })
 
 const DEFAULT_CORS_ORIGINS = ["http://localhost:5173", "http://localhost:4173"]
@@ -44,5 +47,9 @@ export const env = {
     accessTtlMs: parsed.data.SESSION_ACCESS_TTL_MINUTES * 60_000,
     refreshTtlMs: parsed.data.SESSION_REFRESH_TTL_DAYS * 86_400_000,
     cookieSecure: parsed.data.NODE_ENV === "production",
+  },
+  authRateLimit: {
+    max: parsed.data.AUTH_RATE_LIMIT_MAX,
+    windowMs: parsed.data.AUTH_RATE_LIMIT_WINDOW_MINUTES * 60_000,
   },
 } as const

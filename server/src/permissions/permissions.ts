@@ -117,6 +117,11 @@ export const PERMISSION_CODES = [
   "backups:create",
   "audit-logs:view",
   "audit-logs:export",
+  // Portal (student/parent self-service). `portal:view` gates the actor's own
+  // ownership-scoped portal; `portal:update` manages identity<->profile links
+  // (account provisioning by school staff — never by the parent themselves).
+  "portal:view",
+  "portal:update",
 ] as const
 
 export type PermissionCode = (typeof PERMISSION_CODES)[number]
@@ -213,6 +218,7 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
     ...codes("events", [VIEW, CREATE]),
     "messages:view",
     "audit-logs:view",
+    "portal:view",
   ],
 
   TEACHER: [
@@ -282,27 +288,15 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
   ],
 
   PARENT: [
-    "dashboard:view",
-    "students:view",
-    "attendance:view",
-    "exams:view",
-    "results:view",
-    "fees:view",
-    "library:view",
-    "notices:view",
-    "events:view",
-    ...codes("messages", [VIEW, CREATE]),
+    // Ownership-scoped portal access only. Parents see their own children's
+    // data through the portal service — never the school-wide admin grants.
+    "portal:view",
   ],
 
   STUDENT: [
-    "dashboard:view",
-    "attendance:view",
-    "exams:view",
-    "results:view",
-    "fees:view",
-    "library:view",
-    "notices:view",
-    "events:view",
+    // Ownership-scoped portal access only (own records via the resolved
+    // linked student profile).
+    "portal:view",
   ],
 }
 

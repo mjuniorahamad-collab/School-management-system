@@ -9,7 +9,7 @@ export interface AuthContextValue {
   isError: boolean
   refetch: () => void
   can: (permission: string) => boolean
-  signIn: (input: LoginInput) => Promise<void>
+  signIn: (input: LoginInput) => Promise<AuthUser>
   signOut: () => Promise<void>
 }
 
