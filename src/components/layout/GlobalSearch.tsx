@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { CornerDownLeft, Search } from "lucide-react"
+import { useQuery } from "@tanstack/react-query"
+import { CornerDownLeft, Loader2, Search } from "lucide-react"
 import {
   CommandDialog,
   CommandEmpty,
@@ -11,12 +12,15 @@ import {
   CommandSeparator,
 } from "@/components/ui/command"
 import { getAllNavItems } from "@/routes/navigation"
-import { searchableStudents } from "@/data/students"
+import { studentsService } from "@/services/studentsService"
+import { useAuth } from "@/auth/useAuth"
 import { Button } from "@/components/ui/button"
 
 export function GlobalSearch() {
+  const { can } = useAuth()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
+  const [debouncedQuery, setDebouncedQuery] = useState("")
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -30,15 +34,22 @@ export function GlobalSearch() {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [])
 
-  const navigationItems = useMemo(() => getAllNavItems(), [])
-
-  const students = useMemo(() => {
-    const term = query.trim().toLowerCase()
-    if (!term) return searchableStudents.slice(0, 5)
-    return searchableStudents
-      .filter((student) => student.name.toLowerCase().includes(term))
-      .slice(0, 5)
+  // Debounce so the live server search does not fire on every keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query.trim()), 200)
+    return () => clearTimeout(timer)
   }, [query])
+
+  const canViewStudents = can("students:view")
+  const studentsQuery = useQuery({
+    queryKey: ["students", "search", debouncedQuery],
+    queryFn: () =>
+      studentsService.list({ page: 1, pageSize: 5, search: debouncedQuery || undefined }),
+    enabled: open && canViewStudents,
+    staleTime: 30_000,
+  })
+
+  const navigationItems = useMemo(() => getAllNavItems(), [])
 
   const run = (path: string) => {
     setOpen(false)
@@ -70,22 +81,30 @@ export function GlobalSearch() {
         />
         <CommandList>
           <CommandEmpty>No results found.</CommandEmpty>
-          {students.length > 0 && (
+          {canViewStudents && (
             <>
               <CommandGroup heading="Students">
-                {students.map((student) => (
-                  <CommandItem
-                    key={student.id}
-                    value={`student-${student.name}`}
-                    onSelect={() => run("/students")}
-                  >
-                    <Search className="size-4" aria-hidden="true" />
-                    <span>{student.name}</span>
-                    <span className="ml-auto text-xs text-muted-foreground">
-                      Class {student.studentClass}-{student.section}
-                    </span>
+                {studentsQuery.isPending ? (
+                  <CommandItem value="__loading-students" disabled>
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                    <span>Searching students...</span>
                   </CommandItem>
-                ))}
+                ) : (
+                  studentsQuery.data?.items.map((student) => (
+                    <CommandItem
+                      key={student.id}
+                      value={`student-${student.name}`}
+                      onSelect={() => run(`/students/${student.id}`)}
+                    >
+                      <Search className="size-4" aria-hidden="true" />
+                      <span>{student.name}</span>
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        {student.admissionNumber}
+                        {student.class?.name ? ` · Class ${student.class.name}${student.section?.name ? `-${student.section.name}` : ""}` : ""}
+                      </span>
+                    </CommandItem>
+                  ))
+                )}
               </CommandGroup>
               <CommandSeparator />
             </>

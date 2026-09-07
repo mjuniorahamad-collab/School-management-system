@@ -245,12 +245,12 @@ Fresh-clone setup:
 - Mock timestamps are date-anchored; keep them moving/relative-safe.
 - The dashboard milestone mocks were removed with the real-data conversion. The
   notification header mock was replaced by the real Notifications API (bell →
-  `NotificationsMenu`). The only remaining dashboard-adjacent mocks are
-  intentionally out-of-scope providers: `src/data/students.ts` →
-  `searchableStudents` (global command palette), plus `moduleMeta.ts`/
-  `messages.ts` — each labeled TEMPORARY MOCK, each consumed only through its
-  service/hook seam. Convert these per-feature when their real endpoints exist;
-  never extend them.
+  `NotificationsMenu`). The global command palette (GlobalSearch) reads real
+  students through `studentsService.list` → `/students/:id`; the old
+  `src/data/students.ts` mock was deleted. The only remaining mock is
+  `src/data/moduleMeta.ts` (module-detail copy for placeholder pages) — labeled
+  TEMPORARY MOCK, consumed only through its own seam. Convert per-feature when a
+  real endpoint exists; never extend it.
 
 ## 17. Error-handling rules
 
