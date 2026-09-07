@@ -19,6 +19,13 @@ const envSchema = z.object({
   // Rate limiting for public auth endpoints (brute-force / CPU-abuse defence).
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000).default(20),
   AUTH_RATE_LIMIT_WINDOW_MINUTES: z.coerce.number().int().min(1).max(60).default(10),
+  // When set, runs behind a reverse proxy that forwards the real client IP
+  // (X-Forwarded-For). Required so rate limiting and request logging see the
+  // caller, not the proxy. Defaults to off so dev/test behavior is unchanged.
+  TRUST_PROXY: z
+    .enum(["true", "false", "1", "0"])
+    .default("false")
+    .transform((value) => value === "true" || value === "1"),
 })
 
 const DEFAULT_CORS_ORIGINS = ["http://localhost:5173", "http://localhost:4173"]
@@ -52,4 +59,5 @@ export const env = {
     max: parsed.data.AUTH_RATE_LIMIT_MAX,
     windowMs: parsed.data.AUTH_RATE_LIMIT_WINDOW_MINUTES * 60_000,
   },
+  trustProxy: parsed.data.TRUST_PROXY,
 } as const

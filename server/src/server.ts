@@ -4,7 +4,10 @@ import { env } from "./config/env.js"
 import { disconnectDatabase } from "./lib/database.js"
 import { logError, logInfo } from "./lib/logger.js"
 
-const app = createApp()
+// In the single-container production deployment the same process serves both the
+// built frontend (`dist/`) and the API. `createApp` checks the directory exists
+// and skips serving otherwise, so a server-only build still boots cleanly.
+const app = createApp({ serveFrontend: env.isProduction })
 
 const server: Server = app.listen(env.port, () => {
   logInfo(`listening on http://localhost:${env.port}${env.apiPrefix} (${env.nodeEnv})`)

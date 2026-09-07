@@ -1,0 +1,65 @@
+# ────────────────────────────────────────────────────────────────────────────
+# Production Compose stack — ONE school per self-hosted container.
+#
+# Runtime configuration is injected from the environment / a .env file next to
+# this compose file. Never hard-code secrets here. Required starters:
+#   POSTGRES_PASSWORD  (set a strong value)
+#   CORS_ORIGIN        (browser origin only if the SPA is served cross-origin;
+#                       same-origin deployments can omit it)
+#
+# The API container already bundles the built frontend (see Dockerfile), so a
+# TLS-terminating reverse proxy (nginx/caddy) in front of :4000 is the only
+# additional production component. Set TRUST_PROXY=true when one is used.
+#
+# NOTE: authored and statically reviewed on a machine without Docker; validate
+# with `docker compose config` and a build on a Docker-enabled machine.
+# ────────────────────────────────────────────────────────────────────────────
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-school}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:-school_management}
+    volumes:
+      - sms-postgres-data:/var/lib/postgresql/data
+    networks: [sms]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-school} -d ${POSTGRES_DB:-school_management}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: ${PORT:-4000}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-school}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:-school_management}
+      TRUST_PROXY: ${TRUST_PROXY:-true}
+      SESSION_ACCESS_TTL_MINUTES: ${SESSION_ACCESS_TTL_MINUTES:-15}
+      SESSION_REFRESH_TTL_DAYS: ${SESSION_REFRESH_TTL_DAYS:-7}
+      AUTH_RATE_LIMIT_MAX: ${AUTH_RATE_LIMIT_MAX:-20}
+      AUTH_RATE_LIMIT_WINDOW_MINUTES: ${AUTH_RATE_LIMIT_WINDOW_MINUTES:-10}
+    ports:
+      - "${API_PORT:-4000}:4000"
+    networks: [sms]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  sms-postgres-data: {}
+
+networks:
+  sms: {}

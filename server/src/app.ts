@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs"
+import path from "node:path"
 import cors from "cors"
 import express from "express"
 import helmet from "helmet"
@@ -7,10 +9,22 @@ import { notFoundHandler } from "./middleware/notFound.js"
 import { requestLogger } from "./middleware/requestLogger.js"
 import { apiRouter } from "./routes/index.js"
 
-export function createApp(): express.Application {
+export interface CreateAppOptions {
+  /**
+   * Serve the built frontend (repo-root `dist/`) from the API process. Used by
+   * the single-container production deployment; the SPA fallback only answers
+   * non-`/api` GETs so API 404s keep returning the error envelope.
+   */
+  serveFrontend?: boolean
+}
+
+export function createApp(options: CreateAppOptions = {}): express.Application {
   const app = express()
 
   app.disable("x-powered-by")
+  // Behind a reverse proxy (`TRUST_PROXY=true`) trust the nearest hop so
+  // `req.ip` (and thus rate limiting) sees the real client, never the proxy.
+  if (env.trustProxy) app.set("trust proxy", 1)
   app.use(helmet())
   app.use(
     cors({
@@ -24,6 +38,23 @@ export function createApp(): express.Application {
   app.use(express.json({ limit: "100kb" }))
 
   app.use(env.apiPrefix, apiRouter)
+
+  if (options.serveFrontend) {
+    // `server/src` under tsx and `server/dist` under node both resolve `../../dist`
+    // to the repo-root frontend build.
+    const distDir = path.resolve(import.meta.dirname, "../../dist")
+    if (existsSync(distDir)) {
+      app.use(express.static(distDir))
+      // SPA fallback (Express 5 requires a named wildcard).
+      app.get("/{*splat}", (req, res, next) => {
+        if (req.path.startsWith("/api/")) {
+          next()
+          return
+        }
+        res.sendFile(path.join(distDir, "index.html"))
+      })
+    }
+  }
 
   app.use(notFoundHandler)
   app.use(errorHandler)

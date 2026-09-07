@@ -192,6 +192,36 @@ The integration suite applies migrations to that database on startup and isolate
 itself with per-test cleanup. Skip if a test database is unavailable — unit tests
 still cover the rules.
 
+### Deployment (container)
+
+The initial production topology is **one school per self-hosted container**. The
+application stays multi-tenant by design — this is a deployment shape, not an
+architectural conversion.
+
+- `Dockerfile` builds a single image that serves **both** the built frontend
+  (`dist/`) and the API (`server/dist/`) from one `node:22-slim` process, running
+  as a non-root user. In `NODE_ENV=production` the server serves the SPA (with a
+  fallback for client-side routes) while `/api/*` keeps returning the error
+  envelope for unknown routes.
+- `docker-compose.prod.yml` runs `api` + `postgres` on a private network; the
+  database has **no published ports**. Set `POSTGRES_PASSWORD` (required) in the
+  shell/environment before `docker compose -f docker-compose.prod.yml up -d --build`.
+- Deploy migrations explicitly (never on app boot):
+  `docker compose -f docker-compose.prod.yml exec api npm exec prisma migrate deploy -- --schema server/prisma/schema.prisma`
+- Run behind a TLS-terminating reverse proxy (nginx/caddy). Set `TRUST_PROXY=true`
+  (see `.env.example`) so rate limiting sees real client IPs.
+- `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` seed the super admin only in
+  non-production; set them per deployment as needed.
+- **Backup/restore:** operational scripts and runbook live in `scripts/` and
+  `docs/operations-runbook.md` (scheduled `pg_dump`, restore drill, upgrade steps).
+  There is intentionally **no backup UI** — backups are infrastructure, not a
+  feature.
+- **Status:** the container artifacts were authored and statically reviewed on a
+  machine without Docker. Validate them with `docker compose config` and a build
+  on a Docker-enabled environment before going live; CI (`.github/workflows/ci.yml`)
+  runs lint, typecheck, both builds, and the full test suite (unit + DB-backed)
+  on every push/PR to `main`.
+
 ## Branding
 
 School name/logo/contact are placeholders ("Bright Future International School")

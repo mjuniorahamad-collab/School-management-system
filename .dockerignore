@@ -1,0 +1,17 @@
+# Keep the build context lean and never ship secrets/images/logs into the image.
+.git
+.gitignore
+.github
+node_modules
+dist
+server/dist
+.env
+.env.*
+!.env.example
+.data
+logs
+*.log
+coverage
+docs
+scripts
+server/tests

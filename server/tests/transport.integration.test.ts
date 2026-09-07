@@ -859,6 +859,17 @@ async function resetAllTables(prisma: PrismaClient): Promise<void> {
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "Message" CASCADE')
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "ConversationParticipant" CASCADE')
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "Conversation" CASCADE')
+  // Fee rows reference enrollments (Restrict FK). Run order must be irrelevant:
+  // other suites leave the shared test DB pristine, truncate the fee stack here
+  // like every other integration suite so studentEnrollment deletes never trip
+  // feeInvoice_enrollmentId_fkey regardless of which suite ran first.
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeReceipt" CASCADE')
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeePayment" CASCADE')
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeInstallment" CASCADE')
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeInvoice" CASCADE')
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeStructureItem" CASCADE')
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeStructure" CASCADE')
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeHead" CASCADE')
   await prisma.timetableEntry.deleteMany()
   await prisma.attendanceRecord.deleteMany()
   await prisma.periodSlot.deleteMany()
