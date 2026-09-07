@@ -151,6 +151,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Admissions API (integration)", () => {
 
   afterEach(async () => {
     await prisma.studentGuardian.deleteMany()
+    await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeInvoice" CASCADE')
     await prisma.studentEnrollment.deleteMany()
     await prisma.student.deleteMany()
     await prisma.guardian.deleteMany()
@@ -475,6 +476,7 @@ async function resetAllTables(prisma: PrismaClient): Promise<void> {
   await prisma.attendanceRecord.deleteMany()
   await prisma.periodSlot.deleteMany()
   await prisma.studentGuardian.deleteMany()
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeInvoice" CASCADE')
   await prisma.studentEnrollment.deleteMany()
   await prisma.student.deleteMany()
   await prisma.guardian.deleteMany()

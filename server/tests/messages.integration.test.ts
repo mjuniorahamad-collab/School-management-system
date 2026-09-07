@@ -497,6 +497,8 @@ async function resetAllTables(prisma: PrismaClient): Promise<void> {
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "AuditLog" CASCADE')
   await prisma.userRole.deleteMany()
   await prisma.tenantMembership.deleteMany()
+  // Fee invoices reference sessions (Restrict FK); clear them before sessions.
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeInvoice" CASCADE')
   await prisma.academicSession.deleteMany()
   await prisma.school.deleteMany()
   await prisma.rolePermission.deleteMany()

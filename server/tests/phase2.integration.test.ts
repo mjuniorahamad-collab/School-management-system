@@ -421,6 +421,7 @@ async function resetAllTables(prisma: PrismaClient): Promise<void> {
   await prisma.teacherClass.deleteMany()
   await prisma.staff.deleteMany()
   await prisma.studentGuardian.deleteMany()
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeInvoice" CASCADE')
   await prisma.studentEnrollment.deleteMany()
   await prisma.student.deleteMany()
   await prisma.guardian.deleteMany()
