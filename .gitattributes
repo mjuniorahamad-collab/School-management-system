@@ -1,0 +1,5 @@
+# Shell scripts must keep LF in the working tree (bash requires it).
+*.sh text eol=lf
+
+# Open/closed braces in these tooling files are cross-platform; normalize.
+*.ps1 text eol=crlf

@@ -1,7 +1,28 @@
 const PREFIX = "[api]"
 
-export function logRequest(method: string, url: string, statusCode: number, durationMs: number): void {
-  console.log(`${PREFIX} ${method} ${url} ${statusCode} ${durationMs.toFixed(1)}ms`)
+export interface RequestLogFields {
+  method: string
+  url: string
+  statusCode: number
+  durationMs: number
+  requestId: string
+  userId?: string
+}
+
+export function logRequest(fields: RequestLogFields): void {
+  console.info(
+    JSON.stringify({
+      level: "info",
+      ts: new Date().toISOString(),
+      component: "api",
+      method: fields.method,
+      url: fields.url,
+      status: fields.statusCode,
+      durationMs: Number(fields.durationMs.toFixed(1)),
+      requestId: fields.requestId,
+      userId: fields.userId,
+    }),
+  )
 }
 
 export function logInfo(message: string): void {
