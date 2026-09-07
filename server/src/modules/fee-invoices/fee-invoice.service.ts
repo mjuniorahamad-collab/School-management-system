@@ -6,6 +6,8 @@ import { buildInvoiceNumber } from "../../lib/id-generators.js"
 import { roundMoney, toMoney } from "../../lib/money.js"
 import type { AuthUser } from "../../types/auth.js"
 import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
+import { buildFeeInvoiceNotificationTitle } from "../notifications/notification.rules.js"
+import { emitNotifications, resolveGuardianUserIds } from "../notifications/notification.service.js"
 import {
   FEE_INVOICE_DETAIL_INCLUDE,
   FEE_INVOICE_LIST_INCLUDE,
@@ -291,7 +293,7 @@ export async function generateInvoices(
       const invoiceNumber = buildInvoiceNumber(resolved.startYear, counter.feeInvoiceCounter)
       const sectionName = enrollment.sectionId ? sectionNames.get(enrollment.sectionId) ?? null : null
 
-      await tx.feeInvoice.create({
+      const invoiceRow = await tx.feeInvoice.create({
         data: {
           schoolId,
           studentId: enrollment.studentId,
@@ -322,6 +324,22 @@ export async function generateInvoices(
             })),
           },
         },
+        select: { id: true },
+      })
+
+      // Portal notifications fan out to the student's linked guardians. The
+      // notification is written in THIS transaction (atomic with the invoice)
+      // and idempotent by its invoice source — retrying generation for the
+      // same invoice never produces a duplicate.
+      await emitNotifications(tx, {
+        schoolId,
+        type: "FEE_INVOICE",
+        title: buildFeeInvoiceNotificationTitle(),
+        body: `A fee invoice (${invoiceNumber}) has been added to your account.`,
+        linkPath: "/portal",
+        sourceEntityType: "FEE_INVOICE",
+        sourceEntityId: invoiceRow.id,
+        recipientUserIds: await resolveGuardianUserIds(tx, enrollment.studentId),
       })
 
       generated += 1

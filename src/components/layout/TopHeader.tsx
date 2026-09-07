@@ -1,25 +1,15 @@
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
-import {
-  Bell,
-  CalendarDays,
-  CheckCheck,
-  LogOut,
-  Menu,
-  Settings,
-  UserRound,
-} from "lucide-react"
-import { toast } from "sonner"
+import { CalendarDays, LogOut, Menu, Settings, UserRound } from "lucide-react"
 import { branding } from "@/config/branding"
 import { findNavItem, getAllNavItems } from "@/routes/navigation"
-import { notifications } from "@/data/notifications"
-import { cn } from "@/lib/utils"
-import { getInitials, timeAgo } from "@/lib/format"
+import { getInitials } from "@/lib/format"
 import { useSidebar } from "@/hooks/useSidebar"
 import { useAuth } from "@/auth/useAuth"
 import { ThemeToggle } from "@/theme/ThemeToggle"
 import { GlobalSearch } from "@/components/layout/GlobalSearch"
 import { MessagesMenu } from "@/components/layout/MessagesMenu"
+import { NotificationsMenu } from "@/components/layout/NotificationsMenu"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
@@ -58,12 +48,6 @@ function findByPathPrefix(pathname: string) {
     .sort((a, b) => b.path.length - a.path.length)[0]
 }
 
-const notificationToneDot: Record<string, string> = {
-  info: "bg-sky-500",
-  warning: "bg-amber-500",
-  success: "bg-emerald-500",
-}
-
 export function TopHeader() {
   const { setMobileOpen } = useSidebar()
   const location = useLocation()
@@ -77,14 +61,6 @@ export function TopHeader() {
     () => getHeaderMeta(location.pathname, displayName),
     [location.pathname, displayName],
   )
-
-  const [readIds, setReadIds] = useState<Set<string>>(new Set())
-  const unreadCount = notifications.filter((item) => !readIds.has(item.id)).length
-
-  const markAllRead = () => {
-    setReadIds(new Set(notifications.map((item) => item.id)))
-    toast.success("All notifications marked as read")
-  }
 
   const handleSignOut = async () => {
     await signOut()
@@ -115,51 +91,7 @@ export function TopHeader() {
       <div className="flex shrink-0 items-center gap-1">
         <ThemeToggle />
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="relative" aria-label="Notifications">
-              <Bell className="size-5" aria-hidden="true" />
-              {unreadCount > 0 && (
-                <span className="absolute top-1.5 right-1.5 flex size-2 rounded-full bg-destructive ring-2 ring-background" />
-              )}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-80 sm:min-w-96">
-            <div className="flex items-center justify-between px-2 py-1.5">
-              <DropdownMenuLabel className="pt-0">Notifications</DropdownMenuLabel>
-              <Button variant="ghost" size="xs" onClick={markAllRead} className="gap-1.5">
-                <CheckCheck className="size-3.5" aria-hidden="true" />
-                Mark all as read
-              </Button>
-            </div>
-            <DropdownMenuSeparator />
-            <div className="max-h-80 overflow-y-auto">
-              {notifications.map((item) => {
-                const read = readIds.has(item.id)
-                return (
-                  <DropdownMenuItem
-                    key={item.id}
-                    className="flex items-start gap-3 py-2.5 align-top"
-                    onSelect={(event) => event.preventDefault()}
-                  >
-                    <span
-                      className={cn("mt-1.5 size-2 shrink-0 rounded-full", notificationToneDot[item.tone])}
-                      aria-hidden="true"
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">{item.title}</span>
-                      <span className="block truncate text-xs text-muted-foreground">{item.detail}</span>
-                      <span className="mt-0.5 block text-[11px] text-muted-foreground/70">
-                        {timeAgo(item.timestamp)}
-                      </span>
-                    </span>
-                    {!read && <span className="mt-1 size-1.5 shrink-0 rounded-full bg-primary" aria-label="Unread" />}
-                  </DropdownMenuItem>
-                )
-              })}
-            </div>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <NotificationsMenu />
 
         <MessagesMenu />
 

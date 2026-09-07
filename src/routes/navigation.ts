@@ -3,6 +3,7 @@ import {
   Banknote,
   BarChart3,
   BedDouble,
+  Bell,
   Blocks,
   BookOpen,
   Bus,
@@ -90,6 +91,7 @@ export const navigationSections: NavSection[] = [
       { path: "/notices", label: "Notices", icon: Megaphone, requiredPermission: "notices:view" },
       { path: "/events", label: "Events", icon: CalendarDays, requiredPermission: "events:view" },
       { path: "/messages", label: "Messages", icon: MessageSquare, requiredPermission: "messages:view" },
+      { path: "/notifications", label: "Notifications", icon: Bell, requiredPermission: "notifications:view" },
     ],
   },
   {

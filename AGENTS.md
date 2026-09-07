@@ -244,11 +244,13 @@ Fresh-clone setup:
   data comes from the API.
 - Mock timestamps are date-anchored; keep them moving/relative-safe.
 - The dashboard milestone mocks were removed with the real-data conversion. The
-  only remaining dashboard-adjacent mocks are intentionally out-of-scope providers:
-  `src/data/students.ts` → `searchableStudents` (global command palette) and
-  `src/data/notifications.ts` (header), plus `moduleMeta.ts`/`messages.ts` —
-  each labeled TEMPORARY MOCK, each consumed only through its service/hook seam.
-  Convert these per-feature when their real endpoints exist; never extend them.
+  notification header mock was replaced by the real Notifications API (bell →
+  `NotificationsMenu`). The only remaining dashboard-adjacent mocks are
+  intentionally out-of-scope providers: `src/data/students.ts` →
+  `searchableStudents` (global command palette), plus `moduleMeta.ts`/
+  `messages.ts` — each labeled TEMPORARY MOCK, each consumed only through its
+  service/hook seam. Convert these per-feature when their real endpoints exist;
+  never extend them.
 
 ## 17. Error-handling rules
 
@@ -343,7 +345,7 @@ Design decisions — follow these when extending auth:
   Errors: unauthenticated → `UNAUTHORIZED` (401); missing permission →
   `FORBIDDEN` (403).
 - **RBAC models.** `User` ↔ `UserRole` ↔ `Role` ↔ `RolePermission` ↔ `Permission`.
-  `server/src/permissions/permissions.ts` is the canonical catalog: 98 permission
+  `server/src/permissions/permissions.ts` is the canonical catalog: 115 permission
   codes across 11 roles (`SUPER_ADMIN` bypasses checks by role, never by email).
   `requirePermission(code)` enforces server-side as route middleware — never inside
   controllers. Frontend `can()` mirrors checks for UI hiding only; it is not a

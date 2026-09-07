@@ -5,6 +5,8 @@ import { buildPaymentNumber, buildReceiptNumber } from "../../lib/id-generators.
 import { roundMoney, toMoney } from "../../lib/money.js"
 import type { AuthUser } from "../../types/auth.js"
 import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
+import { buildFeePaymentNotificationTitle } from "../notifications/notification.rules.js"
+import { emitNotifications, resolveGuardianUserIds } from "../notifications/notification.service.js"
 import {
   deriveInstallmentStatus,
   deriveInvoiceStatus,
@@ -280,6 +282,20 @@ export async function createPayment(
         studentId: invoice.student.id,
         admissionNumber: invoice.student.admissionNumber,
       },
+    })
+
+    // Portal notifications fan out to the student's linked guardians, written
+    // in THIS transaction (atomic with the payment) and idempotent by source —
+    // an idempotency-key replay of the same payment never re-notifies.
+    await emitNotifications(tx, {
+      schoolId,
+      type: "FEE_PAYMENT",
+      title: buildFeePaymentNotificationTitle(),
+      body: `Your payment of ${paymentAmount} on invoice ${invoice.invoiceNumber} has been received.`,
+      linkPath: "/portal",
+      sourceEntityType: "FEE_PAYMENT",
+      sourceEntityId: paymentRow.id,
+      recipientUserIds: await resolveGuardianUserIds(tx, invoice.student.id),
     })
 
     return paymentRow

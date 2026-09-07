@@ -31,6 +31,7 @@ import { receiptsRouter } from "../modules/receipts/receipt.route.js"
 import { dashboardRouter } from "../modules/dashboard/dashboard.route.js"
 import { auditLogsRouter } from "../modules/audit-logs/audit-log.route.js"
 import { messagesRouter } from "../modules/messages/message.route.js"
+import { notificationsRouter } from "../modules/notifications/notification.route.js"
 import { libraryRouter } from "../modules/library/library.route.js"
 import { transportRouter } from "../modules/transport/transport.route.js"
 import { reportsRouter } from "../modules/reports/report.route.js"
@@ -71,6 +72,7 @@ apiRouter.use("/receipts", receiptsRouter)
 apiRouter.use("/dashboard", dashboardRouter)
 apiRouter.use("/audit-logs", auditLogsRouter)
 apiRouter.use("/messages", messagesRouter)
+apiRouter.use("/notifications", notificationsRouter)
 apiRouter.use("/library", libraryRouter)
 apiRouter.use("/transport", transportRouter)
 apiRouter.use("/reports", reportsRouter)

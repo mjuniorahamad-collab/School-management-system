@@ -8,6 +8,8 @@ import { getPrisma } from "../../lib/database.js"
 import { toMoney } from "../../lib/money.js"
 import type { AuthUser } from "../../types/auth.js"
 import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
+import { buildPortalLinkNotificationTitle } from "../notifications/notification.rules.js"
+import { emitNotifications } from "../notifications/notification.service.js"
 import type {
   PortalAttendanceRecord,
   PortalAttendanceResult,
@@ -896,6 +898,20 @@ export async function linkProfile(auth: AuthUser, input: CreateLinkInput) {
       summary: `Linked ${input.profileType.toLowerCase()} profile "${profile.name}" to a portal account`,
       metadata: { profileId: input.profileId, profileType: input.profileType, userId: input.userId },
       diff: { fields: [{ field: "userId", before: null, after: input.userId }] },
+    })
+
+    // Welcome notification, written in THIS transaction (atomic with the link)
+    // and idempotent by source — linking another profile to the same user does
+    // not send a second welcome.
+    await emitNotifications(tx, {
+      schoolId: auth.school.id,
+      type: "PORTAL_LINK",
+      title: buildPortalLinkNotificationTitle(),
+      body: "Your portal account is ready — sign in to view records.",
+      linkPath: "/portal",
+      sourceEntityType: "USER",
+      sourceEntityId: input.userId,
+      recipientUserIds: [input.userId],
     })
   })
 

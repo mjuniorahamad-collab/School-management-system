@@ -122,6 +122,12 @@ export const PERMISSION_CODES = [
   // (account provisioning by school staff — never by the parent themselves).
   "portal:view",
   "portal:update",
+  // Notifications (per-user in-app feed). `notifications:view` is universal —
+  // every member of a tenant can see their own notifications (parents/students
+  // included); `notifications:create` is restricted to leadership who may send
+  // school-targeted notifications to roles.
+  "notifications:view",
+  "notifications:create",
 ] as const
 
 export type PermissionCode = (typeof PERMISSION_CODES)[number]
@@ -219,6 +225,8 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
     "messages:view",
     "audit-logs:view",
     "portal:view",
+    "notifications:view",
+    "notifications:create",
   ],
 
   TEACHER: [
@@ -237,6 +245,7 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
     "notices:view",
     "events:view",
     ...codes("messages", [VIEW, CREATE]),
+    "notifications:view",
   ],
 
   ACCOUNTANT: [
@@ -249,6 +258,7 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
     ...codes("reports", [VIEW, EXPORT]),
     "results:export",
     "settings:view",
+    "notifications:view",
   ],
 
   LIBRARIAN: [
@@ -260,6 +270,7 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
     "notices:view",
     "events:view",
     "messages:view",
+    "notifications:view",
   ],
 
   TRANSPORT_MANAGER: [
@@ -267,6 +278,7 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
     "students:view",
     ...codes("transport", [VIEW, CREATE, UPDATE, DELETE]),
     "messages:view",
+    "notifications:view",
   ],
 
   HOSTEL_WARDEN: [
@@ -274,6 +286,7 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
     "students:view",
     ...codes("hostel", [VIEW, CREATE, UPDATE, DELETE]),
     "messages:view",
+    "notifications:view",
   ],
 
   RECEPTIONIST: [
@@ -285,18 +298,25 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
     "notices:view",
     "events:view",
     ...codes("messages", [VIEW, CREATE]),
+    "notifications:view",
   ],
 
   PARENT: [
     // Ownership-scoped portal access only. Parents see their own children's
     // data through the portal service — never the school-wide admin grants.
     "portal:view",
+    // Notifications are ownership-scoped too — a parent only ever sees
+    // notifications addressed to them (their own user id).
+    "notifications:view",
   ],
 
   STUDENT: [
     // Ownership-scoped portal access only (own records via the resolved
     // linked student profile).
     "portal:view",
+    // Notifications are ownership-scoped — a student only ever sees
+    // notifications addressed to them (their own user id).
+    "notifications:view",
   ],
 }
 

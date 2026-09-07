@@ -75,6 +75,9 @@ const AuditLogsPage = lazy(() =>
 const MessagesPage = lazy(() =>
   import("@/pages/messages").then((m) => ({ default: m.MessagesPage })),
 )
+const NotificationsPage = lazy(() =>
+  import("@/pages/notifications").then((m) => ({ default: m.NotificationsPage })),
+)
 const TransportPage = lazy(() =>
   import("@/pages/transport/TransportPage").then((m) => ({ default: m.TransportPage })),
 )
@@ -121,6 +124,7 @@ const IMPLEMENTED_PATHS = new Set([
   "/users",
   "/audit-logs",
   "/messages",
+  "/notifications",
   "/transport",
   "/reports",
   "/portal",
@@ -180,6 +184,7 @@ export const router = createBrowserRouter([
           { path: "/users", element: <UsersPage /> },
           { path: "/audit-logs", element: <AuditLogsPage /> },
           { path: "/messages", element: <MessagesPage /> },
+          { path: "/notifications", element: <NotificationsPage /> },
           { path: "/transport", element: <TransportPage /> },
           { path: "/reports", element: <ReportsPage /> },
           { path: "/portal", element: <PortalHomePage /> },
