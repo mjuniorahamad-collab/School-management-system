@@ -2,7 +2,6 @@ import {
   Award,
   Banknote,
   BarChart3,
-  BedDouble,
   Bell,
   Blocks,
   BookOpen,
@@ -13,7 +12,6 @@ import {
   ClipboardCheck,
   ClipboardList,
   CreditCard,
-  DatabaseBackup,
   ExternalLink,
   LayoutDashboard,
   Library,
@@ -30,7 +28,6 @@ import {
   UserPlus,
   Users,
   UsersRound,
-  Wallet,
 } from "lucide-react"
 
 import type { NavItem, NavSection } from "@/types"
@@ -72,7 +69,6 @@ export const navigationSections: NavSection[] = [
       { path: "/fees", label: "Fees Management", icon: Banknote, requiredPermission: "fees:view" },
       { path: "/payments", label: "Payments", icon: CreditCard, requiredPermission: "payments:view" },
       { path: "/receipts", label: "Receipts", icon: Receipt, requiredPermission: "receipts:view" },
-      { path: "/payroll", label: "Payroll", icon: Wallet, requiredPermission: "payroll:view" },
     ],
   },
   {
@@ -81,7 +77,6 @@ export const navigationSections: NavSection[] = [
     items: [
       { path: "/library", label: "Library", icon: Library, requiredPermission: "library:view" },
       { path: "/transport", label: "Transport", icon: Bus, requiredPermission: "transport:view" },
-      { path: "/hostel", label: "Hostel", icon: BedDouble, requiredPermission: "hostel:view" },
     ],
   },
   {
@@ -105,7 +100,6 @@ export const navigationSections: NavSection[] = [
     items: [
       { path: "/users", label: "Users & Roles", icon: UserCog, requiredPermission: "users:view" },
       { path: "/settings", label: "Settings", icon: Settings, requiredPermission: "settings:view" },
-      { path: "/backups", label: "Backups", icon: DatabaseBackup, requiredPermission: "backups:view" },
       { path: "/audit-logs", label: "Audit Logs", icon: ScrollText, requiredPermission: "audit-logs:view" },
     ],
   },

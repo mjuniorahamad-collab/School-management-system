@@ -11,12 +11,12 @@ describe("hasPermission", () => {
 
   it("returns false when the subject lacks the required code", () => {
     expect(hasPermission(["TEACHER"], permissions, ["students:delete"])).toBe(false)
-    expect(hasPermission(["TEACHER"], permissions, ["payroll:view"])).toBe(false)
+    expect(hasPermission(["TEACHER"], permissions, ["academic-sessions:view"])).toBe(false)
   })
 
   it("uses ANY semantics for multiple required codes", () => {
     expect(hasPermission(["TEACHER"], permissions, ["students:delete", "students:view"])).toBe(true)
-    expect(hasPermission(["TEACHER"], permissions, ["students:delete", "payroll:view"])).toBe(false)
+    expect(hasPermission(["TEACHER"], permissions, ["students:delete", "academic-sessions:view"])).toBe(false)
   })
 
   it("grants everything to SUPER_ADMIN regardless of grants", () => {

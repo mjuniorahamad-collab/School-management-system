@@ -1,15 +1,12 @@
 import { lazy, Suspense } from "react"
 import { createBrowserRouter, Navigate, Outlet } from "react-router-dom"
 import { AppShell } from "@/components/layout/AppShell"
-import { ModulePlaceholderPage } from "@/components/placeholders/ModulePlaceholderPage"
 import { RouteFallback } from "@/components/shared/RouteFallback"
 import LoginPage from "@/pages/LoginPage"
 import { NotFoundPage } from "@/pages/NotFoundPage"
 import { useAuth } from "@/auth/useAuth"
 import { defaultLandingPath } from "@/auth/routing"
 import { ProtectedRoute } from "@/routes/ProtectedRoute"
-import { getAllNavItems } from "@/routes/navigation"
-import { moduleMeta } from "@/data/moduleMeta"
 
 /** Redirects the app root to the role-appropriate landing page. */
 function LandingRedirect() {
@@ -98,39 +95,6 @@ const PortalLinksPage = lazy(() =>
 )
 
 const DASHBOARD_PATH = "/dashboard"
-const IMPLEMENTED_PATHS = new Set([
-  DASHBOARD_PATH,
-  "/students",
-  "/academic-sessions",
-  "/classes",
-  "/sections",
-  "/subjects",
-  "/teachers",
-  "/staff",
-  "/notices",
-  "/events",
-  "/admissions",
-  "/settings",
-  "/timetable",
-  "/attendance",
-  "/homework",
-  "/assignments",
-  "/examinations",
-  "/results",
-  "/fees",
-  "/library",
-  "/payments",
-  "/receipts",
-  "/users",
-  "/audit-logs",
-  "/messages",
-  "/notifications",
-  "/transport",
-  "/reports",
-  "/portal",
-  "/portal/notices",
-  "/portal/links",
-])
 
 export const router = createBrowserRouter([
   {
@@ -191,13 +155,6 @@ export const router = createBrowserRouter([
           { path: "/portal/notices", element: <PortalNoticesPage /> },
           { path: "/portal/links", element: <PortalLinksPage /> },
           { path: "/portal/:studentId", element: <PortalChildPage /> },
-          // Remaining unimplemented modules from the navigation registry.
-          ...getAllNavItems()
-            .filter((item) => !IMPLEMENTED_PATHS.has(item.path) && !item.path.startsWith("/students"))
-            .map((item) => ({
-              path: item.path,
-              element: <ModulePlaceholderPage module={moduleMeta[item.path]} />,
-            })),
           { path: "*", element: <NotFoundPage /> },
         ],
       },

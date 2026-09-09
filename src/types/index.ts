@@ -104,16 +104,6 @@ export interface QuickAction {
   icon: LucideIcon
 }
 
-export type ModuleStatus = "planned" | "in-progress" | "ready"
-
-export interface ModuleMeta {
-  path: string
-  label: string
-  status: ModuleStatus
-  purpose: string
-  futureConnection: string
-}
-
 export type NavSectionId =
   | "overview"
   | "academics"
