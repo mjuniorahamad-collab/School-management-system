@@ -69,6 +69,24 @@ Backup files are sensitive (full student/staff/financial data). Store them
 encrypted at rest, restrict access, and treat them like production secrets.
 The `backups/` directory is git-ignored; never commit `.dump` files.
 
+## Profile-photo object storage
+
+Profile photos are **not** in PostgreSQL — the DB stores only the object key
+in each entity's `photoUrl` column (e.g. `photos/<schoolId>/students/<uuid>.jpg`).
+
+- **Local provider (`STORAGE_PROVIDER=local`):** photos live in the persistent
+  `server/uploads/` directory (git-ignored, configurable via
+  `STORAGE_LOCAL_DIR`). Back it up alongside the database with the same
+  schedule/rotation, and restore it with the DB so keys never dangle.
+- **S3 provider (`STORAGE_PROVIDER=s3`):** photos live in the S3/R2 bucket.
+  Enable bucket versioning or lifecycle/replication backups in the provider
+  console; at minimum, treat the bucket as primary data, never ephemeral.
+- Photos are sensitive personal data (student/minor images). Encrypt buckets at
+  rest, keep them **private** (all reads go through the authenticated photo
+  routes, never a public URL), and restrict access to the backup artifacts.
+- The key prefix embeds the owning `schoolId`, so a leaked key cannot be used
+  to fetch another tenant's objects; restore into the same tenant namespace.
+
 ## Database restore
 
 **Restoring destroys the current contents** of the target database. The scripts

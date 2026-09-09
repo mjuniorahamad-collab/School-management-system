@@ -18,6 +18,7 @@ export interface TeacherListItem {
   joiningDate: string
   createdAt: string
   updatedAt: string
+  photoUrl: string | null
 }
 
 export interface TeacherSubjectAssignment {

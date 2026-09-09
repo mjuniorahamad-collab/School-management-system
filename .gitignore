@@ -46,3 +46,6 @@ playwright-report/
 # Prisma (future)
 server/prisma/*.db
 server/prisma/*.db-journal
+
+# Local object storage for profile photos (STORAGE_PROVIDER=local)
+server/uploads/

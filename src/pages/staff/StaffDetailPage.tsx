@@ -3,13 +3,14 @@ import { ArrowLeft, Edit } from "lucide-react"
 import { Link, useParams, useSearchParams } from "react-router-dom"
 import { useAuth } from "@/auth/useAuth"
 import { PageContainer } from "@/components/layout/PageContainer"
+import { ProfilePhotoField } from "@/components/shared/ProfilePhotoField"
 import { StaffFormDialog } from "@/components/staff/StaffFormDialog"
 import { StaffStatusBadge } from "@/components/staff/StaffStatusBadge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useStaff } from "@/hooks/useStaff"
+import { useStaff, useStaffPhoto } from "@/hooks/useStaff"
 import { formatFullDate } from "@/lib/format"
 import type { EmployeeStatus } from "@/types/staff"
 
@@ -29,6 +30,7 @@ export function StaffDetailPage() {
   const page = Math.max(1, Number(searchParams.get("page")) || 1)
   const pageSize = Math.max(1, Number(searchParams.get("pageSize")) || 25)
   const { data, isPending, isError, refetch } = useStaff(id)
+  const { uploadPhoto, removePhoto, isUploading, isRemoving } = useStaffPhoto(id)
   const [dialogOpen, setDialogOpen] = useState(false)
 
   return (
@@ -62,20 +64,31 @@ export function StaffDetailPage() {
       {data && (
         <div className="flex flex-col gap-4">
           <Card>
-            <CardContent className="flex flex-col gap-4 pt-6">
-              <div>
+            <CardContent className="flex flex-col gap-4 pt-6 sm:flex-row sm:items-center">
+              <ProfilePhotoField
+                kind="staff"
+                personId={data.id}
+                name={data.name}
+                photoUrl={data.photoUrl}
+                canEdit={can("staff:update")}
+                onUpload={uploadPhoto}
+                onRemove={removePhoto}
+                isUploading={isUploading}
+                isRemoving={isRemoving}
+              />
+              <div className="min-w-0 flex-1">
                 <h2 className="text-xl font-semibold tracking-tight text-foreground">
                   {data.name}
                 </h2>
                 <p className="mt-0.5 text-sm text-muted-foreground">
                   {data.employeeId} · {data.designation}
                 </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <StaffStatusBadge status={data.status as EmployeeStatus} />
-                <Badge variant="outline">
-                  {data.gender.charAt(0).toUpperCase() + data.gender.slice(1).toLowerCase()}
-                </Badge>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <StaffStatusBadge status={data.status as EmployeeStatus} />
+                  <Badge variant="outline">
+                    {data.gender.charAt(0).toUpperCase() + data.gender.slice(1).toLowerCase()}
+                  </Badge>
+                </div>
               </div>
             </CardContent>
           </Card>

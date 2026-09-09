@@ -1,9 +1,11 @@
 import { ChevronRight, Edit } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { Skeleton } from "@/components/ui/skeleton"
+import { PersonAvatar } from "@/components/shared/PersonAvatar"
 import { StaffStatusBadge } from "@/components/staff/StaffStatusBadge"
 import type { StaffListItem } from "@/types/staff"
 import { formatFullDate } from "@/lib/format"
+import { photoDisplayUrl } from "@/lib/photoUrl"
 
 interface StaffViewProps {
   items: StaffListItem[]
@@ -43,8 +45,16 @@ export function StaffTable({ items, isPending, isError, canEdit, onRetry, onEdit
                 onClick={() => navigate(`/staff/${staff.id}`)}
               >
                 <td className="px-4 py-3">
-                  <p className="font-medium text-foreground">{staff.name}</p>
-                  <p className="text-xs text-muted-foreground">{staff.employeeId}</p>
+                  <div className="flex items-center gap-3">
+                    <PersonAvatar
+                      name={staff.name}
+                      photoUrl={photoDisplayUrl("staff", staff.id, staff.photoUrl)}
+                    />
+                    <div className="min-w-0">
+                      <p className="font-medium text-foreground">{staff.name}</p>
+                      <p className="text-xs text-muted-foreground">{staff.employeeId}</p>
+                    </div>
+                  </div>
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
                   {staff.department}
@@ -95,6 +105,10 @@ export function StaffCards({ items, isPending, isError, canEdit, onRetry, onEdit
       {items.map((staff) => (
         <li key={staff.id}>
           <div className="flex items-center gap-3 rounded-xl bg-card p-4 ring-1 ring-foreground/10 transition-colors hover:bg-muted/40">
+            <PersonAvatar
+              name={staff.name}
+              photoUrl={photoDisplayUrl("staff", staff.id, staff.photoUrl)}
+            />
             <button
               type="button"
               onClick={() => navigate(`/staff/${staff.id}`)}

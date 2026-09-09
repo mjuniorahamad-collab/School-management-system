@@ -73,5 +73,6 @@ export function mapTeacherListItem(row: TeacherListItemRow): TeacherListItem {
     joiningDate: row.joiningDate.toISOString(),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    photoUrl: row.photoUrl,
   }
 }

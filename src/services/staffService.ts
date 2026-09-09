@@ -1,4 +1,5 @@
 import { api } from "@/lib/apiClient"
+import type { PhotoResult } from "@/types/photos"
 import type {
   StaffDetail,
   StaffFormPayload,
@@ -34,5 +35,13 @@ export const staffService = {
   },
   update(id: string, payload: Partial<StaffFormPayload>): Promise<StaffDetail> {
     return api.patch<StaffDetail>(`/staff/${id}`, payload)
+  },
+  uploadPhoto(id: string, file: File): Promise<PhotoResult> {
+    const formData = new FormData()
+    formData.append("photo", file)
+    return api.putForm<PhotoResult>(`/staff/${id}/photo`, formData)
+  },
+  removePhoto(id: string): Promise<PhotoResult> {
+    return api.delete<PhotoResult>(`/staff/${id}/photo`)
   },
 }

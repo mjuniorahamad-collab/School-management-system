@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { teachersService } from "@/services/teachersService"
-import type { TeacherFormPayload, TeachersQuery } from "@/types/teachers"
+import type { TeacherDetail, TeacherFormPayload, TeachersQuery } from "@/types/teachers"
 
 const TEACHERS_QUERY_KEY = ["teachers"] as const
 
@@ -64,4 +64,45 @@ export function useUpdateTeacher(id: string) {
       toast.error("Could not update teacher", { description: error.message })
     },
   })
+}
+
+/** Upload/replace + remove mutations for a teacher's profile photo. */
+export function useTeacherPhoto(id: string) {
+  const queryClient = useQueryClient()
+
+  const patchPhotoUrl = (photoUrl: string | null) => {
+    queryClient.setQueryData<TeacherDetail>(QUERY_KEYS.detail(id), (current) =>
+      current ? { ...current, photoUrl } : current,
+    )
+    queryClient.invalidateQueries({ queryKey: TEACHERS_QUERY_KEY })
+  }
+
+  const upload = useMutation({
+    mutationFn: (file: File) => teachersService.uploadPhoto(id, file),
+    onSuccess: (result) => {
+      patchPhotoUrl(result.photoUrl)
+      toast.success("Photo updated", { description: "The profile photo was saved." })
+    },
+    onError: (error: Error) => {
+      toast.error("Could not upload photo", { description: error.message })
+    },
+  })
+
+  const remove = useMutation({
+    mutationFn: () => teachersService.removePhoto(id),
+    onSuccess: (result) => {
+      patchPhotoUrl(result.photoUrl)
+      toast.success("Photo removed", { description: "The profile photo was removed." })
+    },
+    onError: (error: Error) => {
+      toast.error("Could not remove photo", { description: error.message })
+    },
+  })
+
+  return {
+    uploadPhoto: upload.mutate,
+    removePhoto: remove.mutate,
+    isUploading: upload.isPending,
+    isRemoving: remove.isPending,
+  }
 }

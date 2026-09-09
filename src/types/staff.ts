@@ -29,6 +29,7 @@ export interface StaffListItem {
   joiningDate: string
   createdAt: string
   updatedAt: string
+  photoUrl: string | null
 }
 
 export interface StaffDetail extends StaffListItem {

@@ -2,13 +2,13 @@ import { ArrowLeft, BadgeCheck, CalendarDays, Hash, Mail, MapPin, Pencil, Phone,
 import { Link, useParams } from "react-router-dom"
 import { useAuth } from "@/auth/useAuth"
 import { PageContainer } from "@/components/layout/PageContainer"
-import { StudentAvatar } from "@/components/shared/StudentAvatar"
+import { ProfilePhotoField } from "@/components/shared/ProfilePhotoField"
 import { StudentStatusBadge } from "@/components/students/StudentStatusBadge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useStudent } from "@/hooks/useStudents"
+import { useStudent, useStudentPhoto } from "@/hooks/useStudents"
 import { formatFullDate } from "@/lib/format"
 
 function DetailRow({
@@ -35,6 +35,7 @@ export function StudentDetailPage() {
   const { id = "" } = useParams()
   const { can } = useAuth()
   const { data: student, isPending, isError, refetch } = useStudent(id)
+  const { uploadPhoto, removePhoto, isUploading, isRemoving } = useStudentPhoto(id)
 
   const place = student?.enrollment
 
@@ -72,7 +73,17 @@ export function StudentDetailPage() {
         <div className="flex flex-col gap-4">
           <Card>
             <CardContent className="flex flex-col gap-4 pt-6 sm:flex-row sm:items-start">
-              <StudentAvatar name={student.name} className="size-16 text-xl" />
+              <ProfilePhotoField
+                kind="students"
+                personId={student.id}
+                name={student.name}
+                photoUrl={student.photoUrl}
+                canEdit={can("students:update")}
+                onUpload={uploadPhoto}
+                onRemove={removePhoto}
+                isUploading={isUploading}
+                isRemoving={isRemoving}
+              />
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-xl font-semibold tracking-tight text-foreground">

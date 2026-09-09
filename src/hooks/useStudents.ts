@@ -90,3 +90,44 @@ export function useUpdateStudent(id: string) {
     },
   })
 }
+
+/** Upload/replace + remove mutations for a student's profile photo. */
+export function useStudentPhoto(id: string) {
+  const queryClient = useQueryClient()
+
+  const patchPhotoUrl = (photoUrl: string | null) => {
+    queryClient.setQueryData<StudentDetail>(QUERY_KEYS.student(id), (current) =>
+      current ? { ...current, photoUrl } : current,
+    )
+    queryClient.invalidateQueries({ queryKey: STUDENTS_QUERY_KEY })
+  }
+
+  const upload = useMutation({
+    mutationFn: (file: File) => studentsService.uploadPhoto(id, file),
+    onSuccess: (result) => {
+      patchPhotoUrl(result.photoUrl)
+      toast.success("Photo updated", { description: "The profile photo was saved." })
+    },
+    onError: (error: Error) => {
+      toast.error("Could not upload photo", { description: describeError(error) })
+    },
+  })
+
+  const remove = useMutation({
+    mutationFn: () => studentsService.removePhoto(id),
+    onSuccess: (result) => {
+      patchPhotoUrl(result.photoUrl)
+      toast.success("Photo removed", { description: "The profile photo was removed." })
+    },
+    onError: (error: Error) => {
+      toast.error("Could not remove photo", { description: describeError(error) })
+    },
+  })
+
+  return {
+    uploadPhoto: upload.mutate,
+    removePhoto: remove.mutate,
+    isUploading: upload.isPending,
+    isRemoving: remove.isPending,
+  }
+}

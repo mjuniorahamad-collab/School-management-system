@@ -4,6 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { StudentAvatar } from "@/components/shared/StudentAvatar"
 import { StudentStatusBadge } from "@/components/students/StudentStatusBadge"
 import { formatFullDate } from "@/lib/format"
+import { photoDisplayUrl } from "@/lib/photoUrl"
 import type { StudentListItem } from "@/types/students"
 
 interface StudentsViewProps {
@@ -67,7 +68,10 @@ export function StudentsTable({ items, isPending, isError, onRetry }: StudentsVi
               >
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
-                    <StudentAvatar name={student.name} />
+                    <StudentAvatar
+                      name={student.name}
+                      photoUrl={photoDisplayUrl("students", student.id, student.photoUrl)}
+                    />
                     <div className="min-w-0">
                       <p className="truncate font-medium text-foreground">{student.name}</p>
                       <p className="truncate text-xs text-muted-foreground">
@@ -153,7 +157,10 @@ export function StudentsCards({ items, isPending, isError, onRetry }: StudentsVi
             onClick={() => navigate(`/students/${student.id}`)}
             className="flex w-full items-center gap-3 rounded-xl bg-card p-4 text-left ring-1 ring-foreground/10 transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           >
-            <StudentAvatar name={student.name} />
+            <StudentAvatar
+              name={student.name}
+              photoUrl={photoDisplayUrl("students", student.id, student.photoUrl)}
+            />
             <span className="min-w-0 flex-1">
               <span className="flex items-center justify-between gap-2">
                 <span className="truncate text-sm font-medium text-foreground">{student.name}</span>

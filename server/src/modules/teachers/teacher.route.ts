@@ -8,6 +8,8 @@ import {
   listTeachersHandler,
   updateTeacherHandler,
 } from "./teacher.controller.js"
+import { photoRoutes } from "../photos/photo.route.js"
+import { teacherPhotoEntity } from "./teacher.photo-entity.js"
 
 // Teachers module. Every route requires an authenticated session; each action
 // is guarded by a capability permission. There is intentionally NO DELETE —
@@ -21,3 +23,9 @@ teachersRouter.get("/meta", requirePermission("teachers:view"), getTeacherMetaHa
 teachersRouter.post("/", requirePermission("teachers:create"), createTeacherHandler)
 teachersRouter.get("/:id", requirePermission("teachers:view"), getTeacherHandler)
 teachersRouter.patch("/:id", requirePermission("teachers:update"), updateTeacherHandler)
+
+// Profile photos: upload/replace (PUT), remove (DELETE), authenticated serving (GET).
+teachersRouter.use("/:id/photo", photoRoutes(teacherPhotoEntity, {
+  view: "teachers:view",
+  update: "teachers:update",
+}))

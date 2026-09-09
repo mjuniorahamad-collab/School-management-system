@@ -34,34 +34,56 @@ production features come next, each with its own written domain specification.
 
 ## 2. Product scope
 
-Completed:
+Completed (committed, real DB-backed end-to-end implementation — backend
+route/controller/service + Prisma model, RBAC-guarded REST under `/api/v1`,
+frontend service/hook/component/page, tenant isolation, and unit/integration
+tests):
 
-- Premium admin dashboard foundation (frontend) — PROTECTED BASELINE.
-- Backend API foundation (Express + TypeScript) with health endpoint.
-- Frontend API client boundary.
 - Authentication + RBAC v1 — real DB-backed email/password login, opaque
   refresh/access cookie sessions, roles + permissions, guarded routes and nav
   (design in section 26).
-- Students module (end-to-end implemented): server-generated admission numbers,
-  per-session enrollment placement, guardians, status lifecycle, CSV export,
-  RBAC-guarded REST under `/api/v1/students`, full frontend, unit + DB-backed
-  integration tests.
-- Dashboard real-data ("Insights Foundation"): the dashboard now reads real,
-  tenant-scoped, read-only aggregations under `/api/v1/dashboard` (stats,
-  attendance, fee analytics + active-session fee status, top-performing classes,
-  recent students, events, notices, activity, birthdays) guarded by
-  `dashboard:view`; dashboard mock files removed (spec in
-  `docs/dashboard-real-data.md`).
+- Premium admin dashboard foundation + real-data "Insights Foundation" — the
+  dashboard reads real, tenant-scoped, read-only aggregations under
+  `/api/v1/dashboard` (spec in `docs/dashboard-real-data.md`).
+- Students — server-generated admission numbers, per-session enrollment
+  placement, guardians, status lifecycle, CSV export, full frontend.
+- Teachers, Staff, Academic Sessions, Classes, Sections, Subjects, Master Data
+  (fee-heads, exam-types, grading-bands, period-slots).
+- Admissions (create → review → convert to student).
+- Timetable (conflict detection, day copy), Attendance (bulk mark, summary).
+- Homework, Assignments (shared task validation/rules), Examinations, Results
+  (marks entry, grading bands, ranking).
+- Fees (structures, invoices w/ installments, payments w/ idempotency,
+  receipts).
+- Library (books, copies, loans), Transport (vehicles, routes, stops, drivers,
+  assignments).
+- Communication: Notices, Events, Messages (direct/group), Notifications.
+- Reports V1 (catalog + CSV export), Secure Parent/Student Portal (ownership-
+  scoped), Users & Roles management, Settings, Audit Logs (with redaction).
+- Production Readiness & Operations: health/readiness, backup/restore scripts,
+  operations runbook, Docker/deploy configuration, CI workflow.
 - Testing: vitest + supertest (DB-free unit tests always run; DB-backed
   integration suites opt in via `TEST_DATABASE_URL`).
 
+The frontend navigation registry (`src/routes/navigation.ts`) is the single
+source of truth for nav/routes; implemented modules mount real pages, while the
+deliberately-deferred modules below render a clearly-labelled `PLANNED`
+placeholder via `src/data/moduleMeta.ts`.
+
 Deferred until individually spec'd (do NOT build proactively):
 
-- Domain modules: Teachers, Admissions, Attendance, Fees, Exams, Results,
-  Library, Transport, Hostel, Payroll, Parent portal.
-- Real database schema / business relationships (promotion rules, fee installments,
-  grading rules, attendance policies, class history, parent relationships, session
-  behavior) — these are designed deliberately before each module, never guessed.
+- Payroll — requires a formal domain specification (salary structures, pay
+  periods, allowances/deductions, payslips, statutory/compliance handling)
+  before any implementation.
+- Hostel — no residential-school requirement established; keep deferred.
+- Backups — backups are a database/operations concern (scripts + runbook), not
+  an application feature; a "Backups" product page is intentionally not built.
+- Any new domain / business relationship (promotion rules, fee installments,
+  grading rules, attendance policies, class history, parent relationships,
+  session behavior) — designed deliberately before each module, never guessed.
+- Notifications advanced delivery (email/SMS), portal write/extensions, report
+  card/transcript PDF generation — deferred until real pilot feedback justifies
+  them.
 
 ## 3. Current technology stack
 

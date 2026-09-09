@@ -8,6 +8,8 @@ import {
   listStaffsHandler,
   updateStaffHandler,
 } from "./staff.controller.js"
+import { photoRoutes } from "../photos/photo.route.js"
+import { staffPhotoEntity } from "./staff.photo-entity.js"
 
 // Staff module. Every route requires an authenticated session; each action
 // is guarded by a capability permission. There is intentionally NO DELETE —
@@ -21,3 +23,9 @@ staffRouter.get("/meta", requirePermission("staff:view"), getStaffMetaHandler)
 staffRouter.post("/", requirePermission("staff:create"), createStaffHandler)
 staffRouter.get("/:id", requirePermission("staff:view"), getStaffHandler)
 staffRouter.patch("/:id", requirePermission("staff:update"), updateStaffHandler)
+
+// Profile photos: upload/replace (PUT), remove (DELETE), authenticated serving (GET).
+staffRouter.use("/:id/photo", photoRoutes(staffPhotoEntity, {
+  view: "staff:view",
+  update: "staff:update",
+}))

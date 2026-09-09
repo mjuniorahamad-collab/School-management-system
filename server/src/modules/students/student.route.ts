@@ -9,6 +9,8 @@ import {
   listStudentsHandler,
   updateStudentHandler,
 } from "./student.controller.js"
+import { photoRoutes } from "../photos/photo.route.js"
+import { studentPhotoEntity } from "./student.photo-entity.js"
 
 // Students module. Every route requires an authenticated session; each action
 // is guarded by a capability permission. There is intentionally NO DELETE —
@@ -23,3 +25,10 @@ studentsRouter.get("/export", requirePermission("students:export"), exportStuden
 studentsRouter.post("/", requirePermission("students:create"), createStudentHandler)
 studentsRouter.get("/:id", requirePermission("students:view"), getStudentHandler)
 studentsRouter.patch("/:id", requirePermission("students:update"), updateStudentHandler)
+
+// Profile photos: upload/replace (PUT), remove (DELETE), authenticated serving (GET).
+// Serving is guarded by students:view; mutations by students:update (see photo.route.ts).
+studentsRouter.use("/:id/photo", photoRoutes(studentPhotoEntity, {
+  view: "students:view",
+  update: "students:update",
+}))

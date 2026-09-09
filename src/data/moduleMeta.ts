@@ -1,8 +1,8 @@
 import type { ModuleMeta } from "@/types"
 
 // TEMPORARY metadata used to render polished placeholder pages for modules that
-// are not part of the current dashboard milestone. When a module is implemented,
-// remove its entry here and mount its real page in the route tree.
+// are deliberately deferred. When a module is implemented, remove its entry here
+// and mount its real page in the route tree.
 export const moduleMeta: Record<string, ModuleMeta> = {
   "/payroll": {
     path: "/payroll",
@@ -10,13 +10,6 @@ export const moduleMeta: Record<string, ModuleMeta> = {
     status: "planned",
     purpose: "Staff payroll processing, salary structure, and pay slips.",
     futureConnection: "Connects to the Payroll API and payroll table in the database.",
-  },
-  "/library": {
-    path: "/library",
-    label: "Library",
-    status: "planned",
-    purpose: "Catalogue, book issue/return, and borrower management.",
-    futureConnection: "Connects to the Library API and books table in the database.",
   },
   "/hostel": {
     path: "/hostel",

@@ -61,5 +61,6 @@ export function mapStaffListItem(row: StaffListItemRow): StaffListItem {
     joiningDate: row.joiningDate.toISOString(),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    photoUrl: row.photoUrl,
   }
 }

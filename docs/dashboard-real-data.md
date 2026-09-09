@@ -138,9 +138,10 @@ No additions. The service reads `Student`, `Teacher`, `Class`,
   static navigation catalogue (icons/dialogs/navigation only; gated by
   `can("students:create")`).
 - Removed mock files: `src/data/dashboard.ts`, `attendance.ts`, `fees.ts`,
-  `activities.ts`, `events.ts`, `notices.ts`, `classes.ts`, `quickActions.ts`.
-  `src/data/students.ts` keeps only `searchableStudents` (consumed by the global
-  command palette, out of dashboard scope — still labeled TEMPORARY MOCK).
+  `activities.ts`, `events.ts`, `notices.ts`, `classes.ts`, `quickActions.ts`,
+  and `src/data/students.ts`. `src/data/` now contains only `moduleMeta.ts`
+  (placeholder-page metadata for the planned Payroll/Hostel/Backups modules),
+  labeled TEMPORARY MOCK.
 
 ## 7. Tests
 
@@ -159,4 +160,5 @@ No additions. The service reads `Student`, `Teacher`, `Class`,
 - Real-time/revisioned activity would come from the Audit Logs module.
 - Additional widgets (fee dashboards, exam analytics) attach to the same
   aggregation seam.
-- Search/autocomplete for students remains mock-backed until the search API lands.
+- Search/autocomplete for students is served by the real Students API through
+  `studentsService.list` → `/students/:id` (no longer mock-backed).

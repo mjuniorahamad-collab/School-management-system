@@ -43,7 +43,12 @@ async function request<T>(path: string, init?: RequestInit, options?: RequestOpt
 
   try {
     const headers = new Headers(init?.headers)
-    if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json")
+    // If we have a FormData body the browser sets a multipart boundary header;
+    // forcing JSON Content-Type would break the upload.
+    const isMultipart = init?.body instanceof FormData
+    if (!headers.has("Content-Type") && !isMultipart) {
+      headers.set("Content-Type", "application/json")
+    }
 
     const response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
@@ -98,6 +103,10 @@ export const api = {
   },
   put<T>(path: string, body: unknown, options?: RequestOptions): Promise<T> {
     return request<T>(path, { method: "PUT", body: JSON.stringify(body) }, options)
+  },
+  /** Sends a multipart payload (e.g. a profile-photo upload). */
+  putForm<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T> {
+    return request<T>(path, { method: "PUT", body: formData }, options)
   },
   patch<T>(path: string, body: unknown, options?: RequestOptions): Promise<T> {
     return request<T>(path, { method: "PATCH", body: JSON.stringify(body) }, options)

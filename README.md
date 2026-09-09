@@ -44,7 +44,7 @@ server/         Express + TypeScript + Prisma (PostgreSQL) API
   src/
     config/     Typed environment (zod)
     auth/       Password scrypt, token/cookie primitives, hasPermission
-permissions/ Canonical permission catalog (98 codes, 11 roles)
+permissions/ Canonical permission catalog (115 codes, 11 roles)
     controllers/  HTTP handlers
     middleware/   requireAuth / requirePermission / error handling / 404s
     routes/       Routers mounted under /api/v1 (auth.* under /api/v1/auth)
@@ -65,15 +65,15 @@ permissions/ Canonical permission catalog (98 codes, 11 roles)
 ```
 UI components
    └─ hooks → services (authService · dashboardService → real REST API)
-         └─ data layer (real DB rows via /api/v1 · only out-of-scope
-            header/command-palette mocks remain in src/data)
+         └─ data layer (real DB rows via /api/v1 — the only remaining
+            src/data artifact is moduleMeta.ts placeholder metadata)
 ```
 
 Components never import mock data or call `fetch` directly. Module data flows
-through `src/lib/apiClient.ts` → `/api/v1` once a real endpoint exists. Remaining
-`src/data` mocks (`searchableStudents` for the command palette, header
-notifications/messages) are explicitly labeled TEMPORARY MOCK and converted when
-their features gain real endpoints — never wrapped in fake HTTP.
+through `src/lib/apiClient.ts` → `/api/v1`. The only remaining `src/data` artifact
+is `moduleMeta.ts` (placeholder-page metadata for the planned Payroll/Hostel/Backups
+modules), labeled TEMPORARY MOCK and consumed only through `@/data/moduleMeta` for
+placeholder pages — never wrapped in fake HTTP.
 
 ## Dashboard real-data (Insights Foundation)
 
