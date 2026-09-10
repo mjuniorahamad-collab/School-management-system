@@ -23,7 +23,14 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
-RUN npm run build && npm run build:server
+
+# Prisma Client must be generated from the committed schema before the server
+# is type-checked/compiled. The placeholder DATABASE_URL only satisfies schema
+# env resolution at generate time (no connection is ever made); the real value
+# is injected by the deployment at runtime, and this builder-stage ENV never
+# reaches the runtime image.
+ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
+RUN npm run generate:prisma && npm run build && npm run build:server
 
 # ── Runtime ─────────────────────────────────────────────────────────────────
 FROM node:22-slim AS runtime
@@ -34,9 +41,10 @@ ENV NODE_ENV=production \
 WORKDIR /app
 
 # node_modules is copied wholesale from the builder: it already contains the
-# Prisma-generated client and matching engine binaries. Runtime never needs
-# dev tooling, but re-running prisma generate here would require the CLI; the
-# size trade-off is acceptable for a single-school self-hosted deployment.
+# Prisma-generated client (from the builder's `prisma generate` step) and
+# matching engine binaries. Runtime never needs dev tooling, but re-running
+# prisma generate here would require the CLI; the size trade-off is acceptable
+# for a single-school self-hosted deployment.
 COPY --from=builder /app/package.json /app/package-lock.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
