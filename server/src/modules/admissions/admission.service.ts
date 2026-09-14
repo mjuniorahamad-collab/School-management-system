@@ -405,14 +405,27 @@ export async function convertAdmission(
         },
       })
 
-      const guardian = await tx.guardian.create({
-        data: {
+      const existingGuardian = await tx.guardian.findFirst({
+        where: {
           schoolId,
           name: current.guardianName,
-          phone: current.guardianPhone,
-          email: current.guardianEmail,
+          ...(current.guardianPhone
+            ? { phone: current.guardianPhone }
+            : current.guardianEmail
+              ? { email: current.guardianEmail }
+              : {}),
         },
+        select: { id: true },
       })
+      const guardian = existingGuardian
+        ?? await tx.guardian.create({
+          data: {
+            schoolId,
+            name: current.guardianName,
+            phone: current.guardianPhone,
+            email: current.guardianEmail,
+          },
+        })
       await tx.studentGuardian.create({
         data: {
           studentId: student.id,
@@ -488,6 +501,9 @@ export async function deleteAdmission(
   const prisma = await requirePrisma()
   const application = await prisma.admissionApplication.findFirst({ where: { id, schoolId } })
   if (!application) throw notFoundError("Admission application not found")
+  if (application.status !== "PENDING") {
+    throw badRequestError("Only a pending admission application can be deleted")
+  }
   const auditActor = await resolveAuditActor(prisma, schoolId, actor)
   await prisma.$transaction(async (tx) => {
     await tx.admissionApplication.delete({ where: { id } })

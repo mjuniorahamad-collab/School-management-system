@@ -6,6 +6,8 @@ export const UNAUTHORIZED = "UNAUTHORIZED"
 export const FORBIDDEN = "FORBIDDEN"
 export const INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
 export const ACCOUNT_DISABLED = "ACCOUNT_DISABLED"
+export const STORAGE_ERROR = "STORAGE_ERROR"
+export const ATTENDANCE_EXISTS = "ATTENDANCE_EXISTS"
 
 /**
  * Error thrown by services/controllers for expected, client-relevant failures.
@@ -51,4 +53,22 @@ export function invalidCredentialsError(message = "Invalid email or password"): 
 
 export function accountDisabledError(message = "This account is disabled or suspended"): ApiError {
   return new ApiError(403, ACCOUNT_DISABLED, message)
+}
+
+/**
+ * Object-storage failure (S3-compatible provider). The message is intentionally
+ * secret-free — full technical detail is logged server-side only.
+ */
+export function storageError(message = "Object storage is unavailable"): ApiError {
+  return new ApiError(502, STORAGE_ERROR, message)
+}
+
+/**
+ * A conflicting attendance record already exists for the student/date. Rejecting
+ * instead of silently overwriting preserves the audit trail of who marked what.
+ */
+export function attendanceExistsError(
+  message = "Attendance already marked for this student on this date",
+): ApiError {
+  return new ApiError(409, ATTENDANCE_EXISTS, message)
 }

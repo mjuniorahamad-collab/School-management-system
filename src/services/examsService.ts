@@ -39,7 +39,8 @@ export const examsService = {
     return api.patch<ExamDetail>(`/exams/${id}`, payload)
   },
   updateSubjects(id: string, subjects: ExamSubjectInput[]): Promise<ExamDetail> {
-    return api.patch<ExamDetail>(`/exams/${id}/subjects`, { subjects })
+    // Backend route is PUT /exams/:id/subjects (full replacement of the list).
+    return api.put<ExamDetail>(`/exams/${id}/subjects`, { subjects })
   },
   updateStatus(id: string, status: "PUBLISHED" | "ARCHIVED"): Promise<ExamDetail> {
     return api.patch<ExamDetail>(`/exams/${id}/status`, { status })

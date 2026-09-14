@@ -1,5 +1,9 @@
 import { Prisma } from "@prisma/client"
-import { badRequestError, notFoundError } from "../../lib/ApiError.js"
+import {
+  attendanceExistsError,
+  badRequestError,
+  notFoundError,
+} from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
 import type { AuthUser } from "../../types/auth.js"
 import { recordAudit, recordAuditAfterCommit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
@@ -85,7 +89,7 @@ export async function markAttendance(
   actor: AuthUser,
 ): Promise<AttendanceRecordDetail> {
   const prisma = await requirePrisma()
-  const date = new Date(input.date)
+  const date = new Date(`${input.date}T00:00:00.000Z`)
   const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
   const enrollment = await findEnrollment(
@@ -103,16 +107,12 @@ export async function markAttendance(
         where: { schoolId, enrollmentId: enrollment.id, date },
         select: { id: true },
       })
+      if (existing) {
+        throw attendanceExistsError()
+      }
 
-      const row = await tx.attendanceRecord.upsert({
-        where: {
-          schoolId_enrollmentId_date: {
-            schoolId,
-            enrollmentId: enrollment.id,
-            date,
-          },
-        },
-        create: {
+      const row = await tx.attendanceRecord.create({
+        data: {
           schoolId,
           academicSessionId: input.academicSessionId,
           classId: enrollment.classId,
@@ -120,11 +120,6 @@ export async function markAttendance(
           date,
           studentId: input.studentId,
           enrollmentId: enrollment.id,
-          status: input.status,
-          note: input.note ?? null,
-          markedBy: actor.id,
-        },
-        update: {
           status: input.status,
           note: input.note ?? null,
           markedBy: actor.id,
@@ -139,12 +134,10 @@ export async function markAttendance(
         actorName: auditActor.name,
         actorRole: auditActor.role,
         actorEmail: auditActor.email,
-        action: existing ? "UPDATE" : "CREATE",
+        action: "CREATE",
         entityType: "ATTENDANCE_RECORD",
         entityId: row.id,
-        summary: existing
-          ? `Updated attendance for ${studentName}`
-          : `Marked attendance for ${studentName}`,
+        summary: `Marked attendance for ${studentName}`,
         metadata: { date: input.date, status: input.status, studentId: input.studentId },
       })
 
@@ -165,7 +158,7 @@ export async function bulkMarkAttendance(
   actor: AuthUser,
 ): Promise<{ marked: number }> {
   const prisma = await requirePrisma()
-  const date = new Date(input.date)
+  const date = new Date(`${input.date}T00:00:00.000Z`)
   const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
   const studentIds = input.records.map((r) => r.studentId)
@@ -175,6 +168,7 @@ export async function bulkMarkAttendance(
       academicSessionId: input.academicSessionId,
       classId: input.classId,
       ...(input.sectionId ? { sectionId: input.sectionId } : {}),
+      academicSession: { schoolId },
     },
     include: {
       student: { select: { schoolId: true } },
@@ -187,6 +181,21 @@ export async function bulkMarkAttendance(
       .map((e) => [e.studentId, e]),
   )
 
+  const matchedEnrollmentIds = [...enrollmentMap.values()].map((e) => e.id)
+  const existing = await prisma.attendanceRecord.findFirst({
+    where: {
+      schoolId,
+      date,
+      enrollmentId: { in: matchedEnrollmentIds },
+    },
+    select: { id: true },
+  })
+  if (existing) {
+    throw attendanceExistsError(
+      "Attendance is already marked for one or more students on this date",
+    )
+  }
+
   let marked = 0
 
   for (const record of input.records) {
@@ -194,15 +203,8 @@ export async function bulkMarkAttendance(
     if (!enrollment) continue
 
     try {
-      await prisma.attendanceRecord.upsert({
-        where: {
-          schoolId_enrollmentId_date: {
-            schoolId,
-            enrollmentId: enrollment.id,
-            date,
-          },
-        },
-        create: {
+      await prisma.attendanceRecord.create({
+        data: {
           schoolId,
           academicSessionId: input.academicSessionId,
           classId: enrollment.classId,
@@ -210,11 +212,6 @@ export async function bulkMarkAttendance(
           date,
           studentId: record.studentId,
           enrollmentId: enrollment.id,
-          status: record.status,
-          note: record.note ?? null,
-          markedBy: actor.id,
-        },
-        update: {
           status: record.status,
           note: record.note ?? null,
           markedBy: actor.id,
@@ -440,6 +437,7 @@ async function findEnrollment(
     where: {
       studentId,
       academicSessionId,
+      academicSession: { schoolId },
     },
   })
   if (!enrollment) throw badRequestError("Student is not enrolled in this academic session")

@@ -236,6 +236,15 @@ export async function putSubjectMarks(
   const { maxBy, passBy } = subjectConfigMaps(subjects)
   const bands = await loadGradingBands(prisma, actor.schoolId)
 
+  const subjectMaxMarks = maxBy.get(examSubjectId) ?? 0
+  for (const row of input.rows) {
+    if (row.obtainedMarks !== null && row.obtainedMarks !== undefined && row.obtainedMarks > subjectMaxMarks) {
+      throw badRequestError(
+        `Obtained marks (${row.obtainedMarks}) cannot exceed the maximum marks (${subjectMaxMarks})`,
+      )
+    }
+  }
+
   const saved = await prisma.$transaction(async (tx) => {
     const existingResults = await tx.examResult.findMany({
       where: { examId, enrollmentId: { in: enrollmentIds } },
