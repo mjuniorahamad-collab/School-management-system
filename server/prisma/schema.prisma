@@ -1247,6 +1247,9 @@ model TimetableEntry {
   teacher         Teacher         @relation(fields: [teacherId], references: [id], onDelete: Cascade)
 
   // Prevent same class/section from being double-booked at the same period+day.
+  // DB-level NULLS NOT DISTINCT on this index (SQL-only; Prisma cannot model it)
+  // prevents two sectionless (sectionId NULL) entries from being treated as
+  // distinct, closing the double-booking gap. See migration 20260913000000.
   @@unique([schoolId, academicSessionId, dayOfWeek, periodSlotId, classId, sectionId], map: "timetable_class_slot_unique")
   // Prevent same teacher from being double-booked at the same period+day.
   @@unique([schoolId, academicSessionId, dayOfWeek, periodSlotId, teacherId], map: "timetable_teacher_slot_unique")
@@ -1772,7 +1775,8 @@ model Conversation {
   participants    ConversationParticipant[]
   messages        Message[]
 
-  @@unique([directKey])
+  // Composite so the same user pair can hold independent conversations per school.
+  @@unique([schoolId, directKey], map: "Conversation_schoolId_directKey_key")
   @@index([schoolId, lastMessageAt])
   @@index([schoolId, type])
 }

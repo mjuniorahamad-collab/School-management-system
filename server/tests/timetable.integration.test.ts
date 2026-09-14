@@ -106,10 +106,10 @@ describe.skipIf(!TEST_DATABASE_URL)("Timetable API (integration)", () => {
     })
     fixtures.periodSlotId = slot.id
 
-    await prisma.role.create({ data: { name: SUPER_ADMIN_ROLE, description: "Test super admin" } })
+    const superAdminRole = await prisma.role.create({ data: { name: SUPER_ADMIN_ROLE, description: "Test super admin" } })
     const teacherRole = await prisma.role.create({ data: { name: "TEACHER", description: "Test teacher" } })
 
-    await prisma.user.create({
+    const adminUser = await prisma.user.create({
       data: {
         schoolId: school.id,
         name: "Timetable Admin",
@@ -119,8 +119,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Timetable API (integration)", () => {
         roles: { create: [{ role: { connect: { name: SUPER_ADMIN_ROLE } } }] },
       },
     })
+    await prisma.tenantMembership.create({ data: { userId: adminUser.id, schoolId: school.id, roleId: superAdminRole.id, status: "ACTIVE" } })
 
-    await prisma.user.create({
+    const teacherUser = await prisma.user.create({
       data: {
         schoolId: school.id,
         name: "Timetable Teacher",
@@ -130,6 +131,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Timetable API (integration)", () => {
         roles: { create: [{ role: { connect: { id: teacherRole.id } } }] },
       },
     })
+    await prisma.tenantMembership.create({ data: { userId: teacherUser.id, schoolId: school.id, roleId: teacherRole.id, status: "ACTIVE" } })
 
     await login(adminAgent, "timetable.admin@example.com", fixtures.adminPassword)
     await login(teacherAgent, "timetable.teacher@example.com", "teacher-secret-123")
@@ -224,6 +226,34 @@ describe.skipIf(!TEST_DATABASE_URL)("Timetable API (integration)", () => {
       expect(res.body.error.code).toBe("BAD_REQUEST")
     })
 
+    it("rejects an unknown period slot", async () => {
+      const res = await adminAgent
+        .post("/api/v1/timetable")
+        .send(entryPayload({ periodSlotId: "ffffffff-ffff-ffff-ffff-ffffffffffff" }))
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe("BAD_REQUEST")
+      expect(res.body.error.message).toMatch(/period slot/i)
+    })
+
+    it("rejects a period slot from another school", async () => {
+      const otherSchool = await prisma.school.create({ data: { name: "Foreign School" } })
+      const foreignSlot = await prisma.periodSlot.create({
+        data: {
+          schoolId: otherSchool.id,
+          name: "Foreign Slot",
+          startTime: "09:00",
+          endTime: "09:45",
+          sortOrder: 1,
+        },
+      })
+      const res = await adminAgent
+        .post("/api/v1/timetable")
+        .send(entryPayload({ periodSlotId: foreignSlot.id }))
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe("BAD_REQUEST")
+      expect(res.body.error.message).toMatch(/period slot/i)
+    })
+
     it("rejects a duplicate class+period on the same day with a conflict message", async () => {
       await adminAgent.post("/api/v1/timetable").send(
         entryPayload({ subjectId: (
@@ -280,6 +310,17 @@ describe.skipIf(!TEST_DATABASE_URL)("Timetable API (integration)", () => {
         .patch("/api/v1/timetable/ffffffff-ffff-ffff-ffff-ffffffffffff")
         .send({ dayOfWeek: "FRIDAY" })
       expect(res.status).toBe(404)
+    })
+
+    it("rejects moving an entry to an unknown period slot", async () => {
+      const created = await adminAgent.post("/api/v1/timetable").send(entryPayload())
+      const id = created.body.data.id
+      const res = await adminAgent
+        .patch(`/api/v1/timetable/${id}`)
+        .send({ periodSlotId: "ffffffff-ffff-ffff-ffff-ffffffffffff" })
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe("BAD_REQUEST")
+      expect(res.body.error.message).toMatch(/period slot/i)
     })
   })
 

@@ -43,6 +43,8 @@ describe.skipIf(!TEST_DATABASE_URL)("Messages (integration)", () => {
   const receptionistAAgent = request.agent(app)
   const accountantAAgent = request.agent(app)
 
+  const sharedAdminAgent = request.agent(app)
+
   beforeAll(async () => {
     if (!TEST_DATABASE_URL) throw new Error("TEST_DATABASE_URL is required for this suite")
 
@@ -111,6 +113,24 @@ describe.skipIf(!TEST_DATABASE_URL)("Messages (integration)", () => {
     memberUserIds.accountantA = await createMember("msg.accountant.a@example.com", "Accountant A", schoolA.id, roleIds.ACCOUNTANT)
     memberUserIds.adminB = await createMember("msg.admin.b@example.com", "Admin B", schoolB.id, roleIds.SCHOOL_ADMIN)
 
+    // A cross-school admin and teacher — each an ACTIVE member of BOTH schools.
+    // The same (sender, recipient) pair in both tenants produces an identical
+    // directKey, which the (schoolId, directKey) uniqueness must permit.
+    // The admin carries a legacy User.schoolId + UserRole so login resolves a
+    // home tenant (multi-membership accounts have no implicit default).
+    memberUserIds.crossAdmin = await createMember("msg.cross.admin@example.com", "Cross Admin", schoolA.id, roleIds.SCHOOL_ADMIN)
+    memberUserIds.crossTeacher = await createMember("msg.cross.teacher@example.com", "Cross Teacher", schoolA.id, roleIds.TEACHER)
+    await prisma.user.update({ where: { id: memberUserIds.crossAdmin }, data: { schoolId: schoolA.id } })
+    await prisma.userRole.create({
+      data: { userId: memberUserIds.crossAdmin, roleId: roleIds.SCHOOL_ADMIN },
+    })
+    await prisma.tenantMembership.create({
+      data: { userId: memberUserIds.crossAdmin, schoolId: schoolB.id, roleId: roleIds.SCHOOL_ADMIN, status: "ACTIVE" },
+    })
+    await prisma.tenantMembership.create({
+      data: { userId: memberUserIds.crossTeacher, schoolId: schoolB.id, roleId: roleIds.TEACHER, status: "ACTIVE" },
+    })
+
     await login(adminAAgent, "msg.admin.a@example.com", "password-123456")
     await login(teacherAAgent, "msg.teacher.a@example.com", "password-123456")
     await login(parentAAgent, "msg.parent.a@example.com", "password-123456")
@@ -118,6 +138,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Messages (integration)", () => {
     await login(receptionistAAgent, "msg.receptionist.a@example.com", "password-123456")
     await login(accountantAAgent, "msg.accountant.a@example.com", "password-123456")
     await login(adminBAgent, "msg.admin.b@example.com", "password-123456")
+    await login(sharedAdminAgent, "msg.cross.admin@example.com", "password-123456")
   })
 
   afterAll(async () => {
@@ -480,6 +501,41 @@ describe.skipIf(!TEST_DATABASE_URL)("Messages (integration)", () => {
         roleNames: ["TEACHER"],
       })
       expect(res.status).toBe(400)
+    })
+  })
+
+  describe("cross-school direct conversations (directKey uniqueness per tenant)", () => {
+    it("allows the same sender+recipient pair to have separate conversations in two different schools", async () => {
+      // School A: crossAdmin (sender) → crossTeacher (recipient)
+      const inA = await sharedAdminAgent
+        .set("x-school-id", schoolA.id)
+        .post("/api/v1/messages/conversations")
+        .send({ type: "DIRECT", recipientIds: [memberUserIds.crossTeacher] })
+      expect(inA.status).toBe(201)
+      const convAId = (inA.body.data as { id: string }).id
+
+      // School B: the same crossAdmin + crossTeacher → same directKey, but
+      // a different school — must NOT collide.
+      const inB = await sharedAdminAgent
+        .set("x-school-id", schoolB.id)
+        .post("/api/v1/messages/conversations")
+        .send({ type: "DIRECT", recipientIds: [memberUserIds.crossTeacher] })
+      expect(inB.status).toBe(201)
+      const convBId = (inB.body.data as { id: string }).id
+
+      // The two conversations are distinct rows.
+      expect(convBId).not.toBe(convAId)
+
+      // Each school's list shows only its own conversation.
+      const listA = await sharedAdminAgent.set("x-school-id", schoolA.id).get("/api/v1/messages/conversations")
+      const idsA = (listA.body.data.items as { id: string }[]).map((c) => c.id)
+      expect(idsA).toContain(convAId)
+      expect(idsA).not.toContain(convBId)
+
+      const listB = await sharedAdminAgent.set("x-school-id", schoolB.id).get("/api/v1/messages/conversations")
+      const idsB = (listB.body.data.items as { id: string }[]).map((c) => c.id)
+      expect(idsB).toContain(convBId)
+      expect(idsB).not.toContain(convAId)
     })
   })
 

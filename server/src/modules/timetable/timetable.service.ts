@@ -102,6 +102,9 @@ export async function createTimetableEntry(
       }
       throw badRequestError(conflictMessage("class"))
     }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+      throw badRequestError("One of the referenced timetable items does not exist in this school")
+    }
     throw error
   }
 }
@@ -139,6 +142,7 @@ export async function updateTimetableEntry(
       : existing.sectionId,
     subjectId: (data.subjectId as string) ?? existing.subjectId,
     teacherId: (data.teacherId as string) ?? existing.teacherId,
+    periodSlotId: (data.periodSlotId as string) ?? existing.periodSlotId,
   }, schoolId)
 
   try {
@@ -155,6 +159,9 @@ export async function updateTimetableEntry(
         throw badRequestError(conflictMessage("teacher"))
       }
       throw badRequestError(conflictMessage("class"))
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+      throw badRequestError("One of the referenced timetable items does not exist in this school")
     }
     throw error
   }
@@ -237,9 +244,18 @@ async function validateForeignKeys(
     sectionId?: string | null
     subjectId?: string
     teacherId?: string
+    periodSlotId?: string
   },
   schoolId: string,
 ): Promise<void> {
+  if (input.periodSlotId) {
+    const slot = await prisma.periodSlot.findFirst({
+      where: { id: input.periodSlotId, schoolId },
+      select: { id: true },
+    })
+    if (!slot) throw badRequestError("Period slot not found in this school")
+  }
+
   if (input.classId) {
     const cls = await prisma.class.findFirst({
       where: { id: input.classId, schoolId },
