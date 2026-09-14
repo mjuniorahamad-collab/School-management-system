@@ -555,7 +555,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Reports API (integration)", () => {
     }
 
     async function createUser(name: string, email: string, roleId: string, password: string) {
-      return prisma.user.create({
+      const user = await prisma.user.create({
         data: {
           schoolId: school.id,
           name,
@@ -565,6 +565,10 @@ describe.skipIf(!TEST_DATABASE_URL)("Reports API (integration)", () => {
           roles: { create: [{ role: { connect: { id: roleId } } }] },
         },
       })
+      await prisma.tenantMembership.create({
+        data: { userId: user.id, schoolId: school.id, roleId, status: "ACTIVE" },
+      })
+      return user
     }
     // The SUPER_ADMIN role row already exists; reuse the same role for the admin.
     const superUser = await prisma.user.create({
@@ -577,7 +581,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Reports API (integration)", () => {
         roles: { create: [{ role: { connect: { id: superAdminRole.id } } }] },
       },
     })
-    void superUser
+    await prisma.tenantMembership.create({
+      data: { userId: superUser.id, schoolId: school.id, roleId: superAdminRole.id, status: "ACTIVE" },
+    })
     await createUser("Manager", "reports.manager@example.com", managerRole.id, "manager-secret-123")
     await createUser("Students Only", "reports.students@example.com", studentsOnlyRole.id, "students-secret-123")
     await createUser("View Only", "reports.view@example.com", viewOnlyRole.id, "view-secret-123")

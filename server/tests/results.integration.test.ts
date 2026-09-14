@@ -404,6 +404,17 @@ describe.skipIf(!TEST_DATABASE_URL)("Results API (integration)", () => {
       expect(alpha.isComplete).toBe(false)
     })
 
+    it("rejects obtained marks above the subject's maximum", async () => {
+      const exam = await createExam()
+      const mat = subjectByCode(exam, "MAT")
+      const res = await putMarks(adminAgent, exam.id, mat.id, [
+        { enrollmentId: fixtures.enrollmentAId, obtainedMarks: 101 },
+      ])
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe("BAD_REQUEST")
+      expect(res.body.error.message).toMatch(/maximum/i)
+    })
+
     it("aggregates a complete set with totals, overall grade, and pass", async () => {
       const exam = await createExam()
       const mat = subjectByCode(exam, "MAT")

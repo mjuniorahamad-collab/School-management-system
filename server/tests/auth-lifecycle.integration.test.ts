@@ -53,9 +53,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Auth lifecycle (integration)", () => {
     const school = await prisma.school.create({ data: { name: "Auth Lifecycle School" } })
     fixtures.schoolId = school.id
 
-    await prisma.role.create({ data: { name: SUPER_ADMIN_ROLE, description: "Lifecycle admin role" } })
+    const superRole = await prisma.role.create({ data: { name: SUPER_ADMIN_ROLE, description: "Lifecycle admin role" } })
 
-    await prisma.user.create({
+    const adminUser = await prisma.user.create({
       data: {
         schoolId: school.id,
         name: "Lifecycle Admin",
@@ -65,7 +65,11 @@ describe.skipIf(!TEST_DATABASE_URL)("Auth lifecycle (integration)", () => {
         roles: { create: [{ role: { connect: { name: SUPER_ADMIN_ROLE } } }] },
       },
     })
-    await prisma.user.create({
+    await prisma.tenantMembership.create({
+      data: { userId: adminUser.id, schoolId: school.id, roleId: superRole.id, status: "ACTIVE" },
+    })
+
+    const pendingUser = await prisma.user.create({
       data: {
         schoolId: school.id,
         name: "Lifecycle Pending",
@@ -74,6 +78,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Auth lifecycle (integration)", () => {
         status: "SUSPENDED",
         roles: { create: [{ role: { connect: { name: SUPER_ADMIN_ROLE } } }] },
       },
+    })
+    await prisma.tenantMembership.create({
+      data: { userId: pendingUser.id, schoolId: school.id, roleId: superRole.id, status: "ACTIVE" },
     })
   })
 

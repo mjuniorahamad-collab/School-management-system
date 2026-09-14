@@ -133,7 +133,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Transport API (integration)", () => {
     }
 
     async function createUser(name: string, email: string, roleId: string, password: string) {
-      return prisma.user.create({
+      const user = await prisma.user.create({
         data: {
           schoolId: school.id,
           name,
@@ -143,6 +143,10 @@ describe.skipIf(!TEST_DATABASE_URL)("Transport API (integration)", () => {
           roles: { create: [{ role: { connect: { id: roleId } } }] },
         },
       })
+      await prisma.tenantMembership.create({
+        data: { userId: user.id, schoolId: school.id, roleId, status: "ACTIVE" },
+      })
+      return user
     }
 
     const superAdminRole = await prisma.role.findUniqueOrThrow({

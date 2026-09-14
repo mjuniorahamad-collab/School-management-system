@@ -16,10 +16,7 @@ import {
 } from "../lib/ApiError.js"
 import { getPrisma } from "../lib/database.js"
 import { recordAuditAfterCommit } from "../modules/audit-logs/audit-log.service.js"
-import {
-  resolveRolePermissions,
-  resolveUserPermissions,
-} from "./permission.service.js"
+import { resolveRolePermissions } from "./permission.service.js"
 import type { AuthUser } from "../types/auth.js"
 
 export interface LoginInput {
@@ -240,9 +237,11 @@ export interface LoadPrincipalOptions {
  *  1. An explicit `schoolId` requires an ACTIVE membership for that school
  *     (rejects otherwise — a 403, never a silent cross-tenant fallback).
  *  2. Otherwise a single ACTIVE membership is auto-selected.
- *  3. Otherwise (zero, or multiple without an explicit selection) we fall back
- *     to the legacy `User.schoolId` + `UserRole` model so pre-membership users
- *     and integration-test fixtures keep working.
+ *  3. Otherwise (zero, or multiple without an explicit selection) the legacy
+ *     `User.schoolId` is used only as a home-tenant hint among the user's
+ *     ACTIVE memberships. A stale or missing column returns null (no school),
+ *     ensuring that revoking all memberships actually revokes access. Users
+ *     with zero ACTIVE memberships cannot authenticate via the legacy column.
  */
 export async function loadPrincipalContext(
   userId: string,
@@ -296,20 +295,41 @@ export async function loadPrincipalContext(
     }
   }
 
-  // 3. Legacy fallback: `User.schoolId` + global `UserRole`.
-  const legacySchool = user.schoolId
-    ? await prisma.school.findUnique({
-        where: { id: user.schoolId },
-        select: { id: true, name: true, status: true },
-      })
+  // 3. Zero ACTIVE memberships → no school context (revocation is enforced).
+  if (memberships.length === 0) {
+    return {
+      user: toAuthUserSource(user),
+      school: null,
+      roles: [],
+      permissions: new Set(),
+      membershipSchoolIds: [],
+    }
+  }
+
+  // 4. Multiple ACTIVE memberships without explicit selection: use the legacy
+  //    `User.schoolId` as a home-tenant hint, but only when it matches an
+  //    ACTIVE membership. The legacy column must never bypass the membership
+  //    model. If there is no match the client must send `X-School-Id`.
+  const matchingMembership = user.schoolId
+    ? memberships.find((m) => m.schoolId === user.schoolId)
     : null
 
-  const principal = await resolveUserPermissions(user.id)
+  if (matchingMembership) {
+    const principal = await resolveRolePermissions(matchingMembership.roleId)
+    return {
+      user: toAuthUserSource(user),
+      school: tenantFromSchool(matchingMembership.school),
+      roles: principal.roles,
+      permissions: principal.permissions,
+      membershipSchoolIds: memberships.map((m) => m.schoolId),
+    }
+  }
+
   return {
     user: toAuthUserSource(user),
-    school: legacySchool ? tenantFromSchool(legacySchool) : null,
-    roles: principal.roles,
-    permissions: principal.permissions,
+    school: null,
+    roles: [],
+    permissions: new Set(),
     membershipSchoolIds: memberships.map((m) => m.schoolId),
   }
 }

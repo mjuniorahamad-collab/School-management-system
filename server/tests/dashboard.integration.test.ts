@@ -244,10 +244,10 @@ describe.skipIf(!TEST_DATABASE_URL)("Dashboard API (integration)", () => {
     })
 
     // ── Auth principals ─────────────────────────────────────────────────────
-    await prisma.role.create({ data: { name: SUPER_ADMIN_ROLE, description: "Dashboard super admin" } })
+    const superAdminRole = await prisma.role.create({ data: { name: SUPER_ADMIN_ROLE, description: "Dashboard super admin" } })
     const viewerRole = await prisma.role.create({ data: { name: "DASHBOARD_VIEWER", description: "No dashboard:view" } })
 
-    await prisma.user.create({
+    const adminAUser = await prisma.user.create({
       data: {
         schoolId: schoolA.id,
         name: "Dashboard Admin A",
@@ -257,7 +257,8 @@ describe.skipIf(!TEST_DATABASE_URL)("Dashboard API (integration)", () => {
         roles: { create: [{ role: { connect: { name: SUPER_ADMIN_ROLE } } }] },
       },
     })
-    await prisma.user.create({
+    await prisma.tenantMembership.create({ data: { userId: adminAUser.id, schoolId: schoolA.id, roleId: superAdminRole.id, status: "ACTIVE" } })
+    const adminBUser = await prisma.user.create({
       data: {
         schoolId: schoolB.id,
         name: "Dashboard Admin B",
@@ -267,7 +268,8 @@ describe.skipIf(!TEST_DATABASE_URL)("Dashboard API (integration)", () => {
         roles: { create: [{ role: { connect: { name: SUPER_ADMIN_ROLE } } }] },
       },
     })
-    await prisma.user.create({
+    await prisma.tenantMembership.create({ data: { userId: adminBUser.id, schoolId: schoolB.id, roleId: superAdminRole.id, status: "ACTIVE" } })
+    const viewerUser = await prisma.user.create({
       data: {
         schoolId: schoolA.id,
         name: "Dashboard Viewer",
@@ -277,6 +279,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Dashboard API (integration)", () => {
         roles: { create: [{ role: { connect: { id: viewerRole.id } } }] },
       },
     })
+    await prisma.tenantMembership.create({ data: { userId: viewerUser.id, schoolId: schoolA.id, roleId: viewerRole.id, status: "ACTIVE" } })
 
     await login(adminAgent, "dashboard.admin@example.com", adminPassword)
     await login(adminAgentB, "dashboard.admin.b@example.com", "dashboard-admin-b-secret")

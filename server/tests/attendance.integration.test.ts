@@ -120,10 +120,10 @@ describe.skipIf(!TEST_DATABASE_URL)("Attendance API (integration)", () => {
       },
     })
 
-    await prisma.role.create({ data: { name: SUPER_ADMIN_ROLE, description: "Test super admin" } })
+    const superAdminRole = await prisma.role.create({ data: { name: SUPER_ADMIN_ROLE, description: "Test super admin" } })
     const teacherRole = await prisma.role.create({ data: { name: "TEACHER", description: "Test teacher" } })
 
-    await prisma.user.create({
+    const adminUser = await prisma.user.create({
       data: {
         schoolId: school.id,
         name: "Attendance Admin",
@@ -133,8 +133,11 @@ describe.skipIf(!TEST_DATABASE_URL)("Attendance API (integration)", () => {
         roles: { create: [{ role: { connect: { name: SUPER_ADMIN_ROLE } } }] },
       },
     })
+    await prisma.tenantMembership.create({
+      data: { userId: adminUser.id, schoolId: school.id, roleId: superAdminRole.id, status: "ACTIVE" },
+    })
 
-    await prisma.user.create({
+    const teacherUser = await prisma.user.create({
       data: {
         schoolId: school.id,
         name: "Attendance Teacher",
@@ -143,6 +146,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Attendance API (integration)", () => {
         status: "ACTIVE",
         roles: { create: [{ role: { connect: { id: teacherRole.id } } }] },
       },
+    })
+    await prisma.tenantMembership.create({
+      data: { userId: teacherUser.id, schoolId: school.id, roleId: teacherRole.id, status: "ACTIVE" },
     })
 
     await login(adminAgent, "attendance.admin@example.com", fixtures.adminPassword)
@@ -202,13 +208,33 @@ describe.skipIf(!TEST_DATABASE_URL)("Attendance API (integration)", () => {
       expect(data.academicSessionId).toBe(fixtures.sessionId)
     })
 
-    it("upserts an existing record for the same student+date instead of duplicating", async () => {
+    it("rejects a duplicate record for the same student+date instead of overwriting", async () => {
       await adminAgent.post("/api/v1/attendance").send(markPayload(studentA.id, { status: "PRESENT" }))
-      await adminAgent.post("/api/v1/attendance").send(markPayload(studentA.id, { status: "ABSENT" }))
+      const second = await adminAgent.post("/api/v1/attendance").send(markPayload(studentA.id, { status: "ABSENT" }))
+      expect(second.status).toBe(409)
+      expect(second.body.error.code).toBe("ATTENDANCE_EXISTS")
       const res = await adminAgent.get(`/api/v1/attendance?studentId=${studentA.id}`)
       expect(res.status).toBe(200)
       expect(res.body.data.total).toBe(1)
-      expect(res.body.data.items[0].status).toBe("ABSENT")
+      expect(res.body.data.items[0].status).toBe("PRESENT")
+    })
+
+    it("rejects a record that already exists in the bulk payload", async () => {
+      await adminAgent.post("/api/v1/attendance").send(
+        markPayload(studentA.id, { date: "2026-05-02" }),
+      )
+      const res = await adminAgent.post("/api/v1/attendance/bulk").send({
+        academicSessionId: fixtures.sessionId,
+        classId: fixtures.classId,
+        sectionId: fixtures.sectionId,
+        date: "2026-05-02",
+        records: [
+          { studentId: studentA.id, status: "PRESENT" },
+          { studentId: studentB.id, status: "ABSENT" },
+        ],
+      })
+      expect(res.status).toBe(409)
+      expect(res.body.error.code).toBe("ATTENDANCE_EXISTS")
     })
 
     it("rejects a student that is not enrolled in this class", async () => {

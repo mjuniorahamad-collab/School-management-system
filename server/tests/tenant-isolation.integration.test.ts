@@ -20,6 +20,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Tenant isolation (integration)", () => {
   const schoolB = { id: "" }
   const schoolSuspended = { id: "" }
 
+  let superRoleId = ""
   let teacherBId = ""
   let subjectBId = ""
   let subjectAId = ""
@@ -49,7 +50,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Tenant isolation (integration)", () => {
     await resetAllTables(prisma)
 
     const superRole = await prisma.role.create({ data: { name: SUPER_ADMIN_ROLE, description: "Test super admin" } })
-    const superRoleId = superRole.id
+    superRoleId = superRole.id
 
     const schoolANew = await prisma.school.create({ data: { name: "Isolation School A" } })
     schoolA.id = schoolANew.id
@@ -170,8 +171,8 @@ describe.skipIf(!TEST_DATABASE_URL)("Tenant isolation (integration)", () => {
       data: { userId: userA.id, schoolId: schoolA.id, roleId: superRoleId, status: "ACTIVE" },
     })
 
-    // School B admin — legacy path (schoolId set, no membership).
-    await prisma.user.create({
+    // School B admin — membership path (with a legacy schoolId hint).
+    const adminBUser = await prisma.user.create({
       data: {
         schoolId: schoolB.id,
         name: "Admin B",
@@ -180,6 +181,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Tenant isolation (integration)", () => {
         status: "ACTIVE",
         roles: { create: [{ role: { connect: { name: SUPER_ADMIN_ROLE } } }] },
       },
+    })
+    await prisma.tenantMembership.create({
+      data: { userId: adminBUser.id, schoolId: schoolB.id, roleId: superRoleId, status: "ACTIVE" },
     })
 
     await login(agentA, "isolation.a@example.com", "a-secret-123456")
@@ -335,6 +339,14 @@ describe.skipIf(!TEST_DATABASE_URL)("Tenant isolation (integration)", () => {
           roles: { create: [{ role: { connect: { name: SUPER_ADMIN_ROLE } } }] },
         },
       })
+      await prisma.tenantMembership.create({
+        data: {
+          userId: suspendedAdmin.id,
+          schoolId: schoolSuspended.id,
+          roleId: superRoleId,
+          status: "ACTIVE",
+        },
+      })
       const agent = request.agent(app)
       await login(agent, "isolation.suspended@example.com", "s-secret-123456")
 
@@ -342,6 +354,67 @@ describe.skipIf(!TEST_DATABASE_URL)("Tenant isolation (integration)", () => {
       expect(res.status).toBe(403)
       expect(res.body.error.code).toBe("FORBIDDEN")
       expect(suspendedAdmin).toBeDefined()
+    })
+  })
+
+  describe("revocation bypass prevention (Phase 9 regression)", () => {
+    it("a user with no ACTIVE membership and a stale User.schoolId cannot login", async () => {
+      // Create a user with a legacy schoolId + UserRole but no TenantMembership.
+      // Before Phase 9, this user could authenticate via the legacy fallback.
+      await prisma.user.create({
+        data: {
+          schoolId: schoolA.id,
+          name: "Revoked User",
+          email: "isolation.revoked@example.com",
+          passwordHash: hashPassword("r-secret-123456"),
+          status: "ACTIVE",
+          roles: { create: [{ role: { connect: { name: SUPER_ADMIN_ROLE } } }] },
+        },
+      })
+
+      const res = await request(app)
+        .post("/api/v1/auth/login")
+        .send({ email: "isolation.revoked@example.com", password: "r-secret-123456" })
+      expect(res.status).toBe(403)
+      expect(res.body.error.code).toBe("FORBIDDEN")
+    })
+
+    it("deactivating all memberships revokes access even when User.schoolId is set", async () => {
+      // Create a user with ACTIVE membership, then deactivate it.
+      const revokeTarget = await prisma.user.create({
+        data: {
+          schoolId: schoolA.id,
+          name: "Deactivate Target",
+          email: "isolation.deactivate@example.com",
+          passwordHash: hashPassword("d-secret-123456"),
+          status: "ACTIVE",
+          roles: { create: [{ role: { connect: { name: SUPER_ADMIN_ROLE } } }] },
+        },
+      })
+      const membership = await prisma.tenantMembership.create({
+        data: { userId: revokeTarget.id, schoolId: schoolA.id, roleId: superRoleId, status: "ACTIVE" },
+      })
+
+      // Login succeeds while membership is ACTIVE
+      const agent = request.agent(app)
+      const loginRes = await agent.post("/api/v1/auth/login").send({
+        email: "isolation.deactivate@example.com",
+        password: "d-secret-123456",
+      })
+      expect(loginRes.status).toBe(200)
+
+      // Deactivate the membership — access should be revoked
+      await prisma.tenantMembership.update({
+        where: { id: membership.id },
+        data: { status: "INACTIVE" },
+      })
+
+      // Fresh session: login should now fail because no ACTIVE membership remains
+      const revoked = await request(app)
+        .post("/api/v1/auth/login")
+        .send({ email: "isolation.deactivate@example.com", password: "d-secret-123456" })
+      expect(revoked.status).toBe(403)
+      expect(revoked.body.error.code).toBe("FORBIDDEN")
     })
   })
 })

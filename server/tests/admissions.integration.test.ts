@@ -118,9 +118,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Admissions API (integration)", () => {
       data: { userId: userA.id, schoolId: schoolA.id, roleId: superRole.id, status: "ACTIVE" },
     })
 
-    // Viewer A: legacy path (schoolId set), role with no grants -> 403 for any
-    // permission-gated operations.
-    await prisma.user.create({
+    // Viewer A: membership path (role with no grants -> 403 for any
+    // permission-gated operations).
+    const viewerAUser = await prisma.user.create({
       data: {
         schoolId: schoolA.id,
         name: "Viewer A",
@@ -130,10 +130,13 @@ describe.skipIf(!TEST_DATABASE_URL)("Admissions API (integration)", () => {
         roles: { create: [{ role: { connect: { id: viewerRole.id } } }] },
       },
     })
+    await prisma.tenantMembership.create({
+      data: { userId: viewerAUser.id, schoolId: schoolA.id, roleId: viewerRole.id, status: "ACTIVE" },
+    })
 
-    // Admin B: SUPER_ADMIN rooted in school B (legacy path) to prove that even a
+    // Admin B: SUPER_ADMIN rooted in school B (membership path) to prove that even a
     // super admin cannot read or write another tenant's applications.
-    await prisma.user.create({
+    const adminBUser = await prisma.user.create({
       data: {
         schoolId: schoolB.id,
         name: "Admin B",
@@ -142,6 +145,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Admissions API (integration)", () => {
         status: "ACTIVE",
         roles: { create: [{ role: { connect: { name: SUPER_ADMIN_ROLE } } }] },
       },
+    })
+    await prisma.tenantMembership.create({
+      data: { userId: adminBUser.id, schoolId: schoolB.id, roleId: superRole.id, status: "ACTIVE" },
     })
 
     await login(adminA, "admissions.a@example.com", "a-secret-123456")
@@ -383,6 +389,27 @@ describe.skipIf(!TEST_DATABASE_URL)("Admissions API (integration)", () => {
       expect(guardian.guardian.name).toBe("Ravi Kumar")
     })
 
+    it("reuses the same guardian row when the name and contact already exist", async () => {
+      const firstId = await approveOne()
+      await adminA.post(`/api/v1/admissions/${firstId}/convert`).send({
+        classId: fixtures.classSixAId,
+        sectionId: fixtures.sectionSixAId,
+      })
+      const secondId = await approveOne()
+      const res = await adminA.post(`/api/v1/admissions/${secondId}/convert`).send({
+        classId: fixtures.classSixAId,
+        sectionId: fixtures.sectionSixAId,
+      })
+      const guardians = await prisma.guardian.findMany({
+        where: { name: "Ravi Kumar", phone: "9898989898", schoolId: fixtures.schoolAId },
+      })
+      expect(guardians).toHaveLength(1)
+      const ownedGuardian = await prisma.studentGuardian.findFirstOrThrow({
+        where: { studentId: res.body.data.student.id },
+      })
+      expect(ownedGuardian.guardianId).toBe(guardians[0].id)
+    })
+
     it("prevents converting the same application twice (duplicate prevention)", async () => {
       const id = await approveOne()
       const first = await adminA.post(`/api/v1/admissions/${id}/convert`).send({
@@ -418,6 +445,18 @@ describe.skipIf(!TEST_DATABASE_URL)("Admissions API (integration)", () => {
       expect(res.body.data.deleted).toBe(true)
       const gone = await prisma.admissionApplication.findUnique({ where: { id } })
       expect(gone).toBeNull()
+    })
+
+    it("rejects deleting an application that is no longer pending", async () => {
+      const created = await adminA.post("/api/v1/admissions").send(createApplicationPayload())
+      const id = created.body.data.id
+      await adminA.post(`/api/v1/admissions/${id}/review`).send({ status: "APPROVED" })
+      const res = await adminA.delete(`/api/v1/admissions/${id}`)
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe("BAD_REQUEST")
+      expect(res.body.error.message).toMatch(/pending/i)
+      const stillThere = await prisma.admissionApplication.findUnique({ where: { id } })
+      expect(stillThere).not.toBeNull()
     })
 
     it("denies delete to an actor without the admissions:delete permission", async () => {

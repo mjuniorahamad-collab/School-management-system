@@ -73,10 +73,10 @@ describe.skipIf(!TEST_DATABASE_URL)("Academic Foundation API (integration)", () 
     })
     fixtures.fixtureClassId = cls.id
 
-    await prisma.role.create({ data: { name: SUPER_ADMIN_ROLE, description: "Test super admin" } })
+    const superAdminRole = await prisma.role.create({ data: { name: SUPER_ADMIN_ROLE, description: "Test super admin" } })
     const teacherRole = await prisma.role.create({ data: { name: "TEACHER", description: "Test teacher" } })
 
-    await prisma.user.create({
+    const adminUser = await prisma.user.create({
       data: {
         schoolId: school.id,
         name: "Academic Admin",
@@ -86,7 +86,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Academic Foundation API (integration)", () 
         roles: { create: [{ role: { connect: { name: SUPER_ADMIN_ROLE } } }] },
       },
     })
-    await prisma.user.create({
+    await prisma.tenantMembership.create({ data: { userId: adminUser.id, schoolId: school.id, roleId: superAdminRole.id, status: "ACTIVE" } })
+
+    const teacherUser = await prisma.user.create({
       data: {
         schoolId: school.id,
         name: "Academic Teacher",
@@ -96,6 +98,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Academic Foundation API (integration)", () 
         roles: { create: [{ role: { connect: { id: teacherRole.id } } }] },
       },
     })
+    await prisma.tenantMembership.create({ data: { userId: teacherUser.id, schoolId: school.id, roleId: teacherRole.id, status: "ACTIVE" } })
 
     await login(adminAgent, "academic.admin@example.com", "admin-secret-123")
     await login(teacherAgent, "academic.teacher@example.com", "teacher-secret-123")
