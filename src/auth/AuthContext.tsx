@@ -1,7 +1,7 @@
-import { useCallback, useMemo } from "react"
+import { useCallback, useEffect, useMemo } from "react"
 import type { ReactNode } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ApiClientError } from "@/lib/apiClient"
+import { ApiClientError, onSignedOut } from "@/lib/apiClient"
 import { canUser } from "@/auth/can"
 import { AuthContext, ME_QUERY_KEY } from "@/auth/context"
 import type { AuthContextValue } from "@/auth/context"
@@ -10,6 +10,16 @@ import { fetchMe, login as loginRequest, logout as logoutRequest } from "@/servi
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
+
+  // When a request fails a 401 and the refresh token is also rejected, the
+  // session is over. Clear the cached identity so ProtectedRoute redirects.
+  useEffect(
+    () =>
+      onSignedOut(() => {
+        queryClient.setQueryData(ME_QUERY_KEY, { user: null })
+      }),
+    [queryClient],
+  )
 
   const meQuery = useQuery({
     queryKey: ME_QUERY_KEY,
