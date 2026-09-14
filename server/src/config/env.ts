@@ -36,8 +36,9 @@ const envSchema = z.object({
   S3_BUCKET: z.string().optional(),
   S3_ACCESS_KEY_ID: z.string().optional(),
   S3_SECRET_ACCESS_KEY: z.string().optional(),
-  // Optional public base URL of an S3/R2 bucket. When set, photo reads use
-  // time-limited presigned URLs derived from this endpoint. Keep private.
+  // Whether to use path-style request URLs (endpoint/bucket/key). Required for
+  // R2 / localstack / Supabase-S3 style endpoints; the AWS default is
+  // virtual-hosted style.
   S3_FORCE_PATH_STYLE: z.enum(["true", "false"]).default("false"),
   // When set, runs behind a reverse proxy that forwards the real client IP
   // (X-Forwarded-For). Required so rate limiting and request logging see the

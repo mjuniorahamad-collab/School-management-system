@@ -1,4 +1,6 @@
 import { assertSafeKey, type StoredObject, type StorageProvider } from "./storage.js"
+import { ApiError, storageError } from "../ApiError.js"
+import { logError } from "../logger.js"
 
 export interface S3StorageConfig {
   endpoint?: string
@@ -29,10 +31,10 @@ interface Sdk {
 }
 
 /**
- * S3-compatible object storage provider (works with Cloudflare R2 and any other
- * S3 endpoint). Buckets must be PRIVATE — photos are read back through the
- * authenticated photo routes, which fetch the object server-side rather than
- * exposing public-read URLs.
+ * S3-compatible object storage provider (works with Cloudflare R2, Supabase
+ * Storage S3 API and any other S3 endpoint). Buckets must be PRIVATE — photos
+ * are read back through the authenticated photo routes, which fetch the object
+ * server-side rather than exposing public-read URLs.
  *
  * The AWS SDK is imported lazily so this provider can stay bundled even when
  * the app runs in local mode without S3 credentials present.
@@ -53,6 +55,9 @@ export class S3StorageProvider implements StorageProvider {
         region: this.config.region,
         endpoint: this.config.endpoint,
         forcePathStyle: this.config.forcePathStyle,
+        // Bound retries so a misbehaving/slow endpoint fails fast instead of
+        // triggering a long retry storm that trips the client upload timeout.
+        maxAttempts: 2,
         credentials: {
           accessKeyId: this.config.accessKeyId,
           secretAccessKey: this.config.secretAccessKey,
@@ -68,17 +73,36 @@ export class S3StorageProvider implements StorageProvider {
     return this.sdk
   }
 
+  /**
+   * Converts raw SDK/storage failures into a client-safe ApiError. Full detail
+   * is logged server-side; the client never sees credentials, endpoint internals
+   * or stack traces.
+   */
+  private async mapS3Error(action: "connect to" | "store" | "retrieve" | "remove", fn: () => Promise<void>): Promise<void> {
+    try {
+      await fn()
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      logError(error)
+      throw storageError(`Could not ${action} the object in storage`)
+    }
+  }
+
   async put(key: string, buffer: Buffer, contentType: string): Promise<void> {
     assertSafeKey(key)
-    const sdk = await this.load()
-    await sdk.client.send(
-      new sdk.PutObjectCommand({
-        Bucket: this.config.bucket,
-        Key: key,
-        Body: buffer,
-        ContentType: contentType,
-      }),
-    )
+    await this.mapS3Error("connect to", async () => {
+      const sdk = await this.load()
+      await this.mapS3Error("store", async () => {
+        await sdk.client.send(
+          new sdk.PutObjectCommand({
+            Bucket: this.config.bucket,
+            Key: key,
+            Body: buffer,
+            ContentType: contentType,
+          }),
+        )
+      })
+    })
   }
 
   async getUrl(key: string): Promise<string | null> {
@@ -88,24 +112,29 @@ export class S3StorageProvider implements StorageProvider {
 
   async get(key: string): Promise<StoredObject | null> {
     assertSafeKey(key)
-    const sdk = await this.load()
-    const result = await sdk.client.send(
-      new sdk.GetObjectCommand({ Bucket: this.config.bucket, Key: key }),
-    )
-    if (result.Body === undefined) return null
-    const buffer = Buffer.from(await result.Body.transformToByteArray())
+    let output: GetObjectOutputLike | undefined
+    await this.mapS3Error("retrieve", async () => {
+      const sdk = await this.load()
+      output = await sdk.client.send(
+        new sdk.GetObjectCommand({ Bucket: this.config.bucket, Key: key }),
+      )
+    })
+    if (!output?.Body) return null
+    const buffer = Buffer.from(await output.Body.transformToByteArray())
     return {
       key,
       buffer,
-      contentType: result.ContentType ?? "application/octet-stream",
+      contentType: output.ContentType ?? "application/octet-stream",
     }
   }
 
   async remove(key: string): Promise<void> {
     assertSafeKey(key)
-    const sdk = await this.load()
-    await sdk.client.send(
-      new sdk.DeleteObjectCommand({ Bucket: this.config.bucket, Key: key }),
-    )
+    await this.mapS3Error("remove", async () => {
+      const sdk = await this.load()
+      await sdk.client.send(
+        new sdk.DeleteObjectCommand({ Bucket: this.config.bucket, Key: key }),
+      )
+    })
   }
 }

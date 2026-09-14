@@ -155,6 +155,38 @@ docker compose -f docker-compose.prod.yml exec api npx prisma migrate deploy
 Run `prisma migrate deploy` after deploying a release that changes the schema,
 in a maintenance window, and verify with the checks below.
 
+## Production bootstrap
+
+After the first migration is applied to a **blank** production database, run
+the bootstrap script to create the structural/master records: school, current
+academic session, the full permission catalog (115 codes), 11 roles with their
+grants, and the initial super admin identity.
+
+The script requires `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` to be set in
+the environment (same as local development). It is safe to run multiple times:
+structural rows are upserted idempotently; if the admin email already exists
+the script **aborts** (never overwrites a password hash).
+
+```sh
+# Read-only preflight — reports what would be created/reconciled
+npm run bootstrap:production -- --check
+
+# Transactional write — idempotent, safe to re-run
+npm run bootstrap:production
+
+# Read-only post-run report — confirms everything is in place
+npm run bootstrap:production -- --verify
+```
+
+The script is in `server/prisma/bootstrap-production.ts` and runs via `tsx`. It
+must be executed **after** `prisma migrate deploy` so the schema tables exist.
+In a container workflow:
+
+```sh
+docker compose -f docker-compose.prod.yml exec api npx prisma migrate deploy
+docker compose -f docker-compose.prod.yml exec api npm run bootstrap:production -- --verify
+```
+
 ## Request tracing and operational logging
 
 Every HTTP request produces one structured log line (JSON) on

@@ -21,6 +21,7 @@
     "generate:prisma": "prisma generate --schema server/prisma/schema.prisma",
     "db:migrate": "prisma migrate dev --schema server/prisma/schema.prisma",
     "db:seed": "prisma db seed --schema server/prisma/schema.prisma",
+    "bootstrap:production": "tsx server/prisma/bootstrap-production.ts",
     "db:local:start": "\".data/postgres/pgsql/bin/pg_ctl.exe\" -D \".data/postgres/data\" -l \".data/postgres/pg.log\" -o \"-p 5433\" start",
     "db:local:stop": "\".data/postgres/pgsql/bin/pg_ctl.exe\" -D \".data/postgres/data\" stop",
     "test": "vitest run",

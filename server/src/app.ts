@@ -8,6 +8,7 @@ import { errorHandler } from "./middleware/errorHandler.js"
 import { notFoundHandler } from "./middleware/notFound.js"
 import { requestLogger } from "./middleware/requestLogger.js"
 import { apiRouter } from "./routes/index.js"
+import { validateStorageConfig } from "./lib/storage/index.js"
 
 export interface CreateAppOptions {
   /**
@@ -22,6 +23,9 @@ export function createApp(options: CreateAppOptions = {}): express.Application {
   const app = express()
 
   app.disable("x-powered-by")
+  // A misconfigured S3 provider (missing endpoint/credentials) must fail at
+  // boot — surfacing later as hidden 500s on the first photo upload.
+  if (env.storage.provider === "s3") validateStorageConfig()
   // Behind a reverse proxy (`TRUST_PROXY=true`) trust the nearest hop so
   // `req.ip` (and thus rate limiting) sees the real client, never the proxy.
   if (env.trustProxy) app.set("trust proxy", 1)
