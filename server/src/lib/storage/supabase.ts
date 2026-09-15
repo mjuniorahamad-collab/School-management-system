@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { assertSafeKey, type StoredObject, type StorageProvider } from "./storage.js"
 import { ApiError, storageError } from "../ApiError.js"
 import { logError } from "../logger.js"
@@ -31,6 +32,12 @@ interface StorageFileApiLike {
 
 interface SupabaseStorageClientLike {
   from(bucket: string): StorageFileApiLike
+}
+
+// TEMPORARY DIAGNOSTIC — remove after root cause is confirmed.
+type TempListBucketsResult = {
+  data: Array<{ id?: string }> | null
+  error: { status?: number | string; statusCode?: number | string } | null
 }
 
 function isNotFound(error: StorageErrorLike): boolean {
@@ -85,8 +92,63 @@ export class SupabaseStorageProvider implements StorageProvider {
           `[storage] WARNING: SUPABASE_STORAGE_URL is not a valid URL (received: "${this.config.storageUrl}"). Uploads will fail until it is fixed.`,
         )
       }
+
+      this.runTemporaryStorageDiagnostics(this.client)
     }
     return this.client
+  }
+
+  // TEMPORARY DIAGNOSTIC — remove after root cause is confirmed.
+  private runTemporaryStorageDiagnostics(client: SupabaseStorageClientLike): void {
+    const key = this.config.serviceRoleKey
+    const bucket = this.config.bucket
+
+    let keyKind = "unknown"
+    if (key.startsWith("sb_secret_")) keyKind = "sb_secret"
+    else if (key.startsWith("sb_publishable_")) keyKind = "sb_publishable"
+    else if (/^eyJ/.test(key)) keyKind = "legacy-jwt"
+
+    let host = "invalid-url"
+    let path = ""
+    try {
+      const u = new URL(this.config.storageUrl)
+      host = u.hostname
+      path = u.pathname
+    } catch {
+      // Defaults above.
+    }
+
+    console.log(
+      `[storage] TEMP-DIAG keyKind=${keyKind} keyLength=${key.length} ` +
+        `hasWhitespace=${key.length > 0 && key !== key.trim()} ` +
+        `keySha256=${key ? createHash("sha256").update(key).digest("hex") : ""} ` +
+        `host=${host} path=${path} bucket=${bucket}`,
+    )
+
+    void (async () => {
+      try {
+        const res = await (client as unknown as {
+          listBuckets(): Promise<TempListBucketsResult>
+        }).listBuckets()
+        if (!res.error) {
+          const exists = Array.isArray(res.data) && res.data.some((b) => b?.id === bucket)
+          console.log(`[storage] TEMP-DIAG listBuckets result=2xx/success bucketExists=${exists}`)
+        } else {
+          const status = Number(res.error.status ?? res.error.statusCode ?? 0)
+          const category =
+            status === 400
+              ? "400"
+              : status === 401
+                ? "401"
+                : status === 403
+                  ? "403"
+                  : `other(${status})`
+          console.log(`[storage] TEMP-DIAG listBuckets result=${category}`)
+        }
+      } catch {
+        console.log("[storage] TEMP-DIAG listBuckets result=network-error")
+      }
+    })()
   }
 
   /**
