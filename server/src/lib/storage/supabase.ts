@@ -70,7 +70,6 @@ export class SupabaseStorageProvider implements StorageProvider {
       const { StorageClient } = await import("@supabase/storage-js")
       this.client = new StorageClient(this.config.storageUrl, {
         apikey: this.config.serviceRoleKey,
-        Authorization: `Bearer ${this.config.serviceRoleKey}`,
       }) as unknown as SupabaseStorageClientLike
 
       // Safe diagnostic: log hostname + pathname only (no key material). This is
