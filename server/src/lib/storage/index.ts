@@ -19,7 +19,28 @@ export function validateStorageConfig(): void {
   if (!storageUrl) missing.push("SUPABASE_STORAGE_URL")
   if (!serviceRoleKey) missing.push("SUPABASE_SERVICE_ROLE_KEY")
   if (!bucket) missing.push("SUPABASE_BUCKET")
-  if (missing.length === 0) return
+  if (missing.length === 0) {
+    // The native Storage SDK builds upload URLs as
+    // `${SUPABASE_STORAGE_URL}/object/<bucket>/<key>`. A base URL without the
+    // `/storage/v1` suffix hits the platform gateway with an unmatched path and
+    // fails with 404 "requested path is invalid". Warn loudly at boot so a
+    // misconfigured value is caught before the first failed upload.
+    try {
+      const u = new URL(storageUrl!)
+      if (!u.pathname.endsWith("/storage/v1")) {
+        console.warn(
+          `[storage] WARNING: SUPABASE_STORAGE_URL does not end with /storage/v1 (resolved to ${u.hostname}${u.pathname}). ` +
+            "Uploads will fail with 404 'requested path is invalid'. " +
+            "Fix: set SUPABASE_STORAGE_URL=https://<project-ref>.supabase.co/storage/v1",
+        )
+      }
+    } catch {
+      console.warn(
+        `[storage] WARNING: SUPABASE_STORAGE_URL is not a valid URL ("${storageUrl}"). Uploads will fail until it is fixed.`,
+      )
+    }
+    return
+  }
   throw new Error(
     `STORAGE_PROVIDER=supabase is set but ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} missing. ` +
       "Supabase native Storage requires SUPABASE_STORAGE_URL, SUPABASE_SERVICE_ROLE_KEY and SUPABASE_BUCKET.",

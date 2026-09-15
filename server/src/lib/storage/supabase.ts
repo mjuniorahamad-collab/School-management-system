@@ -62,7 +62,7 @@ export class SupabaseStorageProvider implements StorageProvider {
   private client: SupabaseStorageClientLike | undefined
 
   constructor(config: SupabaseStorageConfig) {
-    this.config = config
+    this.config = { ...config, storageUrl: config.storageUrl.replace(/\/+$/, "") }
   }
 
   private async load(): Promise<SupabaseStorageClientLike> {
@@ -72,6 +72,20 @@ export class SupabaseStorageProvider implements StorageProvider {
         apikey: this.config.serviceRoleKey,
         Authorization: `Bearer ${this.config.serviceRoleKey}`,
       }) as unknown as SupabaseStorageClientLike
+
+      // Safe diagnostic: log hostname + pathname only (no key material). This is
+      // the exact URL the SDK will build upload requests from, so a wrong value
+      // is immediately visible in server logs.
+      try {
+        const u = new URL(this.config.storageUrl)
+        console.log(
+          `[storage] Supabase Storage client initialized — host=${u.hostname} path=${u.pathname} bucket=${this.config.bucket}`,
+        )
+      } catch {
+        console.warn(
+          `[storage] WARNING: SUPABASE_STORAGE_URL is not a valid URL (received: "${this.config.storageUrl}"). Uploads will fail until it is fixed.`,
+        )
+      }
     }
     return this.client
   }
