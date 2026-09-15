@@ -4,8 +4,9 @@
  * Profile photos are sensitive personal data (especially student/minor photos).
  * They are never stored in PostgreSQL — the database keeps only the object key
  * in the entity's `photoUrl` column. This interface lets local development write
- * to a private, persistent `server/uploads` directory while production uses
- * S3-compatible object storage (e.g. Cloudflare R2) with authenticated reads.
+ * to a private, persistent `server/uploads` directory while production uses a
+ * PRIVATE object-storage bucket (currently Supabase native Storage) with
+ * authenticated reads.
  *
  * Keys are always tenant-aware and server-generated (see photo.service.ts), so
  * a leaked key can never escape the owning school's namespace.

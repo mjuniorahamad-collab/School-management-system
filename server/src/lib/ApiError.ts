@@ -56,7 +56,7 @@ export function accountDisabledError(message = "This account is disabled or susp
 }
 
 /**
- * Object-storage failure (S3-compatible provider). The message is intentionally
+ * Object-storage failure (storage provider). The message is intentionally
  * secret-free — full technical detail is logged server-side only.
  */
 export function storageError(message = "Object storage is unavailable"): ApiError {

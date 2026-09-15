@@ -78,12 +78,14 @@ in each entity's `photoUrl` column (e.g. `photos/<schoolId>/students/<uuid>.jpg`
   `server/uploads/` directory (git-ignored, configurable via
   `STORAGE_LOCAL_DIR`). Back it up alongside the database with the same
   schedule/rotation, and restore it with the DB so keys never dangle.
-- **S3 provider (`STORAGE_PROVIDER=s3`):** photos live in the S3/R2 bucket.
-  Enable bucket versioning or lifecycle/replication backups in the provider
-  console; at minimum, treat the bucket as primary data, never ephemeral.
-- Photos are sensitive personal data (student/minor images). Encrypt buckets at
-  rest, keep them **private** (all reads go through the authenticated photo
-  routes, never a public URL), and restrict access to the backup artifacts.
+- **Supabase native Storage (`STORAGE_PROVIDER=supabase`):** photos live in the
+  Supabase Storage bucket named by `SUPABASE_BUCKET` under the tenant-scoped
+  key prefixes. Store the bucket as primary data: enable object versioning or a
+  lifecycle/replication backup in the Supabase console, never treat it as
+  ephemeral. The server-side `SUPABASE_SERVICE_ROLE_KEY` must stay server-only.
+- Photos are sensitive personal data (student/minor images). Keep the bucket
+  **private** (all reads go through the authenticated photo routes, never a
+  public URL), and restrict access to the backup artifacts.
 - The key prefix embeds the owning `schoolId`, so a leaked key cannot be used
   to fetch another tenant's objects; restore into the same tenant namespace.
 

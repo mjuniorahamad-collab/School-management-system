@@ -23,9 +23,9 @@ export function createApp(options: CreateAppOptions = {}): express.Application {
   const app = express()
 
   app.disable("x-powered-by")
-  // A misconfigured S3 provider (missing endpoint/credentials) must fail at
-  // boot — surfacing later as hidden 500s on the first photo upload.
-  if (env.storage.provider === "s3") validateStorageConfig()
+  // A misconfigured Supabase Storage provider (missing URL/key/bucket) must
+  // fail at boot — surfacing later as hidden 500s on the first photo upload.
+  if (env.storage.provider === "supabase") validateStorageConfig()
   // Behind a reverse proxy (`TRUST_PROXY=true`) trust the nearest hop so
   // `req.ip` (and thus rate limiting) sees the real client, never the proxy.
   if (env.trustProxy) app.set("trust proxy", 1)
