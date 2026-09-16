@@ -27,7 +27,7 @@ export function SidebarBrand({ collapsed }: { collapsed?: boolean }) {
       </div>
       {!collapsed && (
         <div className="min-w-0 leading-tight">
-          <p className="truncate text-sm font-semibold">{schoolName}</p>
+          <p className="line-clamp-2 text-sm font-semibold">{schoolName}</p>
           <p className="truncate text-xs text-muted-foreground">{schoolTagline}</p>
         </div>
       )}
