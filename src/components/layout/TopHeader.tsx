@@ -6,6 +6,7 @@ import { findNavItem, getAllNavItems } from "@/routes/navigation"
 import { getInitials } from "@/lib/format"
 import { useSidebar } from "@/hooks/useSidebar"
 import { useAuth } from "@/auth/useAuth"
+import { useSettings } from "@/hooks/useSettings"
 import { ThemeToggle } from "@/theme/ThemeToggle"
 import { GlobalSearch } from "@/components/layout/GlobalSearch"
 import { MessagesMenu } from "@/components/layout/MessagesMenu"
@@ -53,8 +54,9 @@ export function TopHeader() {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, signOut } = useAuth()
+  const { data: settingsData } = useSettings()
 
-  const displayName = user?.name ?? branding.schoolName
+  const displayName = user?.name ?? settingsData?.settings.schoolName ?? branding.schoolName
   const roleLabel = user?.roles[0] ? formatRole(user.roles[0]) : "User"
 
   const { title, subtitle } = useMemo(

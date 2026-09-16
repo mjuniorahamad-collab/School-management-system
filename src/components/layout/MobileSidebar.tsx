@@ -1,16 +1,19 @@
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { SidebarBrand, SidebarNav } from "@/components/layout/SidebarNav"
 import { useSidebar } from "@/hooks/useSidebar"
+import { useSettings } from "@/hooks/useSettings"
 import { branding } from "@/config/branding"
 
 export function MobileSidebar() {
   const { mobileOpen, setMobileOpen } = useSidebar()
+  const { data } = useSettings()
+  const schoolName = data?.settings.schoolName || branding.schoolName
 
   return (
     <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
       <SheetContent side="left" className="w-72! gap-0 p-0 sm:w-80!">
         <SheetTitle className="sr-only">
-          {branding.schoolName} navigation
+          {schoolName} navigation
         </SheetTitle>
         <div className="flex h-16 shrink-0 items-center border-b">
           <SidebarBrand />
