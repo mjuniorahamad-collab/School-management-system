@@ -189,6 +189,7 @@ model School {
   transportStops        TransportStop[]
   transportDrivers      TransportDriver[]
   transportAssignments  TransportAssignment[]
+  portalActivationTokens PortalActivationToken[]
 }
 
 model AcademicSession {
@@ -284,6 +285,8 @@ model User {
   returnedLibraryLoans LibraryLoan[] @relation("LibraryLoanReturnedBy")
 
   transportDrivers TransportDriver[]
+
+  portalActivationTokens PortalActivationToken[]
 
   @@index([schoolId])
   @@index([email])
@@ -505,6 +508,42 @@ model StudentGuardian {
 
   @@unique([studentId, guardianId])
   @@index([guardianId])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Portal activation tokens (parent provisioning).
+//
+// Decisions:
+//   - A one-time, expiring credential-set link for a freshly provisioned portal
+//     account (PARENT/STUDENT). Only the sha-256 HASH of the raw token is stored
+//     (`tokenHash`, unique), mirroring the Session table; the raw token is shown
+//     exactly once to the admin who provisions the account and never reaches the
+//     database, audit logs, or server logs.
+//   - `usedAt` marks a successfully activated token (single use); `revokedAt`
+//     marks a superseded/cancelled token (regeneration or de-provisioning). A
+//     token is valid iff ALL hold: `usedAt IS NULL`, `revokedAt IS NULL`, and
+//     `expiresAt > now`.
+//   - `purpose` is a stable string literal ("PARENT") so adding future
+//     activation kinds never requires a PG enum migration.
+//   - `schoolId` + `userId` scope the token; de-activating or unlinking a lone
+//     portal account revokes its outstanding tokens in the same transaction.
+// ────────────────────────────────────────────────────────────────────────────
+model PortalActivationToken {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  schoolId  String
+  userId    String
+  purpose   String   @default("PARENT")
+  expiresAt DateTime
+  usedAt    DateTime?
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([schoolId])
+  @@index([userId])
 }
 
 model Student {

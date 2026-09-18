@@ -1,5 +1,7 @@
 import { api } from "@/lib/apiClient"
 import type {
+  ActivatePortalAccountPayload,
+  ActivatePortalAccountResult,
   CreateProfileLinkPayload,
   DeleteProfileLinkPayload,
   PortalAttendanceResult,
@@ -11,6 +13,10 @@ import type {
   PortalNoticesResult,
   PortalOverview,
   PortalResultsResult,
+  ProvisionPortalAccountPayload,
+  ProvisionPortalAccountResult,
+  RegenerateActivationPayload,
+  RegenerateActivationResult,
   PortalTasksResult,
   PortalTransportResult,
   PortalLinkCandidatesResult,
@@ -90,5 +96,17 @@ export const portalService = {
 
   deleteLink(payload: DeleteProfileLinkPayload): Promise<PortalLinksResult> {
     return api.delete<PortalLinksResult>("/portal/links", payload)
+  },
+
+  provisionAccount(payload: ProvisionPortalAccountPayload): Promise<ProvisionPortalAccountResult> {
+    return api.post<ProvisionPortalAccountResult>("/portal/accounts", payload)
+  },
+
+  regenerateActivation(payload: RegenerateActivationPayload): Promise<RegenerateActivationResult> {
+    return api.post<RegenerateActivationResult>("/portal/accounts/regenerate", payload)
+  },
+
+  activateAccount(payload: ActivatePortalAccountPayload): Promise<ActivatePortalAccountResult> {
+    return api.post<ActivatePortalAccountResult>("/portal/activate", payload)
   },
 }

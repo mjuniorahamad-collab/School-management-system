@@ -2,8 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { portalService } from "@/services/portalService"
 import type {
+  ActivatePortalAccountPayload,
   CreateProfileLinkPayload,
   DeleteProfileLinkPayload,
+  ProvisionPortalAccountPayload,
+  RegenerateActivationPayload,
 } from "@/types/portal"
 
 const GROUP = ["portal"] as const
@@ -122,5 +125,33 @@ export function useDeletePortalLink() {
       toast.success("Link removed", { description: "Portal access removed for that profile." })
     },
     onError: (e: Error) => toast.error("Could not remove link", { description: e.message }),
+  })
+}
+
+// Portal account provisioning. The create/regenerate success path deliberately
+// does NOT toast — the caller surfaces the one-time activation link itself.
+// Failures are toasted so a failed regenerate is never silent.
+
+export function useProvisionPortalAccount() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: ProvisionPortalAccountPayload) => portalService.provisionAccount(payload),
+    onSuccess: () => qc.invalidateQueries({ queryKey: GROUP }),
+    onError: (e: Error) => toast.error("Could not create portal account", { description: e.message }),
+  })
+}
+
+export function useRegenerateActivation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: RegenerateActivationPayload) => portalService.regenerateActivation(payload),
+    onSuccess: () => qc.invalidateQueries({ queryKey: GROUP }),
+    onError: (e: Error) => toast.error("Could not generate activation link", { description: e.message }),
+  })
+}
+
+export function useActivatePortalAccount() {
+  return useMutation({
+    mutationFn: (payload: ActivatePortalAccountPayload) => portalService.activateAccount(payload),
   })
 }

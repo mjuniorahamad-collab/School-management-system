@@ -93,6 +93,9 @@ const PortalChildPage = lazy(() =>
 const PortalLinksPage = lazy(() =>
   import("@/pages/portal/PortalLinksPage").then((m) => ({ default: m.PortalLinksPage })),
 )
+const ActivatePortalPage = lazy(() =>
+  import("@/pages/portal/ActivatePortalPage").then((m) => ({ default: m.ActivatePortalPage })),
+)
 
 const DASHBOARD_PATH = "/dashboard"
 
@@ -100,6 +103,14 @@ export const router = createBrowserRouter([
   {
     path: "/login",
     element: <LoginPage />,
+  },
+  {
+    path: "/activate",
+    element: (
+      <Suspense fallback={<RouteFallback />}>
+        <ActivatePortalPage />
+      </Suspense>
+    ),
   },
   {
     element: (

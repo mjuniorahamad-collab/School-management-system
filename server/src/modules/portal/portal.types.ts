@@ -213,6 +213,13 @@ export interface PortalNoticesResult {
 
 // Admin-side profile link management.
 
+export type PortalActivationStatus = "NONE" | "PENDING" | "ACTIVATED"
+
+export interface PortalActivationView {
+  status: PortalActivationStatus
+  expiresAt: string | null
+}
+
 export interface PortalLink {
   id: string
   profileType: PortalLinkProfileType
@@ -221,6 +228,7 @@ export interface PortalLink {
   userId: string | null
   userName: string | null
   userEmail: string | null
+  activation: PortalActivationView
 }
 
 export interface PortalLinksResult {
@@ -239,4 +247,31 @@ export interface PortalLinkCandidatesResult {
   students: PortalLinkCandidate[]
   guardians: PortalLinkCandidate[]
   users: PortalLinkCandidate[]
+}
+
+// Portal account provisioning (create parent accounts + activation links).
+
+export interface ProvisionPortalAccountResult {
+  provisioned: boolean
+  linkedToExisting: boolean
+  token: string | null
+  expiresAt: string | null
+  userId: string
+  profileType: PortalLinkProfileType
+  profileId: string
+  profileName: string
+  userName: string
+  userEmail: string
+}
+
+export interface RegenerateActivationResult {
+  token: string
+  expiresAt: string
+  userId: string
+}
+
+export interface ActivatePortalAccountResult {
+  activated: boolean
+  autoSignedIn: boolean
+  user: { id: string; name: string; email: string }
 }

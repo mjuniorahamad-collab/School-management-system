@@ -352,9 +352,10 @@ describe.skipIf(!TEST_DATABASE_URL)("Student/Parent Portal (integration)", () =>
       expect(res.status).toBe(200)
       expect(res.body.data.linked).toBe(false)
 
+      // Deprovisioning: studentCId was parent2's ONLY linked profile, so the
+      // tenant membership is deactivated too — the existing session is cut off.
       const me = await parent2Agent.get("/api/v1/me")
-      const ids = me.body.data.children.map((c: { id: string }) => c.id)
-      expect(ids).not.toContain(studentCId)
+      expect(me.status).toBe(403)
     })
 
     it("unlink audit entry is recorded", async () => {

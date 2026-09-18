@@ -1,13 +1,19 @@
 import type { RequestHandler } from "express"
+import { setAuthCookies } from "../../auth/cookies.js"
 import { ok } from "../../lib/response.js"
 import { parseWithZod } from "../../lib/validation.js"
+import { createSessionTokens } from "../../services/auth.service.js"
 import type { AuthUser } from "../../types/auth.js"
 import {
+  activatePortalAccountSchema,
   createProfileLinkSchema,
   deleteProfileLinkSchema,
   portalListQuerySchema,
   portalNoticesQuerySchema,
+  provisionPortalAccountSchema,
+  regenerateActivationSchema,
 } from "./portal.schema.js"
+import * as portalProvisioningService from "./portal-provisioning.service.js"
 import * as portalService from "./portal.service.js"
 
 function requireAuth(req: { auth?: AuthUser }): AuthUser {
@@ -96,4 +102,33 @@ export const listLinksHandler: RequestHandler = async (req, res) => {
 
 export const getLinkCandidatesHandler: RequestHandler = async (req, res) => {
   res.json(ok(await portalService.getLinkCandidates(requireAuth(req))))
+}
+
+export const provisionAccountHandler: RequestHandler = async (req, res) => {
+  const input = parseWithZod(provisionPortalAccountSchema, req.body, "Invalid provisioning data")
+  const result = await portalProvisioningService.provisionPortalAccount(requireAuth(req), input)
+  res.status(201).json(ok(result))
+}
+
+export const regenerateActivationHandler: RequestHandler = async (req, res) => {
+  const input = parseWithZod(regenerateActivationSchema, req.body, "Invalid regeneration data")
+  const result = await portalProvisioningService.regenerateActivation(
+    requireAuth(req),
+    input.userId,
+  )
+  res.json(ok(result))
+}
+
+export const activatePortalAccountHandler: RequestHandler = async (req, res) => {
+  const input = parseWithZod(activatePortalAccountSchema, req.body, "Invalid activation data")
+  const result = await portalProvisioningService.activatePortalAccount(
+    input.token,
+    input.newPassword,
+  )
+  // Requested behaviour: activation signs the parent straight in. The session
+  // machinery is identical to a normal login (rotating opaque tokens, hashed in
+  // the DB, httpOnly cookies) — the raw token never reaches browser JS.
+  const tokens = await createSessionTokens(result.user.id)
+  setAuthCookies(res, tokens.accessToken, tokens.refreshToken)
+  res.json(ok(result))
 }

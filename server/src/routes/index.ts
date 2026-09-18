@@ -36,6 +36,7 @@ import { libraryRouter } from "../modules/library/library.route.js"
 import { transportRouter } from "../modules/transport/transport.route.js"
 import { reportsRouter } from "../modules/reports/report.route.js"
 import { portalLinksRouter, portalMeRouter } from "../modules/portal/portal.route.js"
+import { portalAccountRouter, portalActivationRouter } from "../modules/portal/portal-provisioning.route.js"
 
 // Feature modules register their routers here (e.g. apiRouter.use(studentsRouter)).
 export const apiRouter: Router = Router()
@@ -78,3 +79,5 @@ apiRouter.use("/transport", transportRouter)
 apiRouter.use("/reports", reportsRouter)
 apiRouter.use("/me", portalMeRouter)
 apiRouter.use("/portal/links", portalLinksRouter)
+apiRouter.use("/portal/accounts", portalAccountRouter)
+apiRouter.use("/portal/activate", portalActivationRouter)

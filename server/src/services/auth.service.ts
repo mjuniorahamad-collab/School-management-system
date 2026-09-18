@@ -56,7 +56,7 @@ async function requirePrisma(): Promise<PrismaClient> {
   return prisma
 }
 
-async function createSessionTokens(userId: string): Promise<SessionTokens> {
+export async function createSessionTokens(userId: string): Promise<SessionTokens> {
   const prisma = await requirePrisma()
   const accessToken = generateToken()
   const refreshToken = generateToken()

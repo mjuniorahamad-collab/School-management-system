@@ -11,6 +11,7 @@ import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.
 import { buildPortalLinkNotificationTitle } from "../notifications/notification.rules.js"
 import { emitNotifications } from "../notifications/notification.service.js"
 import type {
+  PortalActivationView,
   PortalAttendanceRecord,
   PortalAttendanceResult,
   PortalAttendanceSummary,
@@ -793,14 +794,14 @@ export async function getNotices(auth: AuthUser, limit: number): Promise<PortalN
 // Admin-side profile link management (portal account provisioning).
 // ────────────────────────────────────────────────────────────────────────────
 
-function isAdminPortalOperator(auth: AuthUser): boolean {
+export function isAdminPortalOperator(auth: AuthUser): boolean {
   // Mirrors the route guard `requirePermission("portal:update")`: parents and
   // students (who hold only `portal:view`) can never reach link management even
   // if this service is invoked directly.
   return auth.permissions.includes("portal:update")
 }
 
-async function profileExists(
+export async function profileExists(
   prisma: DbClient,
   schoolId: string,
   profileType: "STUDENT" | "GUARDIAN",
@@ -829,7 +830,7 @@ async function profileExists(
 }
 
 /** Verifies a user belongs to the school (ACTIVE membership or legacy link). */
-async function userBelongsToSchool(
+export async function userBelongsToSchool(
   prisma: DbClient,
   schoolId: string,
   userId: string,
@@ -956,6 +957,46 @@ export async function unlinkProfile(auth: AuthUser, input: DeleteLinkInput) {
       metadata: { profileId: input.profileId, profileType: input.profileType, userId: input.userId },
       diff: { fields: [{ field: "userId", before: input.userId, after: null }] },
     })
+
+    // Deprovisioning (requested behaviour): unlinking the LAST portal profile of
+    // a pure portal account (PARENT/STUDENT role) must actually revoke access —
+    // otherwise an "unlinked" parent could keep logging in with working
+    // credentials. The User row is global and stays ACTIVE (it may exist in and
+    // serve other schools); we deactivate the tenant membership for THIS school
+    // and revoke any outstanding activation tokens. Accounts whose portal:view
+    // comes from their own staff/admin role are untouched by design.
+    const [studentLinks, guardianLinks] = await Promise.all([
+      tx.student.count({ where: { schoolId: auth.school.id, userId: input.userId } }),
+      tx.guardian.count({ where: { schoolId: auth.school.id, userId: input.userId } }),
+    ])
+    if (studentLinks + guardianLinks === 0) {
+      const membership = await tx.tenantMembership.findFirst({
+        where: { userId: input.userId, schoolId: auth.school.id },
+        include: { role: { select: { name: true } } },
+      })
+      if (membership && membership.status === "ACTIVE" && ["PARENT", "STUDENT"].includes(membership.role.name)) {
+        await tx.tenantMembership.update({
+          where: { id: membership.id },
+          data: { status: "INACTIVE" },
+        })
+        await tx.portalActivationToken.updateMany({
+          where: { schoolId: auth.school.id, userId: input.userId, usedAt: null, revokedAt: null },
+          data: { revokedAt: new Date() },
+        })
+        await recordAudit(tx, {
+          schoolId: auth.school.id,
+          actorId: actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          actorEmail: actor.email,
+          action: "MEMBER_STATUS_CHANGE",
+          entityType: "TENANT_MEMBERSHIP",
+          entityId: membership.id,
+          summary: `Portal access removed: no remaining linked profiles`,
+          metadata: { userId: input.userId, role: membership.role.name, status: "INACTIVE" },
+        })
+      }
+    }
   })
 
   return { linked: false, profileType: input.profileType, profileId: input.profileId, userId: input.userId }
@@ -982,6 +1023,45 @@ export async function listLinks(auth: AuthUser): Promise<PortalLinksResult> {
     }),
   ])
 
+  const linkedUserIds = [
+    ...studentLinks.map((row) => row.userId).filter((id): id is string => Boolean(id)),
+    ...guardianLinks.map((row) => row.userId).filter((id): id is string => Boolean(id)),
+  ]
+  // Activation state is per USER (one portal account may link several profiles).
+  const tokens =
+    linkedUserIds.length > 0
+      ? await prisma.portalActivationToken.findMany({
+          where: { schoolId: auth.school.id, userId: { in: linkedUserIds } },
+          select: { userId: true, usedAt: true, revokedAt: true, expiresAt: true },
+        })
+      : []
+  const activationByUser = new Map<string, PortalActivationView & { expiresAtMs: number }>()
+  for (const token of tokens) {
+    const current = activationByUser.get(token.userId)
+    if (current?.status === "ACTIVATED") continue
+
+    const isOutstanding = token.usedAt === null && token.revokedAt === null && token.expiresAt.getTime() > Date.now()
+    if (token.usedAt) {
+      activationByUser.set(token.userId, { status: "ACTIVATED", expiresAt: null, expiresAtMs: 0 })
+      continue
+    }
+    if (isOutstanding && (!current || token.expiresAt.getTime() > current.expiresAtMs)) {
+      activationByUser.set(token.userId, {
+        status: "PENDING",
+        expiresAt: token.expiresAt.toISOString(),
+        expiresAtMs: token.expiresAt.getTime(),
+      })
+    }
+  }
+
+  const activationFor = (userId: string | null): PortalActivationView => {
+    if (!userId) return { status: "NONE", expiresAt: null }
+    const view = activationByUser.get(userId)
+    return view
+      ? { status: view.status, expiresAt: view.expiresAt }
+      : { status: "NONE", expiresAt: null }
+  }
+
   const toLink = (
     row: { id: string; userId: string | null; user: { name: string; email: string } | null },
     profileType: "STUDENT" | "GUARDIAN",
@@ -994,15 +1074,12 @@ export async function listLinks(auth: AuthUser): Promise<PortalLinksResult> {
     userId: row.userId,
     userName: row.user?.name ?? null,
     userEmail: row.user?.email ?? null,
+    activation: activationFor(row.userId),
   })
 
   return {
-    studentLinks: studentLinks.map((row) =>
-      toLink(row, "STUDENT", studentName(row)),
-    ),
-    guardianLinks: guardianLinks.map((row) =>
-      toLink(row, "GUARDIAN", row.name),
-    ),
+    studentLinks: studentLinks.map((row) => toLink(row, "STUDENT", studentName(row))),
+    guardianLinks: guardianLinks.map((row) => toLink(row, "GUARDIAN", row.name)),
   }
 }
 
