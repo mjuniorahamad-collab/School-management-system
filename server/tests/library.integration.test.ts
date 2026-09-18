@@ -24,6 +24,12 @@ const fixtures = {
   adminPassword: "library-admin-secret",
 }
 
+// Date-anchored fixtures stay relative to the run date (AGENTS.md §16) so a
+// freshly issued loan always has a future due date regardless of when the
+// suite runs.
+const LOAN_ISSUE_DAY = new Date(Date.now() - 3 * 86_400_000).toISOString().slice(0, 10)
+const LOAN_DUE_DAY = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10)
+
 describe.skipIf(!TEST_DATABASE_URL)("Library API (integration)", () => {
   let prisma: PrismaClient
   const adminAgent = request.agent(app)
@@ -202,8 +208,8 @@ describe.skipIf(!TEST_DATABASE_URL)("Library API (integration)", () => {
       copyId,
       borrowerType: "STUDENT",
       borrowerId: student.id,
-      issueDate: "2026-09-01",
-      dueDate: "2026-09-15",
+      issueDate: LOAN_ISSUE_DAY,
+      dueDate: LOAN_DUE_DAY,
       ...overrides,
     }
   }
@@ -441,8 +447,8 @@ describe.skipIf(!TEST_DATABASE_URL)("Library API (integration)", () => {
       expect(data.borrowerName).toBe("Grace Hopper")
       expect(data.borrowerCode).toBe("LIB-ADM-0001")
       expect(data.borrowerType).toBe("STUDENT")
-      expect(data.issuedAt).toBe("2026-09-01")
-      expect(data.dueAt).toBe("2026-09-15")
+      expect(data.issuedAt).toBe(LOAN_ISSUE_DAY)
+      expect(data.dueAt).toBe(LOAN_DUE_DAY)
       expect(data.issuedByName).toBe("Library Admin")
 
       const copyRow = await prisma.libraryCopy.findUnique({ where: { id: copy.id } })
@@ -455,7 +461,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Library API (integration)", () => {
       expect(audit!.metadata as Record<string, unknown>).toMatchObject({
         bookTitle: book.title,
         copyCode: copy.copyCode,
-        dueAt: "2026-09-15",
+        dueAt: LOAN_DUE_DAY,
       })
     })
 
