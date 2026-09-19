@@ -2,11 +2,12 @@ import { useMemo } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
 import { CalendarDays, LogOut, Menu, Settings, UserRound } from "lucide-react"
 import { branding } from "@/config/branding"
+import { isPortalOnlyUser } from "@/auth/routing"
 import { findNavItem, getAllNavItems } from "@/routes/navigation"
 import { getInitials } from "@/lib/format"
 import { useSidebar } from "@/hooks/useSidebar"
 import { useAuth } from "@/auth/useAuth"
-import { useSettings } from "@/hooks/useSettings"
+import { useBranding } from "@/hooks/useBranding"
 import { ThemeToggle } from "@/theme/ThemeToggle"
 import { GlobalSearch } from "@/components/layout/GlobalSearch"
 import { MessagesMenu } from "@/components/layout/MessagesMenu"
@@ -54,10 +55,14 @@ export function TopHeader() {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, signOut } = useAuth()
-  const { data: settingsData } = useSettings()
+  const { data: brandingData } = useBranding()
 
-  const displayName = user?.name ?? settingsData?.settings.schoolName ?? branding.schoolName
+  const displayName = user?.name ?? brandingData?.schoolName ?? branding.schoolName
   const roleLabel = user?.roles[0] ? formatRole(user.roles[0]) : "User"
+
+  // Portal-only users (parents/students) get a trimmed chrome: the admin global
+  // search is not rendered for them, so its Ctrl+K listener never mounts either.
+  const showGlobalSearch = !isPortalOnlyUser(user)
 
   const { title, subtitle } = useMemo(
     () => getHeaderMeta(location.pathname, displayName),
@@ -86,9 +91,11 @@ export function TopHeader() {
         <p className="hidden truncate text-xs text-muted-foreground sm:block">{subtitle}</p>
       </div>
 
-      <div className="flex flex-1 justify-center px-2">
-        <GlobalSearch />
-      </div>
+      {showGlobalSearch && (
+        <div className="flex flex-1 justify-center px-2">
+          <GlobalSearch />
+        </div>
+      )}
 
       <div className="flex shrink-0 items-center gap-1">
         <ThemeToggle />

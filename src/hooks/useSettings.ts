@@ -14,8 +14,13 @@ export function useUpdateSettings() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (payload: Partial<SchoolSettings>) => settingsService.update(payload),
-    onSuccess: () => {
+    onSuccess: (_, payload) => {
       queryClient.invalidateQueries({ queryKey: ["settings"] })
+      // The chrome branding projection (sidebar/header) derives from the same
+      // SchoolSetting rows; refresh it alongside so edits apply immediately.
+      if (payload.schoolName !== undefined || payload.tagline !== undefined) {
+        queryClient.invalidateQueries({ queryKey: ["branding"] })
+      }
       toast.success("Settings saved")
     },
     onError: (error: Error) => {

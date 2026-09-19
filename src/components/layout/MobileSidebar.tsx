@@ -1,13 +1,13 @@
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { SidebarBrand, SidebarNav } from "@/components/layout/SidebarNav"
 import { useSidebar } from "@/hooks/useSidebar"
-import { useSettings } from "@/hooks/useSettings"
+import { useBranding } from "@/hooks/useBranding"
 import { branding } from "@/config/branding"
 
 export function MobileSidebar() {
   const { mobileOpen, setMobileOpen } = useSidebar()
-  const { data } = useSettings()
-  const schoolName = data?.settings.schoolName || branding.schoolName
+  const { data } = useBranding()
+  const schoolName = data?.schoolName || branding.schoolName
 
   return (
     <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>

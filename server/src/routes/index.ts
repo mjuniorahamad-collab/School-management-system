@@ -15,6 +15,7 @@ import { examTypesRouter } from "../modules/exam-types/exam-type.route.js"
 import { gradingBandsRouter } from "../modules/grading-bands/grading-band.route.js"
 import { periodSlotsRouter } from "../modules/period-slots/period-slot.route.js"
 import { settingsRouter } from "../modules/settings/setting.route.js"
+import { brandingRouter } from "../modules/settings/branding.route.js"
 import { noticesRouter } from "../modules/notices/notice.route.js"
 import { eventsRouter } from "../modules/events/event.route.js"
 import { admissionsRouter } from "../modules/admissions/admission.route.js"
@@ -57,6 +58,7 @@ apiRouter.use("/exam-types", examTypesRouter)
 apiRouter.use("/grading-bands", gradingBandsRouter)
 apiRouter.use("/period-slots", periodSlotsRouter)
 apiRouter.use("/settings", settingsRouter)
+apiRouter.use("/branding", brandingRouter)
 apiRouter.use("/notices", noticesRouter)
 apiRouter.use("/events", eventsRouter)
 apiRouter.use("/admissions", admissionsRouter)

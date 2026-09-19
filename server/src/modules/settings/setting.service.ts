@@ -2,7 +2,7 @@ import { getPrisma } from "../../lib/database.js"
 import type { AuthUser } from "../../types/auth.js"
 import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import type { SchoolSettings, UpdateSettingsInput } from "./setting.schema.js"
-import type { SettingsResponse } from "./setting.types.js"
+import type { BrandingResponse, SettingsResponse } from "./setting.types.js"
 
 type PrismaClient = NonNullable<Awaited<ReturnType<typeof getPrisma>>>
 
@@ -104,6 +104,21 @@ export async function getSettings(schoolId: string): Promise<SettingsResponse> {
   return {
     school: { id: school.id, name: school.name, code: school.code },
     settings,
+  }
+}
+
+/**
+ * Branding projection for the application chrome. Presolves the same canonical
+ * `SchoolSetting` rows `getSettings` reads (falling back to the tenant's
+ * `School.name` when the editable name is empty) so any authenticated user of
+ * the tenant — including portal-only roles without `settings:view` — can render
+ * the school's editable branding. Always scoped to the caller's own school.
+ */
+export async function getBranding(schoolId: string): Promise<BrandingResponse> {
+  const { settings, school } = await getSettings(schoolId)
+  return {
+    schoolName: settings.schoolName.trim() || school.name,
+    tagline: settings.tagline?.trim() || null,
   }
 }
 

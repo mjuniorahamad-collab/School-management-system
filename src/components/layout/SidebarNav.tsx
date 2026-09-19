@@ -1,7 +1,7 @@
 import { NavLink } from "react-router-dom"
 import { useAuth } from "@/auth/useAuth"
 import { branding } from "@/config/branding"
-import { useSettings } from "@/hooks/useSettings"
+import { useBranding } from "@/hooks/useBranding"
 import { navigationSections } from "@/routes/navigation"
 import { cn } from "@/lib/utils"
 import {
@@ -16,9 +16,9 @@ interface SidebarNavProps {
 }
 
 export function SidebarBrand({ collapsed }: { collapsed?: boolean }) {
-  const { data } = useSettings()
-  const schoolName = data?.settings.schoolName || branding.schoolName
-  const schoolTagline = data?.settings.tagline || branding.schoolTagline
+  const { data } = useBranding()
+  const schoolName = data?.schoolName || branding.schoolName
+  const schoolTagline = data?.tagline || branding.schoolTagline
 
   return (
     <div className={cn("flex items-center gap-3 px-5", collapsed && "justify-center px-0")}>

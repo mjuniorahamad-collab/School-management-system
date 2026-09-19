@@ -15,6 +15,16 @@ export const getSettingsHandler: RequestHandler = async (req, res) => {
   res.json(ok(await settingService.getSettings(schoolId)))
 }
 
+/**
+ * Tenant-scoped branding read available to any authenticated user of the school
+ * (no permission required): the chrome/sidebar/header need the editable school
+ * name for portal-only roles that must not receive the full settings payload.
+ */
+export const getBrandingHandler: RequestHandler = async (req, res) => {
+  const schoolId = requireAuth(req).school.id
+  res.json(ok(await settingService.getBranding(schoolId)))
+}
+
 export const updateSettingsHandler: RequestHandler = async (req, res) => {
   const input = parseWithZod(updateSettingsSchema, req.body, "Invalid settings data")
   const auth = requireAuth(req)

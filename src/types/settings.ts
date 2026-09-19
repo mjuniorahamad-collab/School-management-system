@@ -1,6 +1,11 @@
 // Domain type for the Settings module. Mirrors the backend contract
 // (server/src/modules/settings/).
 
+export interface BrandingResponse {
+  schoolName: string
+  tagline: string | null
+}
+
 export interface SchoolSettings {
   schoolName: string
   schoolShortName?: string
@@ -33,4 +38,13 @@ export interface SchoolSettings {
 export interface SettingsResponse {
   school: { id: string; name: string; code: string | null }
   settings: SchoolSettings
+}
+
+// Branding projection consumed by the application chrome (sidebar/header). It is
+// a server-side projection of the canonical SchoolSetting store — the same rows
+// the Settings UI reads — so any authenticated user (including portal-only
+// roles) can render the editable school name without the full settings payload.
+export interface BrandingResponse {
+  schoolName: string
+  tagline: string | null
 }
