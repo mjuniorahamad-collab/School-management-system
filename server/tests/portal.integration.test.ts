@@ -4,6 +4,7 @@ import request from "supertest"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createApp } from "../src/app.js"
 import { hashPassword } from "../src/auth/password.js"
+import { getStorage } from "../src/lib/storage/index.js"
 
 // Student/Parent Portal suite. Verifies ownership-scoped access: a portal user
 // may only read their own linked student(s)/child(ren); changing `:studentId`
@@ -367,6 +368,107 @@ describe.skipIf(!TEST_DATABASE_URL)("Student/Parent Portal (integration)", () =>
       expect(audit?.summary).toContain("Unlinked")
     })
   })
+
+  describe("portal branding (tenant-scoped school name)", () => {
+    it("returns the tenant's editable schoolName setting when present", async () => {
+      await prisma.schoolSetting.upsert({
+        where: { schoolId_key: { schoolId: schoolA.id, key: "schoolName" } },
+        update: { value: "Pragati Senior Secondary School" },
+        create: { schoolId: schoolA.id, key: "schoolName", value: "Pragati Senior Secondary School" },
+      })
+      const res = await guardianAgent.get("/api/v1/me")
+      expect(res.status).toBe(200)
+      expect(res.body.data.school.id).toBe(schoolA.id)
+      expect(res.body.data.school.name).toBe("Pragati Senior Secondary School")
+    })
+
+    it("falls back to the tenant's School.name when schoolName is unset", async () => {
+      await prisma.schoolSetting.deleteMany({ where: { schoolId: schoolA.id, key: "schoolName" } })
+      const res = await guardianAgent.get("/api/v1/me")
+      expect(res.status).toBe(200)
+      expect(res.body.data.school.name).toBe("Portal School A")
+    })
+
+    it("a user from tenant A never receives tenant B's schoolName", async () => {
+      await prisma.schoolSetting.deleteMany({ where: { schoolId: schoolA.id, key: "schoolName" } })
+      await prisma.schoolSetting.upsert({
+        where: { schoolId_key: { schoolId: schoolB.id, key: "schoolName" } },
+        update: { value: "Elite School B" },
+        create: { schoolId: schoolB.id, key: "schoolName", value: "Elite School B" },
+      })
+      const res = await guardianAgent.get("/api/v1/me")
+      expect(res.status).toBe(200)
+      expect(res.body.data.school.name).toBe("Portal School A")
+      expect(res.body.data.school.name).not.toBe("Elite School B")
+    })
+  })
+
+  describe("portal child photos (ownership-scoped serving)", () => {
+    const photoKeys: string[] = []
+
+    afterAll(async () => {
+      const storage = getStorage()
+      for (const key of photoKeys) {
+        try {
+          await storage.remove(key)
+        } catch {
+          // best-effort cleanup
+        }
+      }
+    })
+
+    it("exposes the correct child's storage key in the portal response", async () => {
+      const png = await makePng()
+      const key = `photos/${schoolA.id}/students/portal-test.png`
+      await getStorage().put(key, png)
+      photoKeys.push(key)
+      await prisma.student.update({ where: { id: studentAId }, data: { photoUrl: key } })
+
+      const overview = await guardianAgent.get("/api/v1/me")
+      expect(overview.status).toBe(200)
+      const child = overview.body.data.children.find((c: { id: string }) => c.id === studentAId)
+      expect(child?.photoUrl).toBe(key)
+
+      const detail = await guardianAgent.get(`/api/v1/me/children/${studentAId}`)
+      expect(detail.status).toBe(200)
+      expect(detail.body.data.id).toBe(studentAId)
+      expect(detail.body.data.photoUrl).toBe(key)
+    })
+
+    it("serves the child's photo bytes with a private cache header", async () => {
+      const res = await guardianAgent.get(`/api/v1/me/children/${studentAId}/photo`)
+      expect(res.status).toBe(200)
+      expect(res.headers["content-type"]).toContain("image/png")
+      expect(res.headers["cache-control"]).toContain("private")
+    })
+
+    it("a child without a photo has a null key and the photo route returns 404", async () => {
+      await prisma.student.update({ where: { id: studentAId }, data: { photoUrl: null } })
+      const overview = await guardianAgent.get("/api/v1/me")
+      const child = overview.body.data.children.find((c: { id: string }) => c.id === studentAId)
+      expect(child?.photoUrl).toBeNull()
+      const res = await guardianAgent.get(`/api/v1/me/children/${studentAId}/photo`)
+      expect(res.status).toBe(404)
+      expect(res.body.error.code).toBe("NOT_FOUND")
+    })
+
+    it("a guardian cannot serve a schoolmate who is not their child (404)", async () => {
+      const res = await guardianAgent.get(`/api/v1/me/children/${studentCId}/photo`)
+      expect(res.status).toBe(404)
+      expect(res.body.error.code).toBe("NOT_FOUND")
+    })
+
+    it("a portal user cannot serve another tenant's student photo (404)", async () => {
+      const res = await guardianAgent.get(`/api/v1/me/children/${studentBId}/photo`)
+      expect(res.status).toBe(404)
+      expect(res.body.error.code).toBe("NOT_FOUND")
+    })
+
+    it("the photo route requires authentication", async () => {
+      const res = await request(app).get(`/api/v1/me/children/${studentAId}/photo`)
+      expect(res.status).toBe(401)
+    })
+  })
 })
 
 async function resetAllTables(prisma: PrismaClient): Promise<void> {
@@ -383,6 +485,7 @@ async function resetAllTables(prisma: PrismaClient): Promise<void> {
   await prisma.transportAssignment.deleteMany()
   await prisma.student.deleteMany()
   await prisma.guardian.deleteMany()
+  await prisma.schoolSetting.deleteMany()
   await prisma.section.deleteMany()
   await prisma.class.deleteMany()
   await prisma.session.deleteMany()
@@ -403,4 +506,13 @@ async function login(
 ): Promise<void> {
   const res = await agent.post("/api/v1/auth/login").send({ email, password })
   expect(res.status).toBe(200)
+}
+
+async function makePng(width = 120, height = 120): Promise<Buffer> {
+  const sharp = (await import("sharp")).default
+  return sharp({
+    create: { width, height, channels: 3, background: { r: 210, g: 60, b: 120 } },
+  })
+    .png()
+    .toBuffer()
 }

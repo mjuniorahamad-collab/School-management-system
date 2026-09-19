@@ -1,7 +1,8 @@
 import { Loader2, Pencil, Trash2, Upload } from "lucide-react"
-import { useRef } from "react"
+import { useRef, useState } from "react"
 import { PersonAvatar } from "@/components/shared/PersonAvatar"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { photoDisplayUrl } from "@/lib/photoUrl"
 import type { PhotoKind } from "@/types/photos"
 
@@ -38,11 +39,23 @@ export function ProfilePhotoField({
   className,
 }: ProfilePhotoFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const src = photoDisplayUrl(kind, personId, photoUrl)
 
   return (
     <div className={`flex items-center gap-4 ${className ?? ""}`}>
-      <PersonAvatar name={name} photoUrl={src} className="size-16 text-xl" />
+      {src ? (
+        <button
+          type="button"
+          onClick={() => setPreviewOpen(true)}
+          aria-label={`View full-size photo of ${name}`}
+          className="cursor-zoom-in rounded-full focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          <PersonAvatar name={name} photoUrl={src} className="size-16 text-xl" />
+        </button>
+      ) : (
+        <PersonAvatar name={name} className="size-16 text-xl" />
+      )}
 
       {canEdit && (
         <div className="flex flex-col items-start gap-2">
@@ -92,6 +105,19 @@ export function ProfilePhotoField({
           )}
         </div>
       )}
+
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-[calc(100vw-2rem)] p-2 sm:max-w-[min(70vw,56rem)]">
+          <DialogTitle className="sr-only">{`${name}'s profile photo`}</DialogTitle>
+          <div className="flex max-h-[80vh] items-center justify-center overflow-hidden rounded-lg">
+            <img
+              src={src ?? undefined}
+              alt={name}
+              className="max-h-[80vh] w-auto max-w-full object-contain"
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

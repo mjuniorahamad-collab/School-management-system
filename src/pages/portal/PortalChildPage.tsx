@@ -3,9 +3,11 @@ import { Link, useParams } from "react-router-dom"
 import { ArrowLeft, CalendarDays, UserRound } from "lucide-react"
 import { usePortalChild } from "@/hooks/usePortal"
 import { PageContainer } from "@/components/layout/PageContainer"
+import { PersonAvatar } from "@/components/shared/PersonAvatar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { formatFullDate } from "@/lib/format"
+import { portalChildPhotoUrl } from "@/lib/photoUrl"
 import { AttendanceSection } from "@/components/portal/AttendanceSection"
 import { FeesSection } from "@/components/portal/FeesSection"
 import { ResultsSection } from "@/components/portal/ResultsSection"
@@ -47,9 +49,11 @@ export function PortalChildPage() {
         <>
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
-              <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary/10 text-lg font-semibold text-primary">
-                {data.name.charAt(0).toUpperCase()}
-              </div>
+              <PersonAvatar
+                name={data.name}
+                photoUrl={portalChildPhotoUrl(data.id, data.photoUrl)}
+                className="size-12 text-lg"
+              />
               <div>
                 <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">{data.name}</h1>
                 <p className="font-mono text-sm text-muted-foreground">{data.admissionNumber}</p>

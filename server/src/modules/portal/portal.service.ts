@@ -10,6 +10,9 @@ import type { AuthUser } from "../../types/auth.js"
 import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import { buildPortalLinkNotificationTitle } from "../notifications/notification.rules.js"
 import { emitNotifications } from "../notifications/notification.service.js"
+import { getPhoto } from "../photos/photo.service.js"
+import { getSettings } from "../settings/setting.service.js"
+import { studentPhotoEntity } from "../students/student.photo-entity.js"
 import type {
   PortalActivationView,
   PortalAttendanceRecord,
@@ -248,13 +251,39 @@ export async function getOverview(auth: AuthUser): Promise<PortalOverview> {
   const prisma = await requirePrisma()
   const owned = await resolveOwnedStudentIds(prisma, auth.id, auth.school.id)
   const children = await Promise.all(owned.map((id) => toChild(prisma, auth.school.id, id)))
+  // Display branding comes from the tenant-scoped SchoolSetting.schoolName (the
+  // same editable value the Settings UI writes), falling back to the tenant's
+  // School.name when the setting is unset. Resolution is always keyed to the
+  // authenticated school so another tenant's setting can never leak.
+  const { settings } = await getSettings(auth.school.id)
+  const displaySchoolName = settings.schoolName.trim() || auth.school.name
   return {
     id: auth.id,
     name: auth.name,
-    school: { id: auth.school.id, name: auth.school.name },
+    school: { id: auth.school.id, name: displaySchoolName },
     actorKind: auth.roles.includes("STUDENT") ? "STUDENT" : "GUARDIAN",
     children: children.sort((a, b) => a.name.localeCompare(b.name)),
   }
+}
+
+/**
+ * Serves a child's profile photo bytes through the ownership-scoped portal
+ * surface. Ownership (including cross-tenant protection) is enforced by
+ * `requireOwnedStudent` before the storage key is read; the key itself is
+ * always resolved from the database, never from the request. Returns null when
+ * the child has no photo so the client falls back to initials.
+ */
+export async function getChildPhoto(
+  auth: AuthUser,
+  studentId: string,
+): Promise<{ buffer: Buffer; contentType: string } | null> {
+  const prisma = await requirePrisma()
+  const owned = await resolveOwnedStudentIds(prisma, auth.id, auth.school.id)
+  await requireOwnedStudent(prisma, auth.school.id, owned, studentId)
+  return getPhoto(studentPhotoEntity, {
+    id: studentId,
+    schoolId: auth.school.id,
+  })
 }
 
 export async function getChildren(auth: AuthUser): Promise<PortalChild[]> {

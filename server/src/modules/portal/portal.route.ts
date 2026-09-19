@@ -6,6 +6,7 @@ import {
   deleteLinkHandler,
   getAttendanceHandler,
   getChildHandler,
+  getChildPhotoHandler,
   getFeesHandler,
   getLibraryLoansHandler,
   getLinkCandidatesHandler,
@@ -28,6 +29,8 @@ portalMeRouter.use(requireAuth, requirePermission("portal:view"))
 portalMeRouter.get("/", getOverviewHandler)
 portalMeRouter.get("/children", listChildrenHandler)
 portalMeRouter.get("/children/:studentId", getChildHandler)
+// Ownership-scoped photo serving for a linked child (bytes are never public).
+portalMeRouter.get("/children/:studentId/photo", getChildPhotoHandler)
 portalMeRouter.get("/children/:studentId/attendance", getAttendanceHandler)
 portalMeRouter.get("/children/:studentId/fees", getFeesHandler)
 portalMeRouter.get("/children/:studentId/results", getResultsHandler)

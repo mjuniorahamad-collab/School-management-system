@@ -1,5 +1,6 @@
 import type { RequestHandler } from "express"
 import { setAuthCookies } from "../../auth/cookies.js"
+import { notFoundError } from "../../lib/ApiError.js"
 import { ok } from "../../lib/response.js"
 import { parseWithZod } from "../../lib/validation.js"
 import { createSessionTokens } from "../../services/auth.service.js"
@@ -37,6 +38,21 @@ export const listChildrenHandler: RequestHandler = async (req, res) => {
 export const getChildHandler: RequestHandler = async (req, res) => {
   const auth = requireAuth(req)
   res.json(ok(await portalService.getChild(auth, routeParam(req.params.studentId))))
+}
+
+/**
+ * Authenticated, ownership-scoped photo serving for a linked child. Mirrors the
+ * shared photo serving handler used by the admin routes: raw bytes with image
+ * content type and a private cache header, and a 404 envelope when the child
+ * has no photo. The storage key is resolved from the database server-side.
+ */
+export const getChildPhotoHandler: RequestHandler = async (req, res) => {
+  const auth = requireAuth(req)
+  const photo = await portalService.getChildPhoto(auth, routeParam(req.params.studentId))
+  if (!photo) throw notFoundError("Photo not found")
+  res.setHeader("Content-Type", photo.contentType)
+  res.setHeader("Cache-Control", "private, max-age=3600")
+  res.send(photo.buffer)
 }
 
 export const getAttendanceHandler: RequestHandler = async (req, res) => {

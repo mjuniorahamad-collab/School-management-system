@@ -2,8 +2,9 @@ import { Link } from "react-router-dom"
 import { ChevronRight, Megaphone, School } from "lucide-react"
 import { usePortalOverview } from "@/hooks/usePortal"
 import { PageContainer } from "@/components/layout/PageContainer"
+import { PersonAvatar } from "@/components/shared/PersonAvatar"
 import { Badge } from "@/components/ui/badge"
-import { getInitials } from "@/lib/format"
+import { portalChildPhotoUrl } from "@/lib/photoUrl"
 
 export function PortalHomePage() {
   const { data, isLoading, isError } = usePortalOverview()
@@ -61,9 +62,11 @@ export function PortalHomePage() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
-                      {getInitials(child.name)}
-                    </div>
+                    <PersonAvatar
+                      name={child.name}
+                      photoUrl={portalChildPhotoUrl(child.id, child.photoUrl)}
+                      className="size-10"
+                    />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-foreground">{child.name}</p>
                       <p className="font-mono text-xs text-muted-foreground">{child.admissionNumber}</p>
