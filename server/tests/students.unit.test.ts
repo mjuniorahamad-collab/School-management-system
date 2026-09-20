@@ -82,6 +82,30 @@ describe("listStudentsQuerySchema (database-free)", () => {
     expect(listStudentsQuerySchema.safeParse({ pageSize: 0 }).success).toBe(false)
     expect(listStudentsQuerySchema.safeParse({ sortBy: "createdAt" }).success).toBe(false)
   })
+
+  it("accepts the maximum allowed pageSize of 100", () => {
+    const result = listStudentsQuerySchema.safeParse({ pageSize: "100" })
+    expect(result.success).toBe(true)
+    expect(result.success && result.data.pageSize).toBe(100)
+  })
+
+  it("rejects a pageSize above the maximum (e.g. 1000)", () => {
+    expect(listStudentsQuerySchema.safeParse({ pageSize: 500 }).success).toBe(false)
+    expect(listStudentsQuerySchema.safeParse({ pageSize: 1000 }).success).toBe(false)
+  })
+
+  it("keeps optional academic filters when non-empty", () => {
+    const result = listStudentsQuerySchema.parse({
+      sessionId: "sess-1",
+      classId: "class-1",
+      sectionId: "section-A",
+      status: "ACTIVE",
+    })
+    expect(result.sessionId).toBe("sess-1")
+    expect(result.classId).toBe("class-1")
+    expect(result.sectionId).toBe("section-A")
+    expect(result.status).toBe("ACTIVE")
+  })
 })
 
 function sampleStudent(overrides: Partial<StudentListItem> = {}): StudentListItem {

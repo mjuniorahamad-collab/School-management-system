@@ -1,4 +1,5 @@
 import type { AttendanceBulkMarkPayload, AttendanceStatusType } from "@/types/attendance"
+import type { StudentsQuery } from "@/types/students"
 
 export interface AttendanceBulkMarkItem {
   studentId: string
@@ -29,6 +30,20 @@ export function attendanceBulkMarkToPayload(
       status: r.status,
       note: r.note || undefined,
     })),
+  }
+}
+
+export function buildAttendanceRosterQuery(params: {
+  academicSessionId: string
+  classId: string
+  sectionId?: string
+}): StudentsQuery {
+  return {
+    page: 1,
+    pageSize: 100,
+    sessionId: params.academicSessionId,
+    classId: params.classId,
+    sectionId: params.sectionId || undefined,
   }
 }
 

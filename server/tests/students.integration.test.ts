@@ -179,6 +179,23 @@ describe.skipIf(!TEST_DATABASE_URL)("Students API (integration)", () => {
       expect(res.status).toBe(403)
       expect(res.body.error.code).toBe("FORBIDDEN")
     })
+
+    it("rejects a pageSize above the documented maximum of 100", async () => {
+      const res = await adminAgent.get("/api/v1/students?pageSize=500")
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe("VALIDATION_ERROR")
+      expect(
+        res.body.error.details.issues.some(
+          (issue: { path: string }) => issue.path === "pageSize",
+        ),
+      ).toBe(true)
+    })
+
+    it("accepts pageSize 100", async () => {
+      const res = await adminAgent.get("/api/v1/students?pageSize=100")
+      expect(res.status).toBe(200)
+      expect(res.body.data.pagination.pageSize).toBe(100)
+    })
   })
 
   describe("meta", () => {
@@ -443,6 +460,32 @@ describe.skipIf(!TEST_DATABASE_URL)("Students API (integration)", () => {
       )
       expect(byAdmission.body.data.pagination.total).toBe(1)
     })
+
+    it("loads a sectioned roster (LKG-A style) containing Umar Saifi with a valid pageSize", async () => {
+      const created = await createStudent(adminAgent, { firstName: "Umar", lastName: "Saifi" })
+      const res = await adminAgent.get(
+        `/api/v1/students?pageSize=100&sessionId=${fixtures.sessionId}&classId=${fixtures.classSixId}&sectionId=${fixtures.sectionSixAId}`,
+      )
+      expect(res.status).toBe(200)
+      const roster = res.body.data.items as Array<{ id: string; name: string }>
+      expect(roster.some((s) => s.id === created.id && s.name === "Umar Saifi")).toBe(true)
+      expect(res.body.data.pagination.total).toBe(1)
+    })
+
+    it("loads a section-less class roster (LKG) containing Umar Saifi", async () => {
+      const created = await createStudent(adminAgent, {
+        firstName: "Umar",
+        lastName: "Saifi",
+        classId: fixtures.noSectionClassId,
+        sectionId: undefined,
+      })
+      const res = await adminAgent.get(
+        `/api/v1/students?pageSize=100&sessionId=${fixtures.sessionId}&classId=${fixtures.noSectionClassId}`,
+      )
+      expect(res.status).toBe(200)
+      const roster = res.body.data.items as Array<{ id: string; name: string }>
+      expect(roster.some((s) => s.id === created.id && s.name === "Umar Saifi")).toBe(true)
+    })
   })
 })
 
@@ -503,8 +546,9 @@ function createStudentPayload(overrides: StudentPayload): Record<string, unknown
 
 async function createStudent(
   agent: ReturnType<typeof request.agent>,
+  overrides: StudentPayload = {},
 ): Promise<{ id: string; admissionNumber: string; name: string }> {
-  const res = await agent.post("/api/v1/students").send(createStudentPayload({}))
+  const res = await agent.post("/api/v1/students").send(createStudentPayload(overrides))
   expect(res.status).toBe(201)
   return {
     id: res.body.data.id,

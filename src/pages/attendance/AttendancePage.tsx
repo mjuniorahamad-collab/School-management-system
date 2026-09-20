@@ -17,7 +17,7 @@ import {
   useBulkMarkAttendance,
   useDeleteAttendanceRecord,
 } from "@/hooks/useAttendance"
-import { attendanceBulkMarkToPayload } from "@/lib/attendanceFormRules"
+import { attendanceBulkMarkToPayload, buildAttendanceRosterQuery } from "@/lib/attendanceFormRules"
 import { studentsService } from "@/services/studentsService"
 import type { AttendanceRecordListItem, AttendanceStatusType } from "@/types/attendance"
 
@@ -51,13 +51,9 @@ export function AttendancePage() {
   const { data: studentsData, isPending: studentsPending, isError: studentsError, refetch: refetchStudents } = useQuery({
     queryKey: ["students", "for-attendance", academicSessionId, classId, sectionId],
     queryFn: () =>
-      studentsService.list({
-        page: 1,
-        pageSize: 500,
-        sessionId: academicSessionId,
-        classId,
-        sectionId: sectionId || undefined,
-      }),
+      studentsService.list(
+        buildAttendanceRosterQuery({ academicSessionId, classId, sectionId }),
+      ),
     enabled: studentsReady,
   })
 
