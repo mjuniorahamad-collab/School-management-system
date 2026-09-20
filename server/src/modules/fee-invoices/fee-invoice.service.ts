@@ -367,7 +367,9 @@ export async function generateInvoices(
         },
       })
     }
-  })
+  },
+  { timeout: 20_000, maxWait: 10_000 },
+)
 
   return {
     totalEnrolled,
