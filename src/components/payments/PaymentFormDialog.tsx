@@ -56,7 +56,7 @@ function PaymentFormContent({ onOpenChange }: { onOpenChange: (open: boolean) =>
   const [notes, setNotes] = useState("")
   const [idempotencyKey] = useState(() => crypto.randomUUID())
 
-  const invoicesQuery = useFeeInvoices({ pageSize: 1000 })
+  const invoicesQuery = useFeeInvoices({ pageSize: 100 })
   const createMutation = useCreatePayment()
 
   const invoices = invoicesQuery.data?.items ?? []
