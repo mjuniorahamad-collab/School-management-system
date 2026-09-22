@@ -65,6 +65,9 @@ const LibraryPage = lazy(() =>
 const FeesPage = lazy(() => import("@/pages/fees").then((m) => ({ default: m.FeesPage })))
 const PaymentsPage = lazy(() => import("@/pages/payments").then((m) => ({ default: m.PaymentsPage })))
 const ReceiptsPage = lazy(() => import("@/pages/receipts").then((m) => ({ default: m.ReceiptsPage })))
+const ConcessionsPage = lazy(() =>
+  import("@/pages/concessions/ConcessionsPage").then((m) => ({ default: m.ConcessionsPage })),
+)
 const UsersPage = lazy(() => import("@/pages/users").then((m) => ({ default: m.UsersPage })))
 const AuditLogsPage = lazy(() =>
   import("@/pages/auditLogs").then((m) => ({ default: m.AuditLogsPage })),
@@ -156,6 +159,7 @@ export const router = createBrowserRouter([
           { path: "/fees", element: <FeesPage /> },
           { path: "/payments", element: <PaymentsPage /> },
           { path: "/receipts", element: <ReceiptsPage /> },
+          { path: "/concessions", element: <ConcessionsPage /> },
           { path: "/users", element: <UsersPage /> },
           { path: "/audit-logs", element: <AuditLogsPage /> },
           { path: "/messages", element: <MessagesPage /> },

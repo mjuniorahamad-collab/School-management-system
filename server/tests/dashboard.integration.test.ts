@@ -400,6 +400,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Dashboard API (integration)", () => {
           className: "6",
           sectionName: "A",
           sessionName: "2026-27",
+          grossAmount: 10000,
           totalAmount: 10000,
           items: [],
         },

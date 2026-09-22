@@ -84,6 +84,16 @@ export const PERMISSION_CODES = [
   "receipts:view",
   "receipts:create",
   "receipts:export",
+  // Student-specific fee concessions (FeeAdjustment ledger). `request` opens a
+  // REQUESTED adjustment; `approve`/`reject`/`reverse` act on the workflow;
+  // `override` is the separate, audit-forced SUPER_ADMIN exception (see
+  // FeeAdjustment model — never self-approval).
+  "concessions:view",
+  "concessions:request",
+  "concessions:approve",
+  "concessions:reject",
+  "concessions:reverse",
+  "concessions:override",
   "reports:view",
   "reports:export",
   "notices:view",
@@ -182,7 +192,10 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
   // by full RolePermission seeding — never by email.
   SUPER_ADMIN: PERMISSION_CODES,
 
-  SCHOOL_ADMIN: PERMISSION_CODES,
+  // DAY-TO-DAY operational control across all modules — but the platform-only
+  // `concessions:override` (audited SUPER_ADMIN exception) is intentionally NOT
+  // inherited: override is a SUPER_ADMIN capability, never a tenant admin's.
+  SCHOOL_ADMIN: PERMISSION_CODES.filter((code) => code !== "concessions:override"),
 
   PRINCIPAL: [
     "dashboard:view",
@@ -205,6 +218,10 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
     ...codes("fees", [VIEW, UPDATE, EXPORT]),
     "payments:view",
     "receipts:view",
+    "concessions:view",
+    "concessions:approve",
+    "concessions:reject",
+    "concessions:reverse",
     "library:view",
     "transport:view",
     ...codes("reports", [VIEW, EXPORT]),
@@ -245,6 +262,8 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
     ...codes("reports", [VIEW, EXPORT]),
     "results:export",
     "settings:view",
+    "concessions:view",
+    "concessions:request",
     "notifications:view",
   ],
 

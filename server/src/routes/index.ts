@@ -27,6 +27,7 @@ import { examRouter } from "../modules/exams/exam.route.js"
 import { resultRouter } from "../modules/results/result.route.js"
 import { feeStructuresRouter } from "../modules/fee-structures/fee-structure.route.js"
 import { feeInvoicesRouter } from "../modules/fee-invoices/fee-invoice.route.js"
+import { feeAdjustmentsRouter } from "../modules/fee-adjustments/fee-adjustment.route.js"
 import { paymentsRouter } from "../modules/payments/payment.route.js"
 import { receiptsRouter } from "../modules/receipts/receipt.route.js"
 import { dashboardRouter } from "../modules/dashboard/dashboard.route.js"
@@ -70,6 +71,7 @@ apiRouter.use("/exams", examRouter)
 apiRouter.use("/results", resultRouter)
 apiRouter.use("/fees/structures", feeStructuresRouter)
 apiRouter.use("/fees/invoices", feeInvoicesRouter)
+apiRouter.use("/fees/adjustments", feeAdjustmentsRouter)
 apiRouter.use("/payments", paymentsRouter)
 apiRouter.use("/receipts", receiptsRouter)
 apiRouter.use("/dashboard", dashboardRouter)

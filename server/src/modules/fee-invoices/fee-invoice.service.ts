@@ -304,6 +304,7 @@ export async function generateInvoices(
           className,
           sectionName,
           sessionName: resolved.sessionName,
+          grossAmount: structure.totalAmount,
           totalAmount: structure.totalAmount,
           amountPaid: 0,
           balance: structure.totalAmount,

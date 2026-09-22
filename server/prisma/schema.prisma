@@ -162,6 +162,7 @@ model School {
   feeInstallments       FeeInstallment[]
   feePayments           FeePayment[]
   feeReceipts           FeeReceipt[]
+  feeAdjustments        FeeAdjustment[]
   examTypes             ExamType[]
   gradingBands          GradingBand[]
   schoolSettings        SchoolSetting[]
@@ -208,6 +209,7 @@ model AcademicSession {
   enrollments           StudentEnrollment[]
   feeStructures         FeeStructure[]
   feeInvoices           FeeInvoice[]
+  feeAdjustments        FeeAdjustment[]
   admissionApplications AdmissionApplication[] @relation("ApplicationPreferredSession")
   timetableEntries      TimetableEntry[]
   attendanceRecords     AttendanceRecord[]
@@ -255,6 +257,10 @@ model User {
   createdFeeInvoices FeeInvoice[] @relation("FeeInvoiceCreatedBy")
   recordedPayments   FeePayment[] @relation("PaymentRecordedBy")
   issuedReceipts     FeeReceipt[] @relation("ReceiptIssuedBy")
+  requestedAdjustments  FeeAdjustment[] @relation("FeeAdjustmentRequestedBy")
+  approvedAdjustments   FeeAdjustment[] @relation("FeeAdjustmentApprovedBy")
+  reversedAdjustments   FeeAdjustment[] @relation("FeeAdjustmentReversedBy")
+  overriddenAdjustments FeeAdjustment[] @relation("FeeAdjustmentOverriddenBy")
 
   createdApplications   AdmissionApplication[] @relation("ApplicationCreatedBy")
   updatedApplications   AdmissionApplication[] @relation("ApplicationUpdatedBy")
@@ -580,6 +586,7 @@ model Student {
   attendanceRecords         AttendanceRecord[]
   feeInvoices               FeeInvoice[]
   feeReceipts               FeeReceipt[]
+  feeAdjustments            FeeAdjustment[]
   createdByUser             User?                  @relation("StudentCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
   updatedByUser             User?                  @relation("StudentUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
   user                      User?                  @relation("StudentUser", fields: [userId], references: [id], onDelete: SetNull)
@@ -883,6 +890,12 @@ model FeeInvoice {
   className      String
   sectionName    String?
   sessionName    String
+  // Historical gross obligation snapshot (the structure total the invoice was
+  // generated from). Immutable after generation — never recomputed from the
+  // live FeeStructure. `totalAmount` is the current NET obligation
+  // (gross − approved concessions); grossAmount exists so the original
+  // standard fee is always recoverable.
+  grossAmount    Decimal       @db.Decimal(12, 2)
   totalAmount    Decimal       @db.Decimal(12, 2)
   amountPaid     Decimal       @default(0) @db.Decimal(12, 2)
   balance        Decimal       @default(0) @db.Decimal(12, 2)
@@ -902,6 +915,7 @@ model FeeInvoice {
   installments  FeeInstallment[]
   payments      FeePayment[]
   receipts      FeeReceipt[]
+  adjustments   FeeAdjustment[]
 
   @@unique([schoolId, studentId, sessionId])
   @@index([schoolId, studentId])
@@ -1010,6 +1024,95 @@ model FeeReceipt {
   @@index([schoolId, invoiceId])
   @@index([schoolId, paymentDate])
   @@index([schoolId, createdAt])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// FeeConcessions (student-specific fee adjustments / discounts / waivers).
+//
+// This ledger is the ONLY sanctioned way to alter a student's fee obligation
+// from the class standard. It is student- (and where attached, invoice-) scoped
+// and never mutates the class FeeStructure. `FeeInvoice.grossAmount` preserves
+// the standard; the invoice's `totalAmount` becomes the NET obligation
+// (gross − approved concessions). All financial consumers (payments, receipts,
+// installments, portal, reports) already treat `totalAmount` as "amount
+// payable", so the net model keeps them correct unchanged.
+//
+// Lifecycle (Phase 2 service):
+//   REQUESTED → APPROVED | REJECTED | CANCELLED | REVERSED
+//   - Approval recomputes the invoice net + installments in the SAME
+//     transaction (FIFO on earliest unpaid installments).
+//   - Requester can never approve their own concession. The only exception is
+//     CONCESSION_OVERRIDE by a SUPER_ADMIN (explicitly audited, needs a reason).
+//   - Reversal is a compensating record (`reversalOfId` → original); approved
+//     adjustments are never deleted or mutilated.
+//   - `computedAmount` is a frozen monetary snapshot taken at approval;
+//     `installmentApplication` records exactly which installments were reduced
+//     by how much so a reversal can restore the schedule deterministically.
+// ────────────────────────────────────────────────────────────────────────────
+
+enum FeeAdjustmentKind {
+  FIXED_AMOUNT
+  PERCENTAGE
+}
+
+enum FeeAdjustmentStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  CANCELLED
+  REVERSED
+}
+
+model FeeAdjustment {
+  id                    String               @id @default(uuid())
+  schoolId              String
+  studentId             String
+  sessionId             String
+  // Null while the concession targets a (student, session) invoice not yet
+  // generated (pending pre-invoice adjustments attach at generation time).
+  invoiceId             String?
+  kind                  FeeAdjustmentKind
+  // Raw request value: the rupee amount (FIXED_AMOUNT) or the percent number
+  // (PERCENTAGE, e.g. 10.00).
+  value                 Decimal              @db.Decimal(12, 2)
+  // Frozen monetary snapshot computed at approval (money-rounded); never
+  // recomputed. For PERCENTAGE this is round(grossAmount × value/100).
+  computedAmount        Decimal              @db.Decimal(12, 2)
+  status                FeeAdjustmentStatus  @default(REQUESTED)
+  reason                String?
+  // Per-installment reduction snapshot written at approval: which installments
+  // absorbed the concession and by how much, so reversal restores exact amounts.
+  installmentApplication Json?
+  // Override provenance: set ONLY when a SUPER_ADMIN explicitly overrides
+  // (allowed solely for another user's request, never self-approval).
+  overridden            Boolean              @default(false)
+  overriddenById        String?
+  overrideReason        String?
+  requestedById         String?
+  approvedById          String?
+  reversedById          String?
+  // Companion reversal record → the original adjustment it undoes.
+  reversalOfId          String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  school       School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student      Student         @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  session      AcademicSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  invoice      FeeInvoice?     @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  reversalOf   FeeAdjustment?  @relation("FeeAdjustmentReversal", fields: [reversalOfId], references: [id], onDelete: SetNull)
+  reversals    FeeAdjustment[] @relation("FeeAdjustmentReversal")
+  requestedBy  User?           @relation("FeeAdjustmentRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+  approvedBy   User?           @relation("FeeAdjustmentApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  reversedBy   User?           @relation("FeeAdjustmentReversedBy", fields: [reversedById], references: [id], onDelete: SetNull)
+  overriddenBy User?           @relation("FeeAdjustmentOverriddenBy", fields: [overriddenById], references: [id], onDelete: SetNull)
+
+  @@index([schoolId, studentId])
+  @@index([schoolId, invoiceId])
+  @@index([schoolId, status])
+  @@index([schoolId, status, createdAt])
+  @@index([invoiceId])
+  @@index([reversalOfId])
 }
 
 // Exam types (e.g. midterm, final) — tenant-scoped.
@@ -1681,6 +1784,12 @@ enum AuditAction {
   ISSUE
   RETURN
   ASSIGN
+  CONCESSION_REQUESTED
+  CONCESSION_APPROVED
+  CONCESSION_OVERRIDE
+  CONCESSION_REJECTED
+  CONCESSION_CANCELLED
+  CONCESSION_REVERSED
 }
 
 enum AuditEntityType {
@@ -1729,6 +1838,7 @@ enum AuditEntityType {
   TRANSPORT_DRIVER
   TRANSPORT_ASSIGNMENT
   REPORT
+  FEE_ADJUSTMENT
 }
 
 model AuditLog {

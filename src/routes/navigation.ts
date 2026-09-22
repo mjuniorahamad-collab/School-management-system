@@ -18,6 +18,7 @@ import {
   Megaphone,
   MessageSquare,
   NotebookPen,
+  Percent,
   Presentation,
   Receipt,
   GraduationCap,
@@ -69,6 +70,12 @@ export const navigationSections: NavSection[] = [
       { path: "/fees", label: "Fees Management", icon: Banknote, requiredPermission: "fees:view" },
       { path: "/payments", label: "Payments", icon: CreditCard, requiredPermission: "payments:view" },
       { path: "/receipts", label: "Receipts", icon: Receipt, requiredPermission: "receipts:view" },
+      {
+        path: "/concessions",
+        label: "Concessions",
+        icon: Percent,
+        requiredPermission: "concessions:view",
+      },
     ],
   },
   {
