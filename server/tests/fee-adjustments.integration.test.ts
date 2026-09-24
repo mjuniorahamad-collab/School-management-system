@@ -822,6 +822,63 @@ describe.skipIf(!TEST_DATABASE_URL)("Fees concessions (FeeAdjustment) API (integ
     })
   })
 
+  describe("concurrent payment + concession mutation", () => {
+    it("keeps payment and concession approval financially consistent when they race", async () => {
+      const requested = await accountantAgent
+        .post("/api/v1/fees/adjustments")
+        .send(concessionPayload(fixtures.invoiceAId))
+
+      expect(requested.status).toBe(201)
+      const adjustmentId = requested.body.data.id
+
+      const [payment, approval] = await Promise.all([
+        adminAgent.post("/api/v1/payments").send({
+          invoiceId: fixtures.invoiceAId,
+          amount: 20000,
+          method: "CASH",
+          paymentDate: "2026-09-05",
+          idempotencyKey: "adj-payment-race-1",
+        }),
+        principalAgent.post(`/api/v1/fees/adjustments/${adjustmentId}/approve`).send({}),
+      ])
+
+      expect(payment.status === 201 || payment.status === 400).toBe(true)
+      expect(approval.status).toBe(200)
+
+      const invoice = await prisma.feeInvoice.findUnique({
+        where: { id: fixtures.invoiceAId },
+        include: { installments: { orderBy: { sortOrder: "asc" } } },
+      })
+      expect(invoice).not.toBeNull()
+      if (!invoice) return
+
+      const totalAmount = Number(invoice.totalAmount)
+      const amountPaid = Number(invoice.amountPaid)
+      const balance = Number(invoice.balance)
+      const installmentTotal = invoice.installments.reduce((sum, row) => sum + Number(row.amount), 0)
+      const installmentPaid = invoice.installments.reduce((sum, row) => sum + Number(row.amountPaid), 0)
+      const installmentBalance = invoice.installments.reduce((sum, row) => sum + Number(row.balance), 0)
+
+      expect(totalAmount).toBe(35000)
+      expect(installmentTotal).toBe(35000)
+      expect(installmentPaid).toBe(amountPaid)
+      expect(installmentBalance).toBe(balance)
+      expect(balance).toBe(totalAmount - amountPaid)
+
+      const payments = await prisma.feePayment.findMany({
+        where: { schoolId: fixtures.schoolId, invoiceId: fixtures.invoiceAId },
+      })
+      expect(payments).toHaveLength(payment.status === 201 ? 1 : 0)
+      if (payment.status === 201) {
+        expect(amountPaid).toBe(20000)
+        expect(balance).toBe(15000)
+      } else {
+        expect(amountPaid).toBe(0)
+        expect(balance).toBe(35000)
+      }
+    })
+  })
+
   describe("get & list", () => {
     it("returns the adjustment detail with actors and the invoice summary", async () => {
       const created = await accountantAgent.post("/api/v1/fees/adjustments").send(concessionPayload(fixtures.invoiceAId))
