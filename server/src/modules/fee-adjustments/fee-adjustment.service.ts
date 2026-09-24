@@ -38,6 +38,17 @@ async function requirePrisma(): Promise<PrismaClient> {
   return prisma
 }
 
+async function lockInvoiceForUpdate(tx: Tx, invoiceId: string, schoolId: string): Promise<void> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>(
+    Prisma.sql`SELECT "id"
+                FROM "FeeInvoice"
+                WHERE "id" = ${invoiceId}
+                  AND "schoolId" = ${schoolId}
+                FOR UPDATE`,
+  )
+  if (rows.length === 0) throw notFoundError("Invoice not found")
+}
+
 /** Runs a pure rule and turns any domain violation into a 400 BAD_REQUEST. */
 function ruleValue<T>(operation: () => T): T {
   try {
@@ -223,6 +234,10 @@ async function applyApproval(
   assertNotSelfApprovalOrForbid(pending.requestedById, actor.id)
 
   await prisma.$transaction(async (tx: Tx) => {
+    if (pending.invoiceId) {
+      await lockInvoiceForUpdate(tx, pending.invoiceId, schoolId)
+    }
+
     const current = await tx.feeAdjustment.findFirst({
       where: { id, schoolId },
       include: APPROVE_INCLUDE,
@@ -481,6 +496,10 @@ export async function reverseAdjustment(
   ruleValue(() => assertValidAdjustmentTransition(pending.status, "REVERSED"))
 
   await prisma.$transaction(async (tx: Tx) => {
+    if (pending.invoiceId) {
+      await lockInvoiceForUpdate(tx, pending.invoiceId, schoolId)
+    }
+
     const current = await tx.feeAdjustment.findFirst({
       where: { id, schoolId },
       include: APPROVE_INCLUDE,

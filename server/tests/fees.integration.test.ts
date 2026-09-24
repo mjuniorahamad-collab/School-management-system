@@ -325,11 +325,11 @@ describe.skipIf(!TEST_DATABASE_URL)("Fees payments & receipts API (integration)"
     await prisma.feePayment.deleteMany()
     await prisma.feeInstallment.updateMany({
       where: { invoiceId: fixtures.invoiceAId },
-      data: { amountPaid: 0, balance: 500, status: "UNPAID" },
+      data: { amount: 500, amountPaid: 0, balance: 500, status: "UNPAID" },
     })
     await prisma.feeInvoice.update({
       where: { id: fixtures.invoiceAId },
-      data: { amountPaid: 0, balance: 1000, status: "UNPAID" },
+      data: { totalAmount: 1000, amountPaid: 0, balance: 1000, status: "UNPAID" },
     })
     await prisma.school.update({
       where: { id: fixtures.schoolId },
@@ -356,6 +356,35 @@ describe.skipIf(!TEST_DATABASE_URL)("Fees payments & receipts API (integration)"
       idempotencyKey: `pay-${invoiceId}-attempt-1`,
       ...overrides,
     }
+  }
+
+  async function configureInvoice(
+    invoiceId: string,
+    total: number,
+    installmentAmounts: number[],
+  ): Promise<void> {
+    const installments = await prisma.feeInstallment.findMany({
+      where: { invoiceId },
+      orderBy: { sortOrder: "asc" },
+    })
+    expect(installments).toHaveLength(installmentAmounts.length)
+
+    for (let index = 0; index < installmentAmounts.length; index += 1) {
+      await prisma.feeInstallment.update({
+        where: { id: installments[index].id },
+        data: {
+          amount: installmentAmounts[index],
+          amountPaid: 0,
+          balance: installmentAmounts[index],
+          status: "UNPAID",
+        },
+      })
+    }
+
+    await prisma.feeInvoice.update({
+      where: { id: invoiceId },
+      data: { totalAmount: total, amountPaid: 0, balance: total, status: "UNPAID" },
+    })
   }
 
   describe("index & rbac", () => {
@@ -387,6 +416,114 @@ describe.skipIf(!TEST_DATABASE_URL)("Fees payments & receipts API (integration)"
       expect(res.status).toBe(200)
       expect(res.body.data.items).toEqual([])
       expect(res.body.data.pagination.total).toBe(0)
+    })
+  })
+
+  describe("concurrency safeguards", () => {
+    it("allows only one concurrent payment when the combined amount would overpay", async () => {
+      await configureInvoice(fixtures.invoiceAId, 10000, [5000, 5000])
+
+      const [first, second] = await Promise.all([
+        adminAgent
+          .post("/api/v1/payments")
+          .send(paymentPayload(fixtures.invoiceAId, { amount: 7000, idempotencyKey: "pay-race-7000" })),
+        adminAgent
+          .post("/api/v1/payments")
+          .send(paymentPayload(fixtures.invoiceAId, { amount: 5000, idempotencyKey: "pay-race-5000" })),
+      ])
+
+      expect([first.status, second.status].sort((a, b) => a - b)).toEqual([201, 400])
+
+      const invoice = await prisma.feeInvoice.findUnique({
+        where: { id: fixtures.invoiceAId },
+        include: { installments: { orderBy: { sortOrder: "asc" } } },
+      })
+      expect(invoice).not.toBeNull()
+      if (!invoice) return
+
+      const successfulAmount = first.status === 201 ? 7000 : 5000
+      expect(Number(invoice.amountPaid)).toBe(successfulAmount)
+      expect(Number(invoice.balance)).toBe(10000 - successfulAmount)
+      expect(invoice.installments.reduce((sum, row) => sum + Number(row.balance), 0)).toBe(Number(invoice.balance))
+
+      const payments = await prisma.feePayment.findMany({
+        where: { schoolId: fixtures.schoolId, invoiceId: fixtures.invoiceAId },
+      })
+      const receipts = await prisma.feeReceipt.findMany({
+        where: { schoolId: fixtures.schoolId, invoiceId: fixtures.invoiceAId },
+      })
+      expect(payments).toHaveLength(1)
+      expect(receipts).toHaveLength(1)
+      expect(Number(payments[0].amount)).toBe(successfulAmount)
+    })
+
+    it("preserves exact balances when two valid payments arrive concurrently", async () => {
+      await configureInvoice(fixtures.invoiceAId, 10000, [5000, 5000])
+
+      const [first, second] = await Promise.all([
+        adminAgent
+          .post("/api/v1/payments")
+          .send(paymentPayload(fixtures.invoiceAId, { amount: 6000, idempotencyKey: "pay-race-6000" })),
+        adminAgent
+          .post("/api/v1/payments")
+          .send(paymentPayload(fixtures.invoiceAId, { amount: 4000, idempotencyKey: "pay-race-4000" })),
+      ])
+
+      expect(first.status).toBe(201)
+      expect(second.status).toBe(201)
+
+      const invoice = await prisma.feeInvoice.findUnique({
+        where: { id: fixtures.invoiceAId },
+        include: { installments: { orderBy: { sortOrder: "asc" } } },
+      })
+      expect(invoice).not.toBeNull()
+      if (!invoice) return
+
+      expect(Number(invoice.amountPaid)).toBe(10000)
+      expect(Number(invoice.balance)).toBe(0)
+      expect(invoice.installments.map((row) => Number(row.amountPaid))).toEqual([5000, 5000])
+      expect(invoice.installments.map((row) => Number(row.balance))).toEqual([0, 0])
+
+      const payments = await prisma.feePayment.findMany({
+        where: { schoolId: fixtures.schoolId, invoiceId: fixtures.invoiceAId },
+        orderBy: { amount: "asc" },
+      })
+      const receipts = await prisma.feeReceipt.findMany({
+        where: { schoolId: fixtures.schoolId, invoiceId: fixtures.invoiceAId },
+        orderBy: { amount: "asc" },
+      })
+      expect(payments.map((row) => Number(row.amount))).toEqual([4000, 6000])
+      expect(receipts).toHaveLength(2)
+      const receiptBalances = receipts.map((row) => Number(row.balanceAfter)).sort((a, b) => a - b)
+      expect(receiptBalances[0]).toBe(0)
+      expect([4000, 6000]).toContain(receiptBalances[1])
+    })
+
+    it("does not duplicate a payment or receipt on concurrent identical idempotent submissions", async () => {
+      const payload = paymentPayload(fixtures.invoiceAId, {
+        amount: 500,
+        idempotencyKey: "pay-race-idempotent",
+      })
+
+      const [first, second] = await Promise.all([
+        adminAgent.post("/api/v1/payments").send(payload),
+        adminAgent.post("/api/v1/payments").send(payload),
+      ])
+
+      expect([first.status, second.status].sort((a, b) => a - b)).toEqual([200, 201])
+      const replayed = [first, second].find((response) => response.status === 200)
+      const created = [first, second].find((response) => response.status === 201)
+      expect(replayed?.body.data.replayed).toBe(true)
+      expect(created?.body.data.replayed).toBe(false)
+      expect(replayed?.body.data.payment.id).toBe(created?.body.data.payment.id)
+      expect(replayed?.body.data.receipt.id).toBe(created?.body.data.receipt.id)
+
+      const [paymentCount, receiptCount] = await Promise.all([
+        prisma.feePayment.count({ where: { schoolId: fixtures.schoolId, invoiceId: fixtures.invoiceAId } }),
+        prisma.feeReceipt.count({ where: { schoolId: fixtures.schoolId, invoiceId: fixtures.invoiceAId } }),
+      ])
+      expect(paymentCount).toBe(1)
+      expect(receiptCount).toBe(1)
     })
   })
 
@@ -605,13 +742,23 @@ const payments = await adminAgent.get("/api/v1/payments")
         where: { schoolId: fixtures.schoolId, action: "RECORD_PAYMENT", entityType: "FEE_PAYMENT" },
       })
       expect(rows.length).toBeGreaterThan(0)
+
+      const payments = await prisma.feePayment.findMany({
+        where: { schoolId: fixtures.schoolId, id: { in: rows.map((row) => row.entityId) } },
+        select: { id: true, amount: true, paymentNumber: true },
+      })
+      const paymentsById = new Map(payments.map((payment) => [payment.id, payment]))
+
       for (const row of rows) {
         expect(row.actorName).toBe("Fees Admin")
         expect(row.actorRole).toBe(SUPER_ADMIN_ROLE)
         expect(row.entityId).toMatch(/^[0-9a-f-]{36}$/)
+        const payment = paymentsById.get(row.entityId)
+        expect(payment).toBeDefined()
+        if (!payment) continue
         const metadata = row.metadata as { amount?: number; paymentNumber?: string }
-        expect(metadata.amount).toBe(500)
-        expect(metadata.paymentNumber).toBeTruthy()
+        expect(metadata.amount).toBe(Number(payment.amount))
+        expect(metadata.paymentNumber).toBe(payment.paymentNumber)
       }
     })
 
