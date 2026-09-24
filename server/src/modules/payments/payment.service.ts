@@ -1,6 +1,7 @@
 import { Prisma, type InstallmentStatus } from "@prisma/client"
 import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import { lockInvoiceForUpdate } from "../../lib/db-locks.js"
 import { buildPaymentNumber, buildReceiptNumber } from "../../lib/id-generators.js"
 import { roundMoney, toMoney } from "../../lib/money.js"
 import type { AuthUser } from "../../types/auth.js"
@@ -48,7 +49,7 @@ interface AllocatableInstallmentRow {
 }
 
 async function loadAllocatableInstallments(
-  prisma: PrismaClient,
+  prisma: Tx,
   invoiceId: string,
 ): Promise<AllocatableInstallmentRow[]> {
   const rows = await prisma.feeInstallment.findMany({
@@ -96,29 +97,6 @@ export async function createPayment(
   const prisma = await requirePrisma()
   const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
-  const invoice = await prisma.feeInvoice.findFirst({
-    where: { id: input.invoiceId, schoolId },
-    include: {
-      student: {
-        select: {
-          id: true,
-          admissionNumber: true,
-          firstName: true,
-          middleName: true,
-          lastName: true,
-        },
-      },
-      session: { select: { startDate: true } },
-    },
-  })
-  if (!invoice) throw notFoundError("Invoice not found")
-
-  const paymentAmount = roundMoney(input.amount)
-  const installments = await loadAllocatableInstallments(prisma, invoice.id)
-  if (isOverpayment(paymentAmount, installments)) {
-    throw badRequestError("Payment exceeds the outstanding balance on this invoice")
-  }
-
   async function existingByKey(): Promise<{ id: string } | null> {
     return prisma.feePayment.findFirst({
       where: { schoolId, idempotencyKey: input.idempotencyKey },
@@ -126,194 +104,249 @@ export async function createPayment(
     })
   }
 
+  // Fast path: a sequential retry of an already-recorded key replays without
+  // taking a lock. Concurrent identical submissions are resolved
+  // authoritatively inside the transaction below (after the invoice lock).
   const existing = await existingByKey()
   if (existing) {
     const payment = await paymentDetailById(prisma, existing.id, schoolId)
     return { replayed: true, payment, receipt: payment.receipt }
   }
 
-  const allocation = allocatePayment(paymentAmount, installments)
-  const updatedByInstallment = applyAllocation(installments, allocation)
-
-  const invoiceAmountPaid = roundMoney(toMoney(invoice.amountPaid) + paymentAmount)
-  const invoiceBalance = roundMoney(toMoney(invoice.balance) - paymentAmount)
+  const paymentAmount = roundMoney(input.amount)
+  const paymentDate = parseDateISO(input.paymentDate)
   const today = todayISODate()
 
-  const nextInstallmentStates = installments.map((installment) => {
-    const updated = updatedByInstallment.get(installment.id)
-    return {
-      amountPaid: updated ? updated.amountPaid : installment.amountPaid,
-      balance: updated ? updated.balance : installment.balance,
-      dueDateISO: installment.dueDateISO,
-    }
-  })
-  const invoiceStatus = deriveInvoiceStatus(nextInstallmentStates, today)
+  type PaymentOutcome = { createdId: string } | { replayId: string }
 
-  const installmentUpdates: {
-    id: string
-    amountPaid: number
-    balance: number
-    status: InstallmentStatus
-  }[] = []
-  for (const line of allocation) {
-    const updated = updatedByInstallment.get(line.installmentId)
-    const installment = installments.find((candidate) => candidate.id === line.installmentId)
-    if (!updated || !installment) continue
-    installmentUpdates.push({
-      id: line.installmentId,
-      amountPaid: updated.amountPaid,
-      balance: updated.balance,
-      status: deriveInstallmentStatus(
-        { amountPaid: updated.amountPaid, balance: updated.balance, dueDateISO: installment.dueDateISO },
-        today,
-      ),
-    })
-  }
+  async function persistPayment(): Promise<PaymentOutcome> {
+    try {
+      return await prisma.$transaction(
+        async (tx: Tx): Promise<PaymentOutcome> => {
+          // Serialize all financial mutations for THIS invoice, then read the
+          // authoritative state under the lock. Validation and balance math
+          // must never depend on state read outside the transaction.
+          await lockInvoiceForUpdate(tx, input.invoiceId, schoolId)
 
-  const studentName = [invoice.student.firstName, invoice.student.middleName, invoice.student.lastName]
-    .filter(Boolean)
-    .join(" ")
-  const sessionYear = invoice.session.startDate.getFullYear()
-  const paymentDate = parseDateISO(input.paymentDate)
+          const invoice = await tx.feeInvoice.findFirst({
+            where: { id: input.invoiceId, schoolId },
+            include: {
+              student: {
+                select: {
+                  id: true,
+                  admissionNumber: true,
+                  firstName: true,
+                  middleName: true,
+                  lastName: true,
+                },
+              },
+              session: { select: { startDate: true } },
+            },
+          })
+          if (!invoice) throw notFoundError("Invoice not found")
 
-  let paymentId = ""
-  try {
-    const created = await prisma.$transaction(async (tx: Tx) => {
-    const paymentCounter = await tx.school.update({
-      where: { id: schoolId },
-      data: { feePaymentCounter: { increment: 1 } },
-      select: { feePaymentCounter: true },
-    })
-    const paymentRow = await tx.feePayment.create({
-      data: {
-        schoolId,
-        invoiceId: invoice.id,
-        paymentNumber: buildPaymentNumber(paymentDate.getFullYear(), paymentCounter.feePaymentCounter),
-        amount: paymentAmount,
-        method: input.method,
-        transactionRef: input.transactionRef ?? null,
-        paymentDate,
-        notes: input.notes ?? null,
-        status: "SUCCESS",
-        idempotencyKey: input.idempotencyKey,
-        recordedBy: userId,
-      },
-      select: { id: true, paymentNumber: true },
-    })
+          // Authoritative idempotency check: a concurrent identical request
+          // that committed before we acquired the lock must replay, never
+          // duplicate the payment/receipt/notification.
+          const concurrent = await tx.feePayment.findFirst({
+            where: { schoolId, idempotencyKey: input.idempotencyKey },
+            select: { id: true },
+          })
+          if (concurrent) return { replayId: concurrent.id }
 
-    const receiptCounter = await tx.school.update({
-      where: { id: schoolId },
-      data: { feeReceiptCounter: { increment: 1 } },
-      select: { feeReceiptCounter: true },
-    })
-    const receiptRow = await tx.feeReceipt.create({
-      data: {
-        schoolId,
-        paymentId: paymentRow.id,
-        invoiceId: invoice.id,
-        receiptNumber: buildReceiptNumber(paymentDate.getFullYear(), receiptCounter.feeReceiptCounter),
-        studentId: invoice.student.id,
-        studentName,
-        admissionNumber: invoice.student.admissionNumber,
-        className: invoice.className,
-        sectionName: invoice.sectionName,
-        sessionName: invoice.sessionName,
-        sessionYear,
-        invoiceNumber: invoice.invoiceNumber,
-        invoiceTotal: toMoney(invoice.totalAmount),
-        amount: paymentAmount,
-        balanceAfter: invoiceBalance,
-        method: input.method,
-        paymentDate,
-        transactionRef: input.transactionRef ?? null,
-        receivedBy: userId,
-        receivedByName: userName,
-      },
-      select: { id: true, receiptNumber: true },
-    })
+          const installments = await loadAllocatableInstallments(tx, invoice.id)
+          if (isOverpayment(paymentAmount, installments)) {
+            throw badRequestError("Payment exceeds the outstanding balance on this invoice")
+          }
 
-    for (const update of installmentUpdates) {
-      await tx.feeInstallment.update({
-        where: { id: update.id },
-        data: { amountPaid: update.amountPaid, balance: update.balance, status: update.status },
-      })
-    }
+          const allocation = allocatePayment(paymentAmount, installments)
+          const updatedByInstallment = applyAllocation(installments, allocation)
 
-    await tx.feeInvoice.update({
-      where: { id: invoice.id },
-      data: { amountPaid: invoiceAmountPaid, balance: invoiceBalance, status: invoiceStatus },
-    })
+          const invoiceAmountPaid = roundMoney(toMoney(invoice.amountPaid) + paymentAmount)
+          const invoiceBalance = roundMoney(toMoney(invoice.balance) - paymentAmount)
 
-    await recordAudit(tx, {
-      schoolId,
-      actorId: auditActor.id,
-      actorName: auditActor.name,
-      actorEmail: auditActor.email,
-      actorRole: auditActor.role,
-      action: "RECORD_PAYMENT",
-      entityType: "FEE_PAYMENT",
-      entityId: paymentRow.id,
-      summary: `Recorded payment of ${paymentAmount} on invoice ${invoice.invoiceNumber}`,
-      metadata: {
-        paymentNumber: paymentRow.paymentNumber,
-        amount: paymentAmount,
-        method: input.method,
-        invoiceId: invoice.id,
-        studentId: invoice.student.id,
-        installments: installmentUpdates.map((update) => update.id),
-      },
-    })
+          const nextInstallmentStates = installments.map((installment) => {
+            const updated = updatedByInstallment.get(installment.id)
+            return {
+              amountPaid: updated ? updated.amountPaid : installment.amountPaid,
+              balance: updated ? updated.balance : installment.balance,
+              dueDateISO: installment.dueDateISO,
+            }
+          })
+          const invoiceStatus = deriveInvoiceStatus(nextInstallmentStates, today)
 
-    await recordAudit(tx, {
-      schoolId,
-      actorId: auditActor.id,
-      actorName: auditActor.name,
-      actorEmail: auditActor.email,
-      actorRole: auditActor.role,
-      action: "ISSUE_RECEIPT",
-      entityType: "FEE_RECEIPT",
-      entityId: receiptRow.id,
-      summary: `Issued receipt to ${studentName} for payment of ${paymentAmount} on ${invoice.invoiceNumber}`,
-      metadata: {
-        receiptNumber: receiptRow.receiptNumber,
-        paymentNumber: paymentRow.paymentNumber,
-        amount: paymentAmount,
-        balanceAfter: invoiceBalance,
-        studentId: invoice.student.id,
-        admissionNumber: invoice.student.admissionNumber,
-      },
-    })
+          const installmentUpdates: {
+            id: string
+            amountPaid: number
+            balance: number
+            status: InstallmentStatus
+          }[] = []
+          for (const line of allocation) {
+            const updated = updatedByInstallment.get(line.installmentId)
+            const installment = installments.find((candidate) => candidate.id === line.installmentId)
+            if (!updated || !installment) continue
+            installmentUpdates.push({
+              id: line.installmentId,
+              amountPaid: updated.amountPaid,
+              balance: updated.balance,
+              status: deriveInstallmentStatus(
+                { amountPaid: updated.amountPaid, balance: updated.balance, dueDateISO: installment.dueDateISO },
+                today,
+              ),
+            })
+          }
 
-    // Portal notifications fan out to the student's linked guardians, written
-    // in THIS transaction (atomic with the payment) and idempotent by source —
-    // an idempotency-key replay of the same payment never re-notifies.
-    await emitNotifications(tx, {
-      schoolId,
-      type: "FEE_PAYMENT",
-      title: buildFeePaymentNotificationTitle(),
-      body: `Your payment of ${paymentAmount} on invoice ${invoice.invoiceNumber} has been received.`,
-      linkPath: "/portal",
-      sourceEntityType: "FEE_PAYMENT",
-      sourceEntityId: paymentRow.id,
-      recipientUserIds: await resolveGuardianUserIds(tx, invoice.student.id),
-    })
+          const studentName = [
+            invoice.student.firstName,
+            invoice.student.middleName,
+            invoice.student.lastName,
+          ]
+            .filter(Boolean)
+            .join(" ")
+          const sessionYear = invoice.session.startDate.getFullYear()
 
-    return paymentRow
-  })
-  paymentId = created.id
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      const concurrent = await existingByKey()
-      if (concurrent) {
-        const payment = await paymentDetailById(prisma, concurrent.id, schoolId)
-        return { replayed: true, payment, receipt: payment.receipt }
+          // Counter increments happen only AFTER validation passes, so a
+          // rejected overpayment never consumes a payment/receipt number.
+          const paymentCounter = await tx.school.update({
+            where: { id: schoolId },
+            data: { feePaymentCounter: { increment: 1 } },
+            select: { feePaymentCounter: true },
+          })
+          const paymentRow = await tx.feePayment.create({
+            data: {
+              schoolId,
+              invoiceId: invoice.id,
+              paymentNumber: buildPaymentNumber(paymentDate.getFullYear(), paymentCounter.feePaymentCounter),
+              amount: paymentAmount,
+              method: input.method,
+              transactionRef: input.transactionRef ?? null,
+              paymentDate,
+              notes: input.notes ?? null,
+              status: "SUCCESS",
+              idempotencyKey: input.idempotencyKey,
+              recordedBy: userId,
+            },
+            select: { id: true, paymentNumber: true },
+          })
+
+          const receiptCounter = await tx.school.update({
+            where: { id: schoolId },
+            data: { feeReceiptCounter: { increment: 1 } },
+            select: { feeReceiptCounter: true },
+          })
+          const receiptRow = await tx.feeReceipt.create({
+            data: {
+              schoolId,
+              paymentId: paymentRow.id,
+              invoiceId: invoice.id,
+              receiptNumber: buildReceiptNumber(paymentDate.getFullYear(), receiptCounter.feeReceiptCounter),
+              studentId: invoice.student.id,
+              studentName,
+              admissionNumber: invoice.student.admissionNumber,
+              className: invoice.className,
+              sectionName: invoice.sectionName,
+              sessionName: invoice.sessionName,
+              sessionYear,
+              invoiceNumber: invoice.invoiceNumber,
+              invoiceTotal: toMoney(invoice.totalAmount),
+              amount: paymentAmount,
+              balanceAfter: invoiceBalance,
+              method: input.method,
+              paymentDate,
+              transactionRef: input.transactionRef ?? null,
+              receivedBy: userId,
+              receivedByName: userName,
+            },
+            select: { id: true, receiptNumber: true },
+          })
+
+          for (const update of installmentUpdates) {
+            await tx.feeInstallment.update({
+              where: { id: update.id },
+              data: { amountPaid: update.amountPaid, balance: update.balance, status: update.status },
+            })
+          }
+
+          await tx.feeInvoice.update({
+            where: { id: invoice.id },
+            data: { amountPaid: invoiceAmountPaid, balance: invoiceBalance, status: invoiceStatus },
+          })
+
+          await recordAudit(tx, {
+            schoolId,
+            actorId: auditActor.id,
+            actorName: auditActor.name,
+            actorEmail: auditActor.email,
+            actorRole: auditActor.role,
+            action: "RECORD_PAYMENT",
+            entityType: "FEE_PAYMENT",
+            entityId: paymentRow.id,
+            summary: `Recorded payment of ${paymentAmount} on invoice ${invoice.invoiceNumber}`,
+            metadata: {
+              paymentNumber: paymentRow.paymentNumber,
+              amount: paymentAmount,
+              method: input.method,
+              invoiceId: invoice.id,
+              studentId: invoice.student.id,
+              installments: installmentUpdates.map((update) => update.id),
+            },
+          })
+
+          await recordAudit(tx, {
+            schoolId,
+            actorId: auditActor.id,
+            actorName: auditActor.name,
+            actorEmail: auditActor.email,
+            actorRole: auditActor.role,
+            action: "ISSUE_RECEIPT",
+            entityType: "FEE_RECEIPT",
+            entityId: receiptRow.id,
+            summary: `Issued receipt to ${studentName} for payment of ${paymentAmount} on ${invoice.invoiceNumber}`,
+            metadata: {
+              receiptNumber: receiptRow.receiptNumber,
+              paymentNumber: paymentRow.paymentNumber,
+              amount: paymentAmount,
+              balanceAfter: invoiceBalance,
+              studentId: invoice.student.id,
+              admissionNumber: invoice.student.admissionNumber,
+            },
+          })
+
+          // Portal notifications fan out to the student's linked guardians,
+          // written in THIS transaction (atomic with the payment) and idempotent
+          // by source — an idempotency-key replay of the same payment never
+          // re-notifies.
+          await emitNotifications(tx, {
+            schoolId,
+            type: "FEE_PAYMENT",
+            title: buildFeePaymentNotificationTitle(),
+            body: `Your payment of ${paymentAmount} on invoice ${invoice.invoiceNumber} has been received.`,
+            linkPath: "/portal",
+            sourceEntityType: "FEE_PAYMENT",
+            sourceEntityId: paymentRow.id,
+            recipientUserIds: await resolveGuardianUserIds(tx, invoice.student.id),
+          })
+
+          return { createdId: paymentRow.id }
+        },
+        { timeout: 10_000, maxWait: 10_000 },
+      )
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const concurrent = await existingByKey()
+        if (concurrent) {
+          return { replayId: concurrent.id }
+        }
       }
+      throw error
     }
-    throw error
   }
 
+  const outcome = await persistPayment()
+  const replayed = "replayId" in outcome
+  const paymentId = replayed ? outcome.replayId : outcome.createdId
   const payment = await paymentDetailById(prisma, paymentId, schoolId)
-  return { replayed: false, payment, receipt: payment.receipt }
+  return { replayed, payment, receipt: payment.receipt }
 }
 
 export async function listPayments(

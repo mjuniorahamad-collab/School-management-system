@@ -956,6 +956,68 @@ describe.skipIf(!TEST_DATABASE_URL)("Fees concessions (FeeAdjustment) API (integ
       )
     })
   })
+
+  // Regression coverage for the shared per-invoice serialization point: a
+  // concession approval and a payment must never lose each other's financial
+  // mutation when they target the same invoice concurrently.
+  describe("concurrent payment + concession approval", () => {
+    it("keeps the invoice and installment ledger reconciled under a concurrent payment", async () => {
+      const num = (value: Prisma.Decimal): number => value.toNumber()
+
+      const requested = await accountantAgent
+        .post("/api/v1/fees/adjustments")
+        .send(concessionPayload(fixtures.invoiceBId, { value: 1000 }))
+      expect(requested.status).toBe(201)
+      const adjustmentId = requested.body.data.id
+
+      const [approve, payment] = await Promise.all([
+        principalAgent.post(`/api/v1/fees/adjustments/${adjustmentId}/approve`).send({}),
+        adminAgent.post("/api/v1/payments").send({
+          invoiceId: fixtures.invoiceBId,
+          amount: 2000,
+          method: "CASH",
+          paymentDate: "2026-09-05",
+          idempotencyKey: "race-concession-payment",
+        }),
+      ])
+
+      expect(approve.status).toBe(200)
+      expect(payment.status).toBe(201)
+
+      const [invoice, installments, payments, receipts, adjustment] = await Promise.all([
+        prisma.feeInvoice.findUniqueOrThrow({ where: { id: fixtures.invoiceBId } }),
+        prisma.feeInstallment.findMany({ where: { invoiceId: fixtures.invoiceBId } }),
+        prisma.feePayment.findMany({ where: { invoiceId: fixtures.invoiceBId } }),
+        prisma.feeReceipt.findMany({ where: { invoiceId: fixtures.invoiceBId } }),
+        prisma.feeAdjustment.findUniqueOrThrow({ where: { id: adjustmentId } }),
+      ])
+
+      expect(adjustment.status).toBe("APPROVED")
+      expect(payments).toHaveLength(1)
+      expect(receipts).toHaveLength(1)
+
+      // Frozen gross 6000, concession 1000, payment 2000 → net 5000, paid 2000.
+      expect(num(invoice.totalAmount)).toBe(5000)
+      expect(num(invoice.amountPaid)).toBe(2000)
+      expect(num(invoice.balance)).toBe(3000)
+
+      // The full cross-cutting reconciliation invariant must hold on persisted rows.
+      const installmentAmount = installments.reduce((sum, row) => sum + num(row.amount), 0)
+      const installmentPaid = installments.reduce((sum, row) => sum + num(row.amountPaid), 0)
+      const installmentBalance = installments.reduce((sum, row) => sum + num(row.balance), 0)
+      expect(installmentAmount).toBe(num(invoice.totalAmount))
+      expect(installmentPaid).toBe(num(invoice.amountPaid))
+      expect(installmentBalance).toBe(num(invoice.balance))
+      expect(num(invoice.balance)).toBe(num(invoice.totalAmount) - num(invoice.amountPaid))
+
+      // The receipt is an immutable point-in-time snapshot. Whichever mutation
+      // commits last determines the final invoice balance, so the snapshot is
+      // the final balance (payment last) or 1000 higher (approval last, i.e.
+      // before the concession reduced the amount owed).
+      const snapshot = num(receipts[0].balanceAfter)
+      expect([num(invoice.balance), num(invoice.balance) + 1000]).toContain(snapshot)
+    })
+  })
 })
 
 async function resetInvoice(

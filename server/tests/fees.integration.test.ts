@@ -662,6 +662,133 @@ const payments = await adminAgent.get("/api/v1/payments")
       )
     })
   })
+
+  // Regression coverage for the concurrent financial-state mutation race:
+  // authoritative invoice/installment state must be read and written under a
+  // per-invoice row lock inside one transaction. Each test asserts PERSISTED
+  // database state (not just HTTP responses).
+  describe("concurrent financial mutations", () => {
+    const num = (value: Prisma.Decimal): number => value.toNumber()
+
+    async function persistedInvoiceState(invoiceId: string) {
+      const [invoice, installments, payments, receipts] = await Promise.all([
+        prisma.feeInvoice.findUniqueOrThrow({ where: { id: invoiceId } }),
+        prisma.feeInstallment.findMany({ where: { invoiceId } }),
+        prisma.feePayment.findMany({ where: { invoiceId } }),
+        prisma.feeReceipt.findMany({ where: { invoiceId } }),
+      ])
+      return { invoice, installments, payments, receipts }
+    }
+
+    it("never overpays an invoice when two legitimate payments race", async () => {
+      const [a, b] = await Promise.all([
+        adminAgent
+          .post("/api/v1/payments")
+          .send(paymentPayload(fixtures.invoiceAId, { amount: 700, idempotencyKey: "race-overpay-a" })),
+        adminAgent
+          .post("/api/v1/payments")
+          .send(paymentPayload(fixtures.invoiceAId, { amount: 500, idempotencyKey: "race-overpay-b" })),
+      ])
+
+      expect([a.status, b.status].sort()).toEqual([201, 400])
+      const loser = a.status === 400 ? a : b
+      expect(loser.body.error.code).toBe("BAD_REQUEST")
+      expect(loser.body.error.message).toMatch(/outstanding balance/)
+
+      const { invoice, installments, payments, receipts } = await persistedInvoiceState(fixtures.invoiceAId)
+
+      expect(payments).toHaveLength(1)
+      expect(receipts).toHaveLength(1)
+      expect(num(invoice.amountPaid)).toBe(num(payments[0].amount))
+      expect(num(invoice.balance)).toBe(1000 - num(invoice.amountPaid))
+      expect(num(invoice.balance)).toBeGreaterThanOrEqual(0)
+      // Installment ledger stays mathematically consistent with the invoice.
+      expect(installments.reduce((sum, row) => sum + num(row.amountPaid), 0)).toBe(num(invoice.amountPaid))
+      expect(installments.reduce((sum, row) => sum + num(row.balance), 0)).toBe(num(invoice.balance))
+      expect(num(receipts[0].balanceAfter)).toBe(num(invoice.balance))
+    })
+
+    it("applies two valid concurrent payments without lost updates", async () => {
+      const [a, b] = await Promise.all([
+        adminAgent
+          .post("/api/v1/payments")
+          .send(paymentPayload(fixtures.invoiceAId, { amount: 600, idempotencyKey: "race-valid-a" })),
+        adminAgent
+          .post("/api/v1/payments")
+          .send(paymentPayload(fixtures.invoiceAId, { amount: 400, idempotencyKey: "race-valid-b" })),
+      ])
+
+      expect(a.status).toBe(201)
+      expect(b.status).toBe(201)
+
+      const { invoice, installments, payments, receipts } = await persistedInvoiceState(fixtures.invoiceAId)
+
+      expect(num(invoice.amountPaid)).toBe(1000)
+      expect(num(invoice.balance)).toBe(0)
+      expect(invoice.status).toBe("PAID")
+      expect(payments).toHaveLength(2)
+      expect(receipts).toHaveLength(2)
+      expect(installments.reduce((sum, row) => sum + num(row.amountPaid), 0)).toBe(1000)
+      expect(installments.reduce((sum, row) => sum + num(row.balance), 0)).toBe(0)
+      expect(installments.every((row) => row.status === "PAID")).toBe(true)
+
+      // Receipt balance snapshots must match the commit order (payment number
+      // order), never a stale pre-race balance.
+      const receiptsByPayment = new Map(receipts.map((receipt) => [receipt.paymentId, receipt]))
+      const ordered = [...payments].sort((x, y) => x.paymentNumber.localeCompare(y.paymentNumber))
+      let running = 1000
+      for (const payment of ordered) {
+        running -= num(payment.amount)
+        expect(num(receiptsByPayment.get(payment.id)!.balanceAfter)).toBe(running)
+      }
+      expect(running).toBe(0)
+    })
+
+    it("creates exactly one payment and receipt for concurrent identical idempotency keys", async () => {
+      // Link a portal guardian so the payment notification is actually emitted,
+      // letting us assert the replay never duplicates it.
+      const portalUser = await prisma.user.create({
+        data: {
+          name: "Race Portal Parent",
+          email: "race.parent@example.com",
+          passwordHash: hashPassword("race-parent-123"),
+          status: "ACTIVE",
+        },
+      })
+      const guardian = await prisma.guardian.create({
+        data: { schoolId: fixtures.schoolId, name: "Race Portal Parent", userId: portalUser.id },
+      })
+      await prisma.studentGuardian.create({
+        data: { studentId: fixtures.studentAId, guardianId: guardian.id, relationshipType: "PARENT" },
+      })
+
+      const payload = paymentPayload(fixtures.invoiceAId, {
+        amount: 500,
+        idempotencyKey: "race-idempotency-key",
+      })
+      const [a, b] = await Promise.all([
+        adminAgent.post("/api/v1/payments").send(payload),
+        adminAgent.post("/api/v1/payments").send(payload),
+      ])
+
+      expect([a.status, b.status].sort()).toEqual([200, 201])
+      const created = a.status === 201 ? a : b
+      const replay = a.status === 200 ? a : b
+      expect(replay.body.data.replayed).toBe(true)
+      expect(replay.body.data.payment.id).toBe(created.body.data.payment.id)
+
+      const { invoice, payments, receipts } = await persistedInvoiceState(fixtures.invoiceAId)
+      expect(payments).toHaveLength(1)
+      expect(receipts).toHaveLength(1)
+      expect(num(invoice.amountPaid)).toBe(500)
+      expect(num(invoice.balance)).toBe(500)
+
+      const notifications = await prisma.notification.findMany({
+        where: { sourceEntityType: "FEE_PAYMENT", sourceEntityId: payments[0].id },
+      })
+      expect(notifications).toHaveLength(1)
+    })
+  })
 })
 
 async function resetAllTables(prisma: PrismaClient): Promise<void> {

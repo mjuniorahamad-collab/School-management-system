@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client"
 import { badRequestError, forbiddenError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import { lockInvoiceForUpdate } from "../../lib/db-locks.js"
 import { roundMoney, toMoney } from "../../lib/money.js"
 import type { AuthUser } from "../../types/auth.js"
 import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
@@ -223,6 +224,15 @@ async function applyApproval(
   assertNotSelfApprovalOrForbid(pending.requestedById, actor.id)
 
   await prisma.$transaction(async (tx: Tx) => {
+    // Serialize against every other financial mutation of this invoice (payments
+    // and other adjustments) BEFORE reading invoice/installment state.
+    const target = await tx.feeAdjustment.findFirst({
+      where: { id, schoolId },
+      select: { invoiceId: true },
+    })
+    if (!target) throw notFoundError("Fee adjustment not found")
+    if (target.invoiceId) await lockInvoiceForUpdate(tx, target.invoiceId, schoolId)
+
     const current = await tx.feeAdjustment.findFirst({
       where: { id, schoolId },
       include: APPROVE_INCLUDE,
@@ -343,7 +353,7 @@ async function applyApproval(
         ...(override ? { overrideReason: options.overrideReason } : {}),
       },
     })
-  })
+  }, { timeout: 10_000, maxWait: 10_000 })
 }
 
 export async function approveAdjustment(
@@ -481,6 +491,15 @@ export async function reverseAdjustment(
   ruleValue(() => assertValidAdjustmentTransition(pending.status, "REVERSED"))
 
   await prisma.$transaction(async (tx: Tx) => {
+    // Serialize against every other financial mutation of this invoice (payments
+    // and other adjustments) BEFORE reading invoice/installment state.
+    const target = await tx.feeAdjustment.findFirst({
+      where: { id, schoolId },
+      select: { invoiceId: true },
+    })
+    if (!target) throw notFoundError("Fee adjustment not found")
+    if (target.invoiceId) await lockInvoiceForUpdate(tx, target.invoiceId, schoolId)
+
     const current = await tx.feeAdjustment.findFirst({
       where: { id, schoolId },
       include: APPROVE_INCLUDE,
@@ -608,7 +627,7 @@ export async function reverseAdjustment(
         ...(reason ? { reason } : {}),
       },
     })
-  })
+  }, { timeout: 10_000, maxWait: 10_000 })
 
   return adjustmentDetailById(prisma, id, schoolId)
 }
