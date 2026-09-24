@@ -325,11 +325,11 @@ describe.skipIf(!TEST_DATABASE_URL)("Fees payments & receipts API (integration)"
     await prisma.feePayment.deleteMany()
     await prisma.feeInstallment.updateMany({
       where: { invoiceId: fixtures.invoiceAId },
-      data: { amountPaid: 0, balance: 500, status: "UNPAID" },
+      data: { amount: 500, amountPaid: 0, balance: 500, status: "UNPAID" },
     })
     await prisma.feeInvoice.update({
       where: { id: fixtures.invoiceAId },
-      data: { amountPaid: 0, balance: 1000, status: "UNPAID" },
+      data: { totalAmount: 1000, amountPaid: 0, balance: 1000, status: "UNPAID" },
     })
     await prisma.school.update({
       where: { id: fixtures.schoolId },
