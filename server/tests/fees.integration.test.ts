@@ -742,13 +742,23 @@ const payments = await adminAgent.get("/api/v1/payments")
         where: { schoolId: fixtures.schoolId, action: "RECORD_PAYMENT", entityType: "FEE_PAYMENT" },
       })
       expect(rows.length).toBeGreaterThan(0)
+
+      const payments = await prisma.feePayment.findMany({
+        where: { schoolId: fixtures.schoolId, id: { in: rows.map((row) => row.entityId) } },
+        select: { id: true, amount: true, paymentNumber: true },
+      })
+      const paymentsById = new Map(payments.map((payment) => [payment.id, payment]))
+
       for (const row of rows) {
         expect(row.actorName).toBe("Fees Admin")
         expect(row.actorRole).toBe(SUPER_ADMIN_ROLE)
         expect(row.entityId).toMatch(/^[0-9a-f-]{36}$/)
+        const payment = paymentsById.get(row.entityId)
+        expect(payment).toBeDefined()
+        if (!payment) continue
         const metadata = row.metadata as { amount?: number; paymentNumber?: string }
-        expect(metadata.amount).toBe(500)
-        expect(metadata.paymentNumber).toBeTruthy()
+        expect(metadata.amount).toBe(Number(payment.amount))
+        expect(metadata.paymentNumber).toBe(payment.paymentNumber)
       }
     })
 
