@@ -2,12 +2,14 @@ import { env } from "../config/env.js"
 import {
   buildAuthUser,
   type AuthUserSource,
+  type ResolvedMembership,
   type ResolvedTenant,
 } from "../auth/authUser.js"
 import { hashPassword, verifyPassword } from "../auth/password.js"
 import { generateToken, hashToken } from "../auth/tokens.js"
 import {
   ApiError,
+  FORBIDDEN,
   INTERNAL_ERROR,
   accountDisabledError,
   forbiddenError,
@@ -39,9 +41,9 @@ export interface PrincipalContext {
   school: ResolvedTenant | null
   roles: string[]
   permissions: Set<string>
-  // Ids of the schools the user holds an ACTIVE membership in. Used by clients
-  // to present a tenant switcher when it is > 1.
-  membershipSchoolIds: string[]
+  // Every school the user holds an ACTIVE membership in (with the role held
+  // there). Used by clients to present a tenant switcher when it is > 1.
+  memberships: ResolvedMembership[]
 }
 
 // Verified against when the email is unknown so both failure paths burn equal
@@ -76,7 +78,10 @@ export async function createSessionTokens(userId: string): Promise<SessionTokens
   return { accessToken, refreshToken }
 }
 
-export async function doLogin(input: LoginInput): Promise<LoginResult> {
+export async function doLogin(
+  input: LoginInput,
+  opts: LoadPrincipalOptions = {},
+): Promise<LoginResult> {
   const prisma = await requirePrisma()
   const email = input.email.trim().toLowerCase()
 
@@ -125,7 +130,21 @@ export async function doLogin(input: LoginInput): Promise<LoginResult> {
 
   await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } })
 
-  const principal = await resolvePrincipalContext(user.id)
+  // A returning user's persisted last-used tenant may have been revoked or
+  // deleted since their previous session. Login must not lock them out for a
+  // stale value — fall back to the deterministic default. (An authenticated
+  // request with a forged X-School-Id is still rejected with 403.)
+  let principal: PrincipalContext
+  try {
+    principal = await resolvePrincipalContext(user.id, opts)
+  } catch (error) {
+    if (opts.schoolId && error instanceof ApiError && error.code === FORBIDDEN) {
+      principal = await resolvePrincipalContext(user.id)
+    } else {
+      throw error
+    }
+  }
+
   if (!principal.school) {
     // A user with no resolvable tenant cannot be placed in a school.
     throw forbiddenError("Your account is not associated with any school")
@@ -136,6 +155,7 @@ export async function doLogin(input: LoginInput): Promise<LoginResult> {
     principal.school,
     principal.roles,
     principal.permissions,
+    principal.memberships,
   )
 
   // Best-effort sign-in audit — never blocks the login path.
@@ -236,12 +256,12 @@ export interface LoadPrincipalOptions {
  * Resolution order:
  *  1. An explicit `schoolId` requires an ACTIVE membership for that school
  *     (rejects otherwise — a 403, never a silent cross-tenant fallback).
- *  2. Otherwise a single ACTIVE membership is auto-selected.
- *  3. Otherwise (zero, or multiple without an explicit selection) the legacy
- *     `User.schoolId` is used only as a home-tenant hint among the user's
- *     ACTIVE memberships. A stale or missing column returns null (no school),
- *     ensuring that revoking all memberships actually revokes access. Users
- *     with zero ACTIVE memberships cannot authenticate via the legacy column.
+ *  2. Zero ACTIVE memberships → no school context (revocation is enforced;
+ *     the legacy column can never grant access on its own).
+ *  3. Otherwise a default is selected deterministically: the legacy
+ *     `User.schoolId` home hint when it matches an ACTIVE membership, else the
+ *     earliest ACTIVE membership. The client persists its last choice and
+ *     re-sends it via `X-School-Id`, so this is only the initial fallback.
  */
 export async function loadPrincipalContext(
   userId: string,
@@ -261,12 +281,19 @@ export async function loadPrincipalContext(
   })
   if (!user) throw new ApiError(500, INTERNAL_ERROR, "Authenticated user no longer exists")
 
+  // `createdAt asc` makes the default-selection fallback deterministic.
   const memberships = await prisma.tenantMembership.findMany({
     where: { userId, status: "ACTIVE" },
-    include: { school: { select: { id: true, name: true, status: true } } },
+    include: {
+      school: { select: { id: true, name: true, status: true } },
+      role: { select: { name: true } },
+    },
+    orderBy: { createdAt: "asc" },
   })
 
-  // 1. Explicit tenant selection (multi-school user).
+  const membershipList = toMemberships(memberships)
+
+  // 1. Explicit tenant selection (multi-school user, from X-School-Id).
   if (opts.schoolId) {
     const membership = memberships.find((m) => m.schoolId === opts.schoolId)
     if (!membership) {
@@ -278,60 +305,44 @@ export async function loadPrincipalContext(
       school: tenantFromSchool(membership.school),
       roles: principal.roles,
       permissions: principal.permissions,
-      membershipSchoolIds: memberships.map((m) => m.schoolId),
+      memberships: membershipList,
     }
   }
 
-  // 2. Single ACTIVE membership → auto-select it.
-  if (memberships.length === 1) {
-    const membership = memberships[0]
-    const principal = await resolveRolePermissions(membership.roleId)
-    return {
-      user: toAuthUserSource(user),
-      school: tenantFromSchool(membership.school),
-      roles: principal.roles,
-      permissions: principal.permissions,
-      membershipSchoolIds: memberships.map((m) => m.schoolId),
-    }
-  }
-
-  // 3. Zero ACTIVE memberships → no school context (revocation is enforced).
+  // 2. Zero ACTIVE memberships → no school context (revocation is enforced).
   if (memberships.length === 0) {
     return {
       user: toAuthUserSource(user),
       school: null,
       roles: [],
       permissions: new Set(),
-      membershipSchoolIds: [],
+      memberships: [],
     }
   }
 
-  // 4. Multiple ACTIVE memberships without explicit selection: use the legacy
-  //    `User.schoolId` as a home-tenant hint, but only when it matches an
-  //    ACTIVE membership. The legacy column must never bypass the membership
-  //    model. If there is no match the client must send `X-School-Id`.
-  const matchingMembership = user.schoolId
-    ? memberships.find((m) => m.schoolId === user.schoolId)
-    : null
-
-  if (matchingMembership) {
-    const principal = await resolveRolePermissions(matchingMembership.roleId)
-    return {
-      user: toAuthUserSource(user),
-      school: tenantFromSchool(matchingMembership.school),
-      roles: principal.roles,
-      permissions: principal.permissions,
-      membershipSchoolIds: memberships.map((m) => m.schoolId),
-    }
-  }
-
+  // 3. Default selection: legacy home hint if it matches, else the earliest
+  //    ACTIVE membership.
+  const selected =
+    (user.schoolId ? memberships.find((m) => m.schoolId === user.schoolId) : undefined) ??
+    memberships[0]
+  const principal = await resolveRolePermissions(selected.roleId)
   return {
     user: toAuthUserSource(user),
-    school: null,
-    roles: [],
-    permissions: new Set(),
-    membershipSchoolIds: memberships.map((m) => m.schoolId),
+    school: tenantFromSchool(selected.school),
+    roles: principal.roles,
+    permissions: principal.permissions,
+    memberships: membershipList,
   }
+}
+
+interface ActiveMembershipRow {
+  schoolId: string
+  school: { id: string; name: string; status: string }
+  role: { name: string }
+}
+
+function toMemberships(rows: ActiveMembershipRow[]): ResolvedMembership[] {
+  return rows.map((row) => ({ id: row.schoolId, name: row.school.name, role: row.role.name }))
 }
 
 function toAuthUserSource(user: {
@@ -360,6 +371,9 @@ function tenantFromSchool(school: {
  * Resolves the principal context for a user. This is the shared entry point
  * used by login and session authentication.
  */
-async function resolvePrincipalContext(userId: string): Promise<PrincipalContext> {
-  return loadPrincipalContext(userId)
+async function resolvePrincipalContext(
+  userId: string,
+  opts: LoadPrincipalOptions = {},
+): Promise<PrincipalContext> {
+  return loadPrincipalContext(userId, opts)
 }

@@ -16,11 +16,23 @@ export interface ResolvedTenant {
   status: string
 }
 
+/**
+ * A school the authenticated user holds an ACTIVE membership in, with the role
+ * they hold *within that school*. The same user may hold different roles in
+ * different schools; the client uses this to render a tenant switcher.
+ */
+export interface ResolvedMembership {
+  id: string
+  name: string
+  role: string
+}
+
 export function buildAuthUser(
   user: AuthUserSource,
   school: ResolvedTenant,
   roles: string[],
   permissions: ReadonlySet<string>,
+  memberships: ResolvedMembership[],
 ): AuthUser {
   return {
     id: user.id,
@@ -30,5 +42,6 @@ export function buildAuthUser(
     status: user.status,
     roles,
     permissions: [...permissions],
+    memberships,
   }
 }

@@ -11,6 +11,7 @@ function makeUser(overrides: Partial<AuthUser> = {}): AuthUser {
     school: { id: "s-1", name: "Test School" },
     roles: ["PARENT"],
     permissions: ["portal:view"],
+    memberships: [],
     ...overrides,
   }
 }

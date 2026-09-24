@@ -12,6 +12,7 @@ import { ThemeToggle } from "@/theme/ThemeToggle"
 import { GlobalSearch } from "@/components/layout/GlobalSearch"
 import { MessagesMenu } from "@/components/layout/MessagesMenu"
 import { NotificationsMenu } from "@/components/layout/NotificationsMenu"
+import { SchoolSwitcher } from "@/components/layout/SchoolSwitcher"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
@@ -98,6 +99,8 @@ export function TopHeader() {
       )}
 
       <div className="flex shrink-0 items-center gap-1">
+        <SchoolSwitcher />
+
         <ThemeToggle />
 
         <NotificationsMenu />

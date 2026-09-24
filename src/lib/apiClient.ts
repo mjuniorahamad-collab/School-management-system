@@ -1,4 +1,5 @@
 import type { ApiErrorBody } from "@/types/api"
+import { getActiveSchoolId } from "@/auth/activeSchool"
 
 export const API_BASE_URL: string = import.meta.env.VITE_API_URL ?? "/api/v1"
 
@@ -101,6 +102,13 @@ async function request<T>(path: string, init?: RequestInit, options?: RequestOpt
     const isMultipart = init?.body instanceof FormData
     if (!headers.has("Content-Type") && !isMultipart) {
       headers.set("Content-Type", "application/json")
+    }
+
+    // The active tenant for a multi-school user. Sent on every request
+    // (including login) unless the caller provided one explicitly.
+    const activeSchoolId = getActiveSchoolId()
+    if (activeSchoolId && !headers.has("X-School-Id")) {
+      headers.set("X-School-Id", activeSchoolId)
     }
 
     const response = await fetch(`${API_BASE_URL}${path}`, {

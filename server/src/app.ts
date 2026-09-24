@@ -34,7 +34,8 @@ export function createApp(options: CreateAppOptions = {}): express.Application {
     cors({
       origin: env.corsOrigins,
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
-      allowedHeaders: ["Content-Type", "Authorization"],
+      // `X-School-Id` carries the active tenant for multi-school users.
+      allowedHeaders: ["Content-Type", "Authorization", "X-School-Id"],
       credentials: true,
     }),
   )

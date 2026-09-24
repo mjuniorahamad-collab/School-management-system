@@ -69,7 +69,13 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
       return
     }
 
-    req.auth = buildAuthUser(principal.user, principal.school, principal.roles, principal.permissions)
+    req.auth = buildAuthUser(
+      principal.user,
+      principal.school,
+      principal.roles,
+      principal.permissions,
+      principal.memberships,
+    )
     next()
   } catch (error) {
     next(error)

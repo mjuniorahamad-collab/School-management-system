@@ -20,7 +20,15 @@ const loginSchema = z.object({
 export const loginHandler: RequestHandler = async (req, res) => {
   const input = parseWithZod(loginSchema, req.body, "Invalid login details")
 
-  const { user, tokens } = await doLogin(input)
+  // A returning multi-school user sends their last-used tenant so login lands
+  // on the same school. It is validated against an ACTIVE membership inside
+  // `doLogin`; an unknown/foreign value falls back to the deterministic
+  // default rather than leaking or failing (a bad explicit selection on an
+  // authenticated request is still rejected with 403).
+  const headerValue = req.headers["x-school-id"]
+  const requestedSchoolId = typeof headerValue === "string" ? headerValue.trim() : undefined
+
+  const { user, tokens } = await doLogin(input, { schoolId: requestedSchoolId || undefined })
   setAuthCookies(res, tokens.accessToken, tokens.refreshToken)
   res.json(ok({ user }))
 }

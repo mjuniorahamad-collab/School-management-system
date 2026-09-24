@@ -6,16 +6,26 @@ import { canUser } from "@/auth/can"
 import { AuthContext, ME_QUERY_KEY } from "@/auth/context"
 import type { AuthContextValue } from "@/auth/context"
 import type { LoginInput } from "@/auth/types"
+import { clearActiveSchoolId, getActiveSchoolId, setActiveSchoolId } from "@/auth/activeSchool"
 import { fetchMe, login as loginRequest, logout as logoutRequest } from "@/services/authService"
+
+// Auth-namespaced query keys survive a tenant switch so identity can be
+// reloaded; everything else is tenant scoped and must be cleared.
+function isAuthQueryKey(key: readonly unknown[]): boolean {
+  return key[0] === "auth"
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
 
   // When a request fails a 401 and the refresh token is also rejected, the
-  // session is over. Clear the cached identity so ProtectedRoute redirects.
+  // session is over. Drop the active school plus every cached tenant payload
+  // so the next sign-in can never observe a previous tenant's data.
   useEffect(
     () =>
       onSignedOut(() => {
+        clearActiveSchoolId()
+        queryClient.clear()
         queryClient.setQueryData(ME_QUERY_KEY, { user: null })
       }),
     [queryClient],
@@ -42,12 +52,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const user = meQuery.data?.user ?? null
 
+  // Reconcile the persisted selection with the server-resolved tenant. On a
+  // first login (or when the stored school was revoked) the server picked the
+  // default; adopt it so the header matches reality on every later request.
+  useEffect(() => {
+    if (!user) return
+    const stored = getActiveSchoolId()
+    const storedIsValid = stored !== null && user.memberships.some((m) => m.id === stored)
+    if (!storedIsValid) setActiveSchoolId(user.school.id)
+  }, [user])
+
   const can = useCallback((permission: string) => canUser(user, permission), [user])
 
+  // `signIn` sets the header via the module-level active school *before* the
+  // request, so login itself lands on the last-used tenant.
   const signIn = useCallback(
     async (input: LoginInput) => {
       const { user: signedInUser } = await loginRequest(input)
       queryClient.setQueryData(ME_QUERY_KEY, { user: signedInUser })
+      setActiveSchoolId(signedInUser.school.id)
       return signedInUser
     },
     [queryClient],
@@ -59,8 +82,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Best-effort revocation: local auth state must still clear if offline.
     }
+    clearActiveSchoolId()
+    queryClient.clear()
     queryClient.setQueryData(ME_QUERY_KEY, { user: null })
   }, [queryClient])
+
+  const switchSchool = useCallback(
+    async (schoolId: string) => {
+      if (schoolId === getActiveSchoolId()) return
+      setActiveSchoolId(schoolId)
+      // All non-auth caches are tenant scoped; drop them so the new school can
+      // never read the previous one's data. `can()` recomputes because /auth/me
+      // returns the new school's role and permissions.
+      queryClient.removeQueries({ predicate: (query) => !isAuthQueryKey(query.queryKey) })
+      await meQuery.refetch()
+    },
+    [queryClient, meQuery],
+  )
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -71,8 +109,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       can,
       signIn,
       signOut,
+      memberships: user?.memberships ?? [],
+      activeSchoolId: getActiveSchoolId(),
+      switchSchool,
     }),
-    [user, meQuery, can, signIn, signOut],
+    [user, meQuery, can, signIn, signOut, switchSchool],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
