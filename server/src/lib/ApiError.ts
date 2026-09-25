@@ -2,6 +2,7 @@ export const NOT_FOUND = "NOT_FOUND"
 export const BAD_REQUEST = "BAD_REQUEST"
 export const VALIDATION_ERROR = "VALIDATION_ERROR"
 export const INTERNAL_ERROR = "INTERNAL_ERROR"
+export const SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
 export const UNAUTHORIZED = "UNAUTHORIZED"
 export const FORBIDDEN = "FORBIDDEN"
 export const INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
@@ -37,6 +38,10 @@ export function badRequestError(message: string, details?: unknown): ApiError {
 
 export function validationError(message = "Request validation failed", details?: unknown): ApiError {
   return new ApiError(400, VALIDATION_ERROR, message, details)
+}
+
+export function serviceUnavailableError(message = "Service is not ready"): ApiError {
+  return new ApiError(503, SERVICE_UNAVAILABLE, message)
 }
 
 export function unauthorizedError(message = "Authentication required"): ApiError {

@@ -176,7 +176,11 @@ to — a fresh `npm run dev:server`, `dev:vite`, `db:local:start`, or `db:local:
 for the individual pieces.
 
 Fresh clone: `npm install`, then follow the database + seed steps above. Health
-check: `GET http://localhost:4000/api/v1/health`.
+checks:
+
+- `GET http://localhost:4000/api/v1/live` — process liveness; does not query PostgreSQL.
+- `GET http://localhost:4000/api/v1/ready` — database readiness; returns 503 when unavailable.
+- `GET http://localhost:4000/api/v1/health` — legacy hybrid response retained for compatibility.
 
 ### Tests against a real database
 

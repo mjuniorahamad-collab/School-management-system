@@ -237,8 +237,10 @@ Canonical validation before claiming anything works:
 2. `npm run typecheck` → passes (frontend `tsc -b` + server typecheck).
 3. `npm run build` and `npm run build:server` → pass.
 4. `npm test` → all vitest tests pass.
-5. Server boots (`npm run dev:server`) and `GET /api/v1/health` → 200; an unknown
-   `/api/v1/...` route → 404 envelope.
+5. Server boots (`npm run dev:server`) and `GET /api/v1/live` → 200;
+   `GET /api/v1/ready` → 200 with a reachable database or 503 without one;
+   the legacy `GET /api/v1/health` remains 200; an unknown `/api/v1/...` route
+   → 404 envelope.
 6. Auth smoke: login → 200 + httpOnly session cookies, `GET /auth/me` → user with
    roles/permissions, logout → revoked, unauthenticated `me` → 401.
 7. Frontend dev/preview serves `/`, `/dashboard`, `/students`, `/settings`; `/login`

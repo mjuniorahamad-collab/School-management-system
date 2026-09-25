@@ -43,6 +43,7 @@ services:
       NODE_ENV: production
       PORT: ${PORT:-4000}
       DATABASE_URL: postgresql://${POSTGRES_USER:-school}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:-school_management}
+      HEALTH_READINESS_TIMEOUT_MS: ${HEALTH_READINESS_TIMEOUT_MS:-2000}
       TRUST_PROXY: ${TRUST_PROXY:-true}
       SESSION_ACCESS_TTL_MINUTES: ${SESSION_ACCESS_TTL_MINUTES:-15}
       SESSION_REFRESH_TTL_DAYS: ${SESSION_REFRESH_TTL_DAYS:-7}
@@ -52,7 +53,7 @@ services:
       - "${API_PORT:-4000}:4000"
     networks: [sms]
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/v1/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5

@@ -140,13 +140,20 @@ The API container serves both the API (`/api/v1`) and the built frontend
 (`/`), so a single published port fronts the whole app. Health checks:
 
 ```sh
-curl -fsS http://localhost/api/v1/health   # liveness + DB reachability in `data.database`
+curl -fsS http://localhost/api/v1/live   # process liveness; does not query PostgreSQL
+curl -i    http://localhost/api/v1/ready  # 200 when ready, 503 when the DB is unavailable
 ```
 
-Because the container is built from the checked-in `Dockerfile`, the only
-unauthenticated API route is `/api/v1/health` — every other API route is behind
-auth/RBAC. Keep `TRUST_PROXY=true` when the container sits behind any reverse
-proxy; the terminal checks in this runbook assume it too.
+`/api/v1/ready` is the intended Render HTTP health-check endpoint. It uses a
+bounded, single-flight `SELECT 1` probe, so repeated concurrent health checks do
+not create overlapping database probes. `/api/v1/health` remains available for
+backward compatibility and retains its legacy hybrid response.
+
+Health probes are unauthenticated and do not require a school/tenant header.
+Authentication and RBAC still protect application data routes; `/auth/login`
+and `/auth/refresh` are intentionally public. Keep `TRUST_PROXY=true` when the
+container sits behind any reverse proxy; the terminal checks in this runbook
+assume it too.
 
 **Migrations run as an explicit deploy step**, never on boot:
 
@@ -221,18 +228,21 @@ grep -F '"component":"api"' /var/log/api.log | awk -F'"durationMs":' '{ if ($2+0
 
 After a deploy, restore, config change, or container rebuild:
 
-1. `curl -fsS <host>/api/v1/health` — `200`, `data.database` is `"ok"` with a
-   DB reachable, or `"unreachable"` (server still answers liveness) when the DB
-   is down.
-2. Unknown `/api/v1/*` route — `404` with the error envelope
+1. `curl -fsS <host>/api/v1/live` — `200` while the process can serve requests.
+2. `curl -i <host>/api/v1/ready` — `200` when PostgreSQL is reachable, or `503`
+   with `{ "success": false, "error": { "code": "SERVICE_UNAVAILABLE", ... } }`
+   when the bounded database probe fails.
+3. `curl -fsS <host>/api/v1/health` — `200` for the retained legacy response;
+   `data.database` is `"ok"` or `"unreachable"` as before.
+4. Unknown `/api/v1/*` route — `404` with the error envelope
    `{ "success": false, "error": { "code": "NOT_FOUND", ... } }`.
-3. Auth smoke — login returns `200` + `HttpOnly` session cookies (with
+5. Auth smoke — login returns `200` + `HttpOnly` session cookies (with
    `Secure` added automatically in production), `GET /api/v1/auth/me` returns
    the user with roles/permissions, `POST /api/v1/auth/logout` revokes the
    session, and `me` after logout is `401`.
-4. Frontend `GET /` serves the SPA HTML (container deploy), and a deep client
+6. Frontend `GET /` serves the SPA HTML (container deploy), and a deep client
    route (e.g. `/dashboard`) falls back to `index.html`.
-5. `X-Request-Id` is present on every response.
+7. `X-Request-Id` is present on every response.
 
 ## Security notes
 

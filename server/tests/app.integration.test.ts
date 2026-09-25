@@ -4,9 +4,15 @@ import { createApp } from "../src/app.js"
 
 const app = createApp()
 
-// These tests exercise the HTTP layer and auth guards without any database:
-// every path below fails before Prisma is reached.
-describe("HTTP foundation and auth guards (database-free)", () => {
+describe("HTTP foundation and auth guards", () => {
+  it("GET /api/v1/live returns the success envelope without database access", async () => {
+    const res = await request(app).get("/api/v1/live")
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.data.status).toBe("ok")
+    expect(res.body.data).not.toHaveProperty("database")
+  })
+
   it("GET /api/v1/health returns the success envelope", async () => {
     const res = await request(app).get("/api/v1/health")
     expect(res.status).toBe(200)

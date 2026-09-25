@@ -14,6 +14,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   CORS_ORIGIN: z.string().min(1).optional(),
   DATABASE_URL: z.string().min(1).optional(),
+  HEALTH_READINESS_TIMEOUT_MS: z.coerce.number().int().min(100).max(10_000).default(2_000),
   SESSION_ACCESS_TTL_MINUTES: z.coerce.number().int().min(1).max(1440).default(15),
   SESSION_REFRESH_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(7),
   // How long a freshly provisioned portal activation link stays valid before it
@@ -70,6 +71,9 @@ export const env = {
         .filter(Boolean)
     : DEFAULT_CORS_ORIGINS,
   databaseUrl: parsed.data.DATABASE_URL,
+  health: {
+    readinessTimeoutMs: parsed.data.HEALTH_READINESS_TIMEOUT_MS,
+  },
   session: {
     accessTtlMs: parsed.data.SESSION_ACCESS_TTL_MINUTES * 60_000,
     refreshTtlMs: parsed.data.SESSION_REFRESH_TTL_DAYS * 86_400_000,
