@@ -1,5 +1,6 @@
 import type { FeeAdjustmentKind, FeeAdjustmentStatus } from "@prisma/client"
 import { moneySchema, roundMoney } from "../../lib/money.js"
+import type { ConcessionSelfApprovalPolicy } from "../../lib/school-settings.js"
 import { sumInstallmentInputAmounts } from "../fee-invoices/fee-invoice.rules.js"
 
 /**
@@ -286,20 +287,79 @@ export function assertValidAdjustmentTransition(from: FeeAdjustmentStatus, to: F
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Rule 9 — self-approval is never allowed
+// Rule 9 — self-approval is governed by the school's policy
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * Rejects approval by the adjustment's requester. Applies to EVERY user
- * including SUPER_ADMIN. (The audited SUPER_ADMIN override is a separate,
- * explicit action modelled in Phase 3 — it is NOT implemented here, and even
- * then it may only act on another user's request.)
+ * Whether the approver is the requester. Identity-only: it knows nothing about
+ * policy, roles, or the school, so every policy decision composes on top of it.
+ * A null requester (a deleted user, `onDelete: SetNull`) is never a
+ * self-approval — there is no same-person fact to record.
  */
 export function isSelfApproval(requestedById: string | null, approverId: string | null): boolean {
   if (requestedById == null || approverId == null) return false
   return requestedById === approverId
 }
 
+/**
+ * Whether the school's policy permits a requester to approve their own request.
+ * Independent approval is always possible, so `SELF_APPROVAL_ALLOWED` already
+ * means "both" and needs no third value.
+ */
+export function isSelfApprovalAllowed(policy: ConcessionSelfApprovalPolicy): boolean {
+  return policy === "SELF_APPROVAL_ALLOWED"
+}
+
+/**
+ * Whether a given actor may approve a given adjustment under the school's
+ * policy. Pure and role-blind: the policy is the ONLY relaxed rule, and it acts
+ * solely on actors who already passed `concessions:approve` at the route. An
+ * unrecognized policy can never appear here (it is parsed fail-safe upstream),
+ * and the comparison below is deliberately strict, so a hypothetical bad value
+ * would fall through to the restrictive branch.
+ */
+export function canApproveAdjustment(input: {
+  policy: ConcessionSelfApprovalPolicy
+  requestedById: string | null
+  approverId: string | null
+}): boolean {
+  if (!isSelfApproval(input.requestedById, input.approverId)) return true
+  return isSelfApprovalAllowed(input.policy)
+}
+
+export function assertCanApproveAdjustment(input: {
+  policy: ConcessionSelfApprovalPolicy
+  requestedById: string | null
+  approverId: string | null
+}): void {
+  if (!canApproveAdjustment(input)) {
+    throw new Error(
+      "An adjustment requester cannot approve their own concession because this school requires independent approval",
+    )
+  }
+}
+
+/**
+ * Whether this approval is a self-approval the school permits, and therefore
+ * needs a decision rationale of its own. Independent approvals keep the reason
+ * optional exactly as before; only the deliberate waiver of segregation of
+ * duties requires one.
+ */
+export function requiresSelfApprovalReason(input: {
+  policy: ConcessionSelfApprovalPolicy
+  requestedById: string | null
+  approverId: string | null
+}): boolean {
+  return isSelfApproval(input.requestedById, input.approverId) && isSelfApprovalAllowed(input.policy)
+}
+
+/**
+ * The STRICT, policy-free rule. Retained for the override path, which may never
+ * act on the actor's own request regardless of the school's self-approval
+ * policy: `concessions:override` is a distinct SUPER_ADMIN capability for
+ * approving ANOTHER user's request with a mandatory reason, and is never the
+ * mechanism through which a school enables self-approval.
+ */
 export function assertNotSelfApproval(requestedById: string | null, approverId: string | null): void {
   if (isSelfApproval(requestedById, approverId)) {
     throw new Error("An adjustment requester cannot approve their own concession")

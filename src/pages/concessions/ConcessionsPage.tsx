@@ -3,6 +3,7 @@ import { Plus, Search } from "lucide-react"
 import { useAuth } from "@/auth/useAuth"
 import { ConcessionOverrideDialog } from "@/components/concessions/ConcessionOverrideDialog"
 import { ConcessionRequestDialog } from "@/components/concessions/ConcessionRequestDialog"
+import { ConcessionSelfApprovalDialog } from "@/components/concessions/ConcessionSelfApprovalDialog"
 import { ConcessionStatusBadge, ConcessionValueLabel } from "@/components/concessions/ConcessionStatusBadge"
 import { PageContainer } from "@/components/layout/PageContainer"
 import { PageHeader } from "@/components/layout/PageHeader"
@@ -25,6 +26,12 @@ import {
   useReverseConcession,
 } from "@/hooks/useConcessions"
 import { formatFullDate, formatINR } from "@/lib/format"
+import {
+  availableConcessionActions,
+  isSelfApprovalAllowed,
+  requiresApprovalReason,
+  type ConcessionActions,
+} from "@/lib/concessionApprovalRules"
 import { ADJUSTMENT_KINDS, ADJUSTMENT_STATUSES } from "@/types/concessions"
 import type {
   AdjustmentKind,
@@ -33,6 +40,7 @@ import type {
   AdjustmentQuery,
   AdjustmentStatus,
 } from "@/types/concessions"
+import type { ConcessionSelfApprovalPolicy } from "@/types/settings"
 
 const SEARCH_DEBOUNCE_MS = 350
 const PAGE_SIZE = 20
@@ -78,6 +86,7 @@ export function ConcessionsPage() {
   const [page, setPage] = useState(1)
   const [requestOpen, setRequestOpen] = useState(false)
   const [overrideItem, setOverrideItem] = useState<AdjustmentListItem | null>(null)
+  const [selfApprovalItem, setSelfApprovalItem] = useState<AdjustmentListItem | null>(null)
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null)
 
   const searchRef = useRef("")
@@ -113,6 +122,13 @@ export function ConcessionsPage() {
   }
   const { data, isPending, isError, refetch } = useConcessions(query)
 
+  // The school's self-approval policy arrives with the list. While it is unknown
+  // (first load, or a cached payload from before the field existed) treat it as
+  // the restrictive default so the UI can never be looser than the server.
+  const approvalPolicy = data?.approvalPolicy
+  const selfApprovalEnabled = isSelfApprovalAllowed(approvalPolicy)
+  const currentUserId = user?.id ?? null
+
   const approveMutation = useApproveConcession()
   const rejectMutation = useRejectConcession()
   const cancelMutation = useCancelConcession()
@@ -125,12 +141,24 @@ export function ConcessionsPage() {
 
   const updateFilter = (nextPage = 1) => setPage(nextPage)
 
+  // A self-approval gets the dedicated dialog because the reason is mandatory
+  // there; an independent approver gets the normal confirmation dialog, which
+  // collects no reason at all. The backend keeps the approval reason optional
+  // for every non-self approval, so sending an empty payload below is correct.
+  const startApprove = (item: AdjustmentListItem) => {
+    if (requiresApprovalReason(item, currentUserId, approvalPolicy)) {
+      setSelfApprovalItem(item)
+      return
+    }
+    setConfirmAction({ type: "approve", item })
+  }
+
   const runConfirm = () => {
     if (!confirmAction) return
     const close = () => setConfirmAction(null)
     switch (confirmAction.type) {
       case "approve":
-        approveMutation.mutate(confirmAction.item.id, { onSuccess: close })
+        approveMutation.mutate({ id: confirmAction.item.id, payload: {} }, { onSuccess: close })
         break
       case "reject":
         rejectMutation.mutate({ id: confirmAction.item.id, payload: {} }, { onSuccess: close })
@@ -222,6 +250,13 @@ export function ConcessionsPage() {
               </Select>
             </div>
 
+            {selfApprovalEnabled && (
+              <p className="rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                This school allows requesters to approve their own concessions. A reason is required
+                and recorded in the audit log.
+              </p>
+            )}
+
             <ConcessionsList
               data={data}
               isPending={isPending}
@@ -232,8 +267,9 @@ export function ConcessionsPage() {
               canOverride={canOverride}
               canReverse={canReverse}
               canCancel={canRequest}
-              currentUserId={user?.id ?? null}
-              onApprove={(item) => setConfirmAction({ type: "approve", item })}
+              currentUserId={currentUserId}
+              approvalPolicy={approvalPolicy}
+              onApprove={startApprove}
               onReject={(item) => setConfirmAction({ type: "reject", item })}
               onCancel={(item) => setConfirmAction({ type: "cancel", item })}
               onReverse={(item) => setConfirmAction({ type: "reverse", item })}
@@ -274,6 +310,13 @@ export function ConcessionsPage() {
           }}
           item={overrideItem}
         />
+        <ConcessionSelfApprovalDialog
+          open={Boolean(selfApprovalItem)}
+          onOpenChange={(open) => {
+            if (!open) setSelfApprovalItem(null)
+          }}
+          item={selfApprovalItem}
+        />
         <ConfirmDialog
           open={Boolean(confirmAction)}
           onOpenChange={(open) => {
@@ -301,6 +344,7 @@ function ConcessionsList({
   canReverse,
   canCancel,
   currentUserId,
+  approvalPolicy,
   onApprove,
   onReject,
   onCancel,
@@ -317,6 +361,7 @@ function ConcessionsList({
   canReverse: boolean
   canCancel: boolean
   currentUserId: string | null
+  approvalPolicy: ConcessionSelfApprovalPolicy | undefined
   onApprove: (item: AdjustmentListItem) => void
   onReject: (item: AdjustmentListItem) => void
   onCancel: (item: AdjustmentListItem) => void
@@ -383,6 +428,7 @@ function ConcessionsList({
                   canReverse={canReverse}
                   canCancel={canCancel}
                   currentUserId={currentUserId}
+                  approvalPolicy={approvalPolicy}
                   onApprove={() => onApprove(item)}
                   onReject={() => onReject(item)}
                   onCancel={() => onCancel(item)}
@@ -406,6 +452,7 @@ function ConcessionsList({
             canReverse={canReverse}
             canCancel={canCancel}
             currentUserId={currentUserId}
+            approvalPolicy={approvalPolicy}
             onApprove={() => onApprove(item)}
             onReject={() => onReject(item)}
             onCancel={() => onCancel(item)}
@@ -416,29 +463,6 @@ function ConcessionsList({
       </ul>
     </>
   )
-}
-
-interface ConcessionActions {
-  approve: boolean
-  reject: boolean
-  cancel: boolean
-  override: boolean
-  reverse: boolean
-}
-
-function availableActions(
-  item: AdjustmentListItem,
-  flags: { canApprove: boolean; canReject: boolean; canCancel: boolean; canOverride: boolean; canReverse: boolean },
-  currentUserId: string | null,
-): ConcessionActions {
-  const isOwn = Boolean(item.requestedBy && item.requestedBy.id === currentUserId)
-  return {
-    approve: item.status === "REQUESTED" && flags.canApprove && !isOwn,
-    reject: item.status === "REQUESTED" && flags.canReject,
-    cancel: item.status === "REQUESTED" && flags.canCancel && isOwn,
-    override: item.status === "REQUESTED" && flags.canOverride && !isOwn,
-    reverse: item.status === "APPROVED" && flags.canReverse,
-  }
 }
 
 function ActionsCell({ actions, onRun }: { actions: ConcessionActions; onRun: { [K in keyof ConcessionActions]: () => void } }) {
@@ -481,16 +505,18 @@ function ConcessionRow({
   canReverse,
   canCancel,
   currentUserId,
+  approvalPolicy,
   onApprove,
   onReject,
   onCancel,
   onReverse,
   onOverride,
 }: RowProps) {
-  const actions = availableActions(
+  const actions = availableConcessionActions(
     item,
     { canApprove, canReject, canCancel, canOverride, canReverse },
     currentUserId,
+    approvalPolicy,
   )
   return (
     <tr className="transition-colors hover:bg-muted/40">
@@ -537,16 +563,18 @@ function MobileConcessionCard({
   canReverse,
   canCancel,
   currentUserId,
+  approvalPolicy,
   onApprove,
   onReject,
   onCancel,
   onReverse,
   onOverride,
 }: RowProps) {
-  const actions = availableActions(
+  const actions = availableConcessionActions(
     item,
     { canApprove, canReject, canCancel, canOverride, canReverse },
     currentUserId,
+    approvalPolicy,
   )
   return (
     <li className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
@@ -585,6 +613,7 @@ interface RowProps {
   canReverse: boolean
   canCancel: boolean
   currentUserId: string | null
+  approvalPolicy: ConcessionSelfApprovalPolicy | undefined
   onApprove: () => void
   onReject: () => void
   onCancel: () => void

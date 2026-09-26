@@ -6,6 +6,32 @@ export interface BrandingResponse {
   tagline: string | null
 }
 
+/**
+ * Tenant-scoped segregation-of-duties control for fee concessions. Mirrors
+ * `ConcessionSelfApprovalPolicy` in server/src/lib/school-settings.ts.
+ *
+ * Not a permission: it only relaxes the self-approval guard for actors who
+ * already hold `concessions:approve`. Independent approval is always possible,
+ * so `SELF_APPROVAL_ALLOWED` already means "both" and there is no third value.
+ */
+export const CONCESSION_SELF_APPROVAL_VALUES = [
+  "INDEPENDENT_APPROVAL_REQUIRED",
+  "SELF_APPROVAL_ALLOWED",
+] as const
+
+export type ConcessionSelfApprovalPolicy = (typeof CONCESSION_SELF_APPROVAL_VALUES)[number]
+
+/** `SchoolSetting.key` that stores the policy. Mirrors the server constant. */
+export const CONCESSION_SELF_APPROVAL_SETTING_KEY = "feeConcessionSelfApproval"
+
+/** Fail-safe default: matches the server's read-through default exactly. */
+export const DEFAULT_CONCESSION_SELF_APPROVAL: ConcessionSelfApprovalPolicy = "INDEPENDENT_APPROVAL_REQUIRED"
+
+export const CONCESSION_SELF_APPROVAL_LABELS: Record<ConcessionSelfApprovalPolicy, string> = {
+  INDEPENDENT_APPROVAL_REQUIRED: "Require independent approval (recommended)",
+  SELF_APPROVAL_ALLOWED: "Allow requesters to approve their own concessions",
+}
+
 export interface SchoolSettings {
   schoolName: string
   schoolShortName?: string
@@ -33,6 +59,7 @@ export interface SchoolSettings {
   feeCurrency?: string
   feeDefaultDueDay?: number
   feeEnableOnlinePayments?: boolean
+  feeConcessionSelfApproval?: ConcessionSelfApprovalPolicy
 }
 
 export interface SettingsResponse {

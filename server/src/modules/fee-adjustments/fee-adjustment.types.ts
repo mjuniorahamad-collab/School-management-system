@@ -1,4 +1,5 @@
 import type { FeeAdjustmentKind, FeeAdjustmentStatus } from "@prisma/client"
+import type { ConcessionSelfApprovalPolicy } from "../../lib/school-settings.js"
 import type { InstallmentApplicationLine } from "./fee-adjustment.rules.js"
 
 export interface AdjustmentStudentSummary {
@@ -81,4 +82,10 @@ export interface Pagination {
 export interface AdjustmentListResult {
   items: AdjustmentItem[]
   pagination: Pagination
+  /**
+   * The school's resolved concession self-approval policy, so the client can
+   * mirror the server's approve/reject action gating. Resolved from the
+   * authenticated tenant and fail-safe to `INDEPENDENT_APPROVAL_REQUIRED`.
+   */
+  approvalPolicy: ConcessionSelfApprovalPolicy
 }

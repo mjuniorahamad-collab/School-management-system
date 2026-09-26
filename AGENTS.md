@@ -85,6 +85,17 @@ Deferred until individually spec'd (do NOT build proactively):
   card/transcript PDF generation — deferred until real pilot feedback justifies
   them.
 
+Implemented policy decisions worth keeping (details in the module docs):
+
+- **Concession self-approval** (`feeConcessionSelfApproval`, `docs/fee-concessions.md`)
+  — a two-value tenant setting, defaulting to
+  `INDEPENDENT_APPROVAL_REQUIRED`. It is deliberately NOT a new permission: it
+  only relaxes the self-approval guard for actors who already hold
+  `concessions:approve`, and a self-approval requires a reason and is marked
+  `selfApproved` in the audit metadata. `concessions:override` stays SUPER_ADMIN
+  and is never self. Both a missing and a corrupt stored value read through to
+  the strict default. Never branch on school name to decide this.
+
 ## 3. Current technology stack
 
 - Frontend: React 19, Vite 8, TypeScript 5.9, Tailwind CSS 4, shadcn/ui

@@ -25,7 +25,9 @@ function queryString(query: AdjustmentQuery): string {
 
 // Data seam for Fee Concessions (adjustments to generated invoices). Money
 // changes are single-purpose mutations; every transition is guarded server-side
-// by status transitions and the RBAC `concessions:*` permissions.
+// by status transitions and the RBAC `concessions:*` permissions. Whether a
+// requester may approve their own request is additionally governed server-side by
+// the school's `feeConcessionSelfApproval` setting.
 export const concessionsService = {
   list(query: AdjustmentQuery = {}): Promise<AdjustmentListResult> {
     const qs = queryString(query)
@@ -37,8 +39,10 @@ export const concessionsService = {
   request(payload: RequestAdjustmentInput): Promise<AdjustmentDetail> {
     return api.post<AdjustmentDetail>("/fees/adjustments", payload)
   },
-  approve(id: string): Promise<AdjustmentDetail> {
-    return api.post<AdjustmentDetail>(`/fees/adjustments/${id}/approve`, {})
+  approve(id: string, payload: AdjustActionInput = {}): Promise<AdjustmentDetail> {
+    // The reason is optional here and only ever sent when the actor is approving
+    // their own request under a permissive policy; the server rejects a blank one.
+    return api.post<AdjustmentDetail>(`/fees/adjustments/${id}/approve`, payload)
   },
   override(id: string, payload: OverrideAdjustmentInput): Promise<AdjustmentDetail> {
     return api.post<AdjustmentDetail>(`/fees/adjustments/${id}/override`, payload)

@@ -1,4 +1,9 @@
 import { getPrisma } from "../../lib/database.js"
+import {
+  CONCESSION_SELF_APPROVAL_SETTING_KEY,
+  DEFAULT_CONCESSION_SELF_APPROVAL,
+  parseConcessionSelfApproval,
+} from "../../lib/school-settings.js"
 import type { AuthUser } from "../../types/auth.js"
 import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import type { SchoolSettings, UpdateSettingsInput } from "./setting.schema.js"
@@ -38,6 +43,9 @@ const SETTING_DEFAULTS: Record<keyof SchoolSettings, string> = {
   feeCurrency: "USD",
   feeDefaultDueDay: "10",
   feeEnableOnlinePayments: "true",
+  // Fails SAFE: a school that never saved this key requires independent
+  // approval, which is exactly the behavior that predates the setting.
+  feeConcessionSelfApproval: DEFAULT_CONCESSION_SELF_APPROVAL,
 }
 
 async function requirePrisma(): Promise<PrismaClient> {
@@ -46,8 +54,19 @@ async function requirePrisma(): Promise<PrismaClient> {
   return prisma
 }
 
+/**
+ * Keys whose stored string belongs to a closed value set and therefore must be
+ * validated on read, so a hand-edited or corrupt row can never hand an
+ * out-of-contract value to a client or to a policy decision.
+ */
+const SETTING_PARSERS: Partial<Record<keyof SchoolSettings, (raw: string) => unknown>> = {
+  feeConcessionSelfApproval: parseConcessionSelfApproval,
+}
+
 /** Coerces a stored string back to the typed value for the seeded defaults. */
 function coerceSetting(key: keyof SchoolSettings, raw: string): unknown {
+  const parser = SETTING_PARSERS[key]
+  if (parser) return parser(raw)
   const definition = schoolSettingsSchemaShape[key]
   if (definition === "number") return Number(raw)
   if (definition === "boolean") return raw.toLowerCase() === "true"
@@ -81,6 +100,7 @@ const schoolSettingsSchemaShape: Record<keyof SchoolSettings, "string" | "number
   feeCurrency: "string",
   feeDefaultDueDay: "number",
   feeEnableOnlinePayments: "boolean",
+  feeConcessionSelfApproval: "string",
 }
 
 /** Reads all tenant-scoped settings for a school, merging defaults over DB rows. */
@@ -133,8 +153,23 @@ export async function updateSettings(
 
   const entries = Object.entries(input) as [keyof SchoolSettings, unknown][]
   await prisma.$transaction(async (tx) => {
+    // Read the concession self-approval policy's current value inside the same
+    // transaction as the write, so the audit row records a real before/after.
+    let policyChange: { previousValue: string; newValue: string } | null = null
+    if (entries.some(([key]) => key === "feeConcessionSelfApproval")) {
+      const existing = await tx.schoolSetting.findUnique({
+        where: { schoolId_key: { schoolId, key: CONCESSION_SELF_APPROVAL_SETTING_KEY } },
+        select: { value: true },
+      })
+      policyChange = { previousValue: existing?.value ?? DEFAULT_CONCESSION_SELF_APPROVAL, newValue: "" }
+    }
+
     for (const [key, value] of entries) {
       const raw = settingToStored(value)
+      // Scoped to the policy key: a payload may carry many settings at once, and
+      // a later unrelated entry must not overwrite the recorded new value with
+      // its own stored representation.
+      if (policyChange && key === CONCESSION_SELF_APPROVAL_SETTING_KEY) policyChange.newValue = raw
       await tx.schoolSetting.upsert({
         where: { schoolId_key: { schoolId, key } },
         update: { value: raw },
@@ -152,7 +187,21 @@ export async function updateSettings(
       entityType: "SCHOOL_SETTING",
       entityId: null,
       summary: `Updated ${entries.length} school setting(s)`,
-      metadata: { keys: entries.map(([key]) => key) },
+      metadata: {
+        keys: entries.map(([key]) => key),
+        // The self-approval policy waives segregation of duties, so its
+        // before/after value is recorded. Every other key keeps recording names
+        // only, so no new setting values enter the audit trail.
+        ...(policyChange
+          ? {
+              policyChange: {
+                key: CONCESSION_SELF_APPROVAL_SETTING_KEY,
+                previousValue: policyChange.previousValue,
+                newValue: policyChange.newValue,
+              },
+            }
+          : {}),
+      },
     })
   })
 

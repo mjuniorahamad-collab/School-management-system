@@ -9,6 +9,11 @@ import { FeeHeadsPanel } from "@/components/settings/masterData/FeeHeadsPanel"
 import { GradingBandsPanel } from "@/components/settings/masterData/GradingBandsPanel"
 import { PeriodSlotsPanel } from "@/components/settings/masterData/PeriodSlotsPanel"
 import { useSettings, useUpdateSettings } from "@/hooks/useSettings"
+import {
+  CONCESSION_SELF_APPROVAL_LABELS,
+  CONCESSION_SELF_APPROVAL_SETTING_KEY,
+  CONCESSION_SELF_APPROVAL_VALUES,
+} from "@/types/settings"
 
 const schoolFields: SectionField[] = [
   { key: "schoolName", label: "School name", type: "text", placeholder: "Bright Future International School" },
@@ -68,6 +73,22 @@ const feeFields: SectionField[] = [
   { key: "feeCurrency", label: "Currency code", type: "text", placeholder: "USD" },
   { key: "feeDefaultDueDay", label: "Default due day", type: "number", min: 1, max: 31 },
   { key: "feeEnableOnlinePayments", label: "Enable online payments", type: "switch" },
+  {
+    key: CONCESSION_SELF_APPROVAL_SETTING_KEY,
+    label: "Concession self-approval",
+    type: "select",
+    help: "Controls whether the person who requested a fee concession may also approve it. Turning this on requires a reason on self-approvals, which is recorded in the audit log.",
+    options: [
+      {
+        value: CONCESSION_SELF_APPROVAL_VALUES[0],
+        label: CONCESSION_SELF_APPROVAL_LABELS[CONCESSION_SELF_APPROVAL_VALUES[0]],
+      },
+      {
+        value: CONCESSION_SELF_APPROVAL_VALUES[1],
+        label: CONCESSION_SELF_APPROVAL_LABELS[CONCESSION_SELF_APPROVAL_VALUES[1]],
+      },
+    ],
+  },
 ]
 
 export function SettingsPage() {

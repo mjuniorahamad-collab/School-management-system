@@ -22,6 +22,7 @@ export interface SectionField {
   min?: number
   max?: number
   span?: string
+  help?: string
 }
 
 interface SectionFormProps {
@@ -65,7 +66,10 @@ export function SectionForm({ title, description, fields, values, isSaving, onSa
           if (field.type === "switch") {
             return (
               <div key={field.key} className={cn("flex items-center justify-between gap-3 rounded-lg border border-input p-3", field.span)}>
-                <Label htmlFor={fieldId} className="text-sm">{field.label}</Label>
+                <div className="flex flex-col gap-0.5">
+                  <Label htmlFor={fieldId} className="text-sm">{field.label}</Label>
+                  {field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}
+                </div>
                 <Switch
                   id={fieldId}
                   checked={Boolean(draft[field.key])}
@@ -93,6 +97,7 @@ export function SectionForm({ title, description, fields, values, isSaving, onSa
                     ))}
                   </SelectContent>
                 </Select>
+                {field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}
               </div>
             )
           }

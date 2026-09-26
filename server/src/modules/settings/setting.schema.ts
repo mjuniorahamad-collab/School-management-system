@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { CONCESSION_SELF_APPROVAL_VALUES } from "../../lib/school-settings.js"
 
 const requiredText = (label: string, max: number) =>
   z.string().trim().min(1, `${label} is required`).max(max)
@@ -46,6 +47,12 @@ export const schoolSettingsSchema = z.object({
   feeCurrency: optionalText(10),
   feeDefaultDueDay: z.number().int().min(1).max(31).optional(),
   feeEnableOnlinePayments: flag,
+  // Segregation-of-duties control for fee concessions. Not a permission: it
+  // only relaxes the self-approval guard for actors who already hold
+  // `concessions:approve`. The value set and default are owned by
+  // lib/school-settings.ts so the settings module and the fee-adjustment
+  // service can never disagree about them.
+  feeConcessionSelfApproval: z.enum(CONCESSION_SELF_APPROVAL_VALUES).optional(),
 })
 
 export const updateSettingsSchema = schoolSettingsSchema.partial().strict()

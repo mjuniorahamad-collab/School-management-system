@@ -4,6 +4,10 @@ import request from "supertest"
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { createApp } from "../src/app.js"
 import { hashPassword } from "../src/auth/password.js"
+import {
+  CONCESSION_SELF_APPROVAL_SETTING_KEY,
+  type ConcessionSelfApprovalPolicy,
+} from "../src/lib/school-settings.js"
 import { SUPER_ADMIN_ROLE } from "../src/permissions/permissions.js"
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL
@@ -375,6 +379,10 @@ describe.skipIf(!TEST_DATABASE_URL)("Fees concessions (FeeAdjustment) API (integ
       where: { id: fixtures.schoolId },
       data: { feePaymentCounter: 0, feeReceiptCounter: 0 },
     })
+    // Pinned explicitly (rather than relying on the read-through default) so the
+    // segregation-of-duties tests stay deterministic and cannot silently start
+    // passing for the wrong reason if the default ever changes.
+    await setSelfApprovalPolicy("INDEPENDENT_APPROVAL_REQUIRED")
   })
 
   afterAll(async () => {
@@ -392,6 +400,52 @@ describe.skipIf(!TEST_DATABASE_URL)("Fees concessions (FeeAdjustment) API (integ
       reason: "Sibling discount",
       ...overrides,
     }
+  }
+
+  /**
+   * Blocks until some other session is waiting on a row lock, polling `pg_locks`
+   * (world-readable) rather than sleeping. `applyApproval` takes the invoice lock
+   * BEFORE it re-reads the policy, so parking the caller exactly there lets a test
+   * change the school's policy inside the window between the pre-transaction read
+   * and the authoritative in-transaction read.
+   *
+   * A blocked `SELECT ... FOR UPDATE` waits on the blocking transaction's id, so
+   * the waiter appears as a `transactionid` lock with `granted = false` (it holds
+   * a granted relation lock while scanning). A timeout here means the caller never
+   * reached the lock — it answered early — so the test must fail loudly rather
+   * than silently assert nothing.
+   */
+  async function waitForRowLockWaiter(invoiceId: string, timeoutMs = 4_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      const rows = await prisma.$queryRaw<Array<{ waiting: bigint }>>`
+        SELECT count(*)::bigint AS waiting
+        FROM pg_locks
+        WHERE locktype = 'transactionid'
+          AND NOT granted
+      `
+      if (Number(rows[0]?.waiting ?? 0) > 0) return
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    throw new Error(`Timed out waiting for a row-lock waiter on invoice ${invoiceId}`)
+  }
+
+  /** Writes (or clears, with `null`) the school's concession self-approval policy. */
+  async function setSelfApprovalPolicy(
+    value: ConcessionSelfApprovalPolicy | null,
+    schoolId: string = fixtures.schoolId,
+  ): Promise<void> {
+    if (value === null) {
+      await prisma.schoolSetting.deleteMany({
+        where: { schoolId, key: CONCESSION_SELF_APPROVAL_SETTING_KEY },
+      })
+      return
+    }
+    await prisma.schoolSetting.upsert({
+      where: { schoolId_key: { schoolId, key: CONCESSION_SELF_APPROVAL_SETTING_KEY } },
+      update: { value },
+      create: { schoolId, key: CONCESSION_SELF_APPROVAL_SETTING_KEY, value },
+    })
   }
 
   describe("index & rbac", () => {
@@ -693,6 +747,228 @@ describe.skipIf(!TEST_DATABASE_URL)("Fees concessions (FeeAdjustment) API (integ
         .post(`/api/v1/fees/adjustments/${created.body.data.id}/override`)
         .send({ overrideReason: "Not authorized" })
       expect(res.status).toBe(403)
+    })
+  })
+
+  // The school's policy is a business rule, not a permission: the same
+  // concessions:approve holder is allowed or refused based on a tenant setting.
+  describe("self-approval policy (school setting)", () => {
+    it("requires independent approval when the school never saved a policy", async () => {
+      await setSelfApprovalPolicy(null)
+      const created = await bursarAgent.post("/api/v1/fees/adjustments").send(concessionPayload(fixtures.invoiceAId))
+      const res = await bursarAgent
+        .post(`/api/v1/fees/adjustments/${created.body.data.id}/approve`)
+        .send({ reason: "Trying it on" })
+      expect(res.status).toBe(403)
+      expect(res.body.error.code).toBe("FORBIDDEN")
+    })
+
+    it("ships the resolved policy on the list response for every viewer", async () => {
+      // A role that can request concessions is not guaranteed `settings:view`,
+      // so the policy must travel with the list rather than a separate read.
+      await setSelfApprovalPolicy("SELF_APPROVAL_ALLOWED")
+      const res = await viewerAgent.get("/api/v1/fees/adjustments")
+      expect(res.status).toBe(200)
+      expect(res.body.data.approvalPolicy).toBe("SELF_APPROVAL_ALLOWED")
+
+      await setSelfApprovalPolicy(null)
+      const fallback = await viewerAgent.get("/api/v1/fees/adjustments")
+      expect(fallback.body.data.approvalPolicy).toBe("INDEPENDENT_APPROVAL_REQUIRED")
+    })
+
+    it("lets a requester approve their own concession when the school allows it", async () => {
+      await setSelfApprovalPolicy("SELF_APPROVAL_ALLOWED")
+      const created = await bursarAgent.post("/api/v1/fees/adjustments").send(concessionPayload(fixtures.invoiceAId))
+      const id = created.body.data.id
+
+      const res = await bursarAgent
+        .post(`/api/v1/fees/adjustments/${id}/approve`)
+        .send({ reason: "Sibling discount confirmed by the bursar" })
+
+      expect(res.status).toBe(200)
+      const adjustment = res.body.data
+      expect(adjustment.status).toBe("APPROVED")
+      expect(adjustment.approvedBy.name).toBe("Adjust Bursar")
+      expect(adjustment.requestedBy.name).toBe("Adjust Bursar")
+      // A self-approval is an ordinary approval, NOT an override.
+      expect(adjustment.overridden).toBe(false)
+      expect(adjustment.overriddenBy).toBeNull()
+      // The money path is identical to an independent approval.
+      expect(adjustment.invoice.totalAmount).toBe(35000)
+      expect(adjustment.invoice.balance).toBe(35000)
+      expect(adjustment.installmentApplication).toEqual([
+        expect.objectContaining({ installmentId: expect.any(String), amountReduced: 5000, amountAfter: 15000 }),
+      ])
+    })
+
+    it("allows a SUPER_ADMIN to self-approve once the school allows it", async () => {
+      await setSelfApprovalPolicy("SELF_APPROVAL_ALLOWED")
+      const created = await adminAgent.post("/api/v1/fees/adjustments").send(concessionPayload(fixtures.invoiceAId))
+      const res = await adminAgent
+        .post(`/api/v1/fees/adjustments/${created.body.data.id}/approve`)
+        .send({ reason: "Head of school approved directly" })
+      expect(res.status).toBe(200)
+      expect(res.body.data.status).toBe("APPROVED")
+    })
+
+    it("requires a reason for a permitted self-approval", async () => {
+      await setSelfApprovalPolicy("SELF_APPROVAL_ALLOWED")
+      const created = await bursarAgent.post("/api/v1/fees/adjustments").send(concessionPayload(fixtures.invoiceAId))
+      const id = created.body.data.id
+
+      const missing = await bursarAgent.post(`/api/v1/fees/adjustments/${id}/approve`).send({})
+      expect(missing.status).toBe(400)
+      expect(missing.body.error.code).toBe("BAD_REQUEST")
+      expect(missing.body.error.message).toMatch(/reason is required/i)
+
+      // A blank reason never reaches the policy check: validation rejects it.
+      const blank = await bursarAgent.post(`/api/v1/fees/adjustments/${id}/approve`).send({ reason: "   " })
+      expect(blank.status).toBe(400)
+      expect(blank.body.error.code).toBe("VALIDATION_ERROR")
+
+      const stillPending = await prisma.feeAdjustment.findUnique({ where: { id } })
+      expect(stillPending?.status).toBe("REQUESTED")
+    })
+
+    it("keeps the approval reason optional for an independent approval", async () => {
+      await setSelfApprovalPolicy("SELF_APPROVAL_ALLOWED")
+      const created = await accountantAgent.post("/api/v1/fees/adjustments").send(concessionPayload(fixtures.invoiceAId))
+      const res = await principalAgent.post(`/api/v1/fees/adjustments/${created.body.data.id}/approve`).send({})
+      expect(res.status).toBe(200)
+      expect(res.body.data.status).toBe("APPROVED")
+    })
+
+    it("restores the refusal when the school switches back to independent approval", async () => {
+      await setSelfApprovalPolicy("SELF_APPROVAL_ALLOWED")
+      const allowed = await bursarAgent.post("/api/v1/fees/adjustments").send(concessionPayload(fixtures.invoiceAId))
+      const ok = await bursarAgent
+        .post(`/api/v1/fees/adjustments/${allowed.body.data.id}/approve`)
+        .send({ reason: "Approved while the school allowed it" })
+      expect(ok.status).toBe(200)
+
+      await setSelfApprovalPolicy("INDEPENDENT_APPROVAL_REQUIRED")
+      const refused = await bursarAgent.post("/api/v1/fees/adjustments").send(concessionPayload(fixtures.invoiceBId))
+      const denied = await bursarAgent
+        .post(`/api/v1/fees/adjustments/${refused.body.data.id}/approve`)
+        .send({ reason: "Approved while the school allowed it" })
+      expect(denied.status).toBe(403)
+    })
+
+    it("never lets one school's policy leak into another school", async () => {
+      await setSelfApprovalPolicy("SELF_APPROVAL_ALLOWED", fixtures.schoolId)
+      // The other school never set a policy, so it must keep independent approval
+      // even though the acting user's own school permits self-approval.
+      const created = await otherAgent
+        .post("/api/v1/fees/adjustments")
+        .send(concessionPayload(fixtures.otherInvoiceId))
+      expect(created.status).toBe(201)
+      const res = await otherAgent
+        .post(`/api/v1/fees/adjustments/${created.body.data.id}/approve`)
+        .send({ reason: "Cross-tenant policy must not apply" })
+      expect(res.status).toBe(403)
+      expect(res.body.error.code).toBe("FORBIDDEN")
+    })
+
+    it("resolves the policy from the authenticated tenant, not the active-school header", async () => {
+      await setSelfApprovalPolicy("INDEPENDENT_APPROVAL_REQUIRED", fixtures.schoolId)
+      const created = await bursarAgent.post("/api/v1/fees/adjustments").send(concessionPayload(fixtures.invoiceAId))
+      const id = created.body.data.id
+
+      // Pointing the header at a school the actor has no membership in must not
+      // resolve another tenant's policy (nor reach the adjustment at all).
+      const forged = await bursarAgent
+        .post(`/api/v1/fees/adjustments/${id}/approve`)
+        .set("x-school-id", fixtures.otherSchoolId)
+        .send({ reason: "Header must not change the policy" })
+      expect([401, 403]).toContain(forged.status)
+
+      // And the honest request against the same adjustment is still refused,
+      // because the target school's own policy requires independence.
+      const honest = await bursarAgent
+        .post(`/api/v1/fees/adjustments/${id}/approve`)
+        .send({ reason: "Header must not change the policy" })
+      expect(honest.status).toBe(403)
+    })
+
+    it("keeps override distinct: it may never act on the actor's own request", async () => {
+      await setSelfApprovalPolicy("SELF_APPROVAL_ALLOWED")
+      const created = await adminAgent.post("/api/v1/fees/adjustments").send(concessionPayload(fixtures.invoiceAId))
+      const res = await adminAgent
+        .post(`/api/v1/fees/adjustments/${created.body.data.id}/override`)
+        .send({ overrideReason: "Self override attempt" })
+      expect(res.status).toBe(403)
+      expect(res.body.error.code).toBe("FORBIDDEN")
+
+      // ...while the ordinary self-approval path remains open.
+      const approved = await adminAgent
+        .post(`/api/v1/fees/adjustments/${created.body.data.id}/approve`)
+        .send({ reason: "Approved through the normal path" })
+      expect(approved.status).toBe(200)
+    })
+
+    it("audits a self-approval with the policy, the same-person fact, and the reason", async () => {
+      await setSelfApprovalPolicy("SELF_APPROVAL_ALLOWED")
+      const created = await bursarAgent.post("/api/v1/fees/adjustments").send(concessionPayload(fixtures.invoiceAId))
+      const id = created.body.data.id
+      await bursarAgent
+        .post(`/api/v1/fees/adjustments/${id}/approve`)
+        .send({ reason: "Sibling discount confirmed by the bursar" })
+
+      const rows = await prisma.auditLog.findMany({
+        where: { schoolId: fixtures.schoolId, entityType: "FEE_ADJUSTMENT", entityId: id, action: "CONCESSION_APPROVED" },
+      })
+      expect(rows).toHaveLength(1)
+      expect(rows[0].actorName).toBe("Adjust Bursar")
+      expect(rows[0].actorRole).toBe("BURSAR")
+      const metadata = rows[0].metadata as {
+        approvalPolicy?: string
+        selfApproved?: boolean
+        requestedById?: string
+        approveReason?: string
+      }
+      expect(metadata.approvalPolicy).toBe("SELF_APPROVAL_ALLOWED")
+      expect(metadata.selfApproved).toBe(true)
+      expect(metadata.requestedById).toBe(rows[0].actorId)
+      expect(metadata.approveReason).toBe("Sibling discount confirmed by the bursar")
+
+      const requested = await prisma.auditLog.findMany({
+        where: { schoolId: fixtures.schoolId, entityType: "FEE_ADJUSTMENT", entityId: id, action: "CONCESSION_REQUESTED" },
+      })
+      expect(requested).toHaveLength(1)
+      expect(requested[0].actorId).toBe(rows[0].actorId)
+    })
+
+    it("audits an independent approval as not self-approved", async () => {
+      const created = await accountantAgent.post("/api/v1/fees/adjustments").send(concessionPayload(fixtures.invoiceAId))
+      await principalAgent.post(`/api/v1/fees/adjustments/${created.body.data.id}/approve`).send({})
+      const rows = await prisma.auditLog.findMany({
+        where: {
+          schoolId: fixtures.schoolId,
+          entityType: "FEE_ADJUSTMENT",
+          entityId: created.body.data.id,
+          action: "CONCESSION_APPROVED",
+        },
+      })
+      const metadata = rows[0].metadata as { approvalPolicy?: string; selfApproved?: boolean; requestedById?: string }
+      expect(metadata.approvalPolicy).toBe("INDEPENDENT_APPROVAL_REQUIRED")
+      expect(metadata.selfApproved).toBe(false)
+      expect(metadata.requestedById).toBeUndefined()
+    })
+
+    it("ignores an unrecognized stored value instead of opening self-approval", async () => {
+      await prisma.schoolSetting.upsert({
+        where: { schoolId_key: { schoolId: fixtures.schoolId, key: CONCESSION_SELF_APPROVAL_SETTING_KEY } },
+        update: { value: "BOTH_ALLOWED" },
+        create: { schoolId: fixtures.schoolId, key: CONCESSION_SELF_APPROVAL_SETTING_KEY, value: "BOTH_ALLOWED" },
+      })
+      const created = await bursarAgent.post("/api/v1/fees/adjustments").send(concessionPayload(fixtures.invoiceAId))
+      const res = await bursarAgent
+        .post(`/api/v1/fees/adjustments/${created.body.data.id}/approve`)
+        .send({ reason: "Corrupt value must not help" })
+      expect(res.status).toBe(403)
+
+      const list = await viewerAgent.get("/api/v1/fees/adjustments")
+      expect(list.body.data.approvalPolicy).toBe("INDEPENDENT_APPROVAL_REQUIRED")
     })
   })
 
@@ -1016,6 +1292,105 @@ describe.skipIf(!TEST_DATABASE_URL)("Fees concessions (FeeAdjustment) API (integ
       // before the concession reduced the amount owed).
       const snapshot = num(receipts[0].balanceAfter)
       expect([num(invoice.balance), num(invoice.balance) + 1000]).toContain(snapshot)
+    })
+  })
+
+  // The policy is read twice in `applyApproval`: once before the transaction as a
+  // fast-fail hint, and once inside it as the authoritative decision. These tests
+  // pin the second read by changing the school's policy while a request is parked
+  // on the invoice row lock — which `applyApproval` takes BEFORE it re-reads the
+  // policy, so the flip lands exactly in the window between the two reads.
+  describe("authoritative in-transaction policy decision", () => {
+    it("refuses a self-approval when the policy tightens inside the transaction", async () => {
+      await setSelfApprovalPolicy("SELF_APPROVAL_ALLOWED")
+      const created = await bursarAgent.post("/api/v1/fees/adjustments").send(concessionPayload(fixtures.invoiceBId))
+      expect(created.status).toBe(201)
+      const id = created.body.data.id
+
+      // The blocking transaction must NOT await the response: the approver cannot
+      // finish until the lock is released, so the callback returns (committing the
+      // policy flip and releasing the lock) and only then is the response read.
+      let pending!: Promise<{ status: number; body: { error?: { code?: string } } }>
+      await prisma.$transaction(async (tx) => {
+        // Park the approver on the invoice lock, then tighten the policy before
+        // releasing it. The in-transaction read must see the strict policy.
+        // The async IIFE is required: a supertest `Test` is a thenable that only
+        // fires the HTTP request once it is awaited, so assigning it to a
+        // variable would never put anything in flight.
+        await tx.$queryRaw`SELECT "id" FROM "FeeInvoice" WHERE "id" = ${fixtures.invoiceBId} FOR UPDATE`
+        pending = (async () =>
+          bursarAgent
+            .post(`/api/v1/fees/adjustments/${id}/approve`)
+            .send({ reason: "Approved while the school still allowed it" }))()
+        await waitForRowLockWaiter(fixtures.invoiceBId)
+        await setSelfApprovalPolicy("INDEPENDENT_APPROVAL_REQUIRED")
+      }, { timeout: 15_000 })
+
+      const res = await pending
+      expect(res.status).toBe(403)
+      expect(res.body.error?.code).toBe("FORBIDDEN")
+
+      const adjustment = await prisma.feeAdjustment.findUniqueOrThrow({ where: { id } })
+      expect(adjustment.status).toBe("REQUESTED")
+      expect(adjustment.approvedById).toBeNull()
+
+      // No money may move on a refused approval.
+      const invoice = await prisma.feeInvoice.findUniqueOrThrow({ where: { id: fixtures.invoiceBId } })
+      expect(invoice.totalAmount.toNumber()).toBe(6000)
+      expect(invoice.balance.toNumber()).toBe(6000)
+
+      // Scoped to this adjustment: the suite's `beforeEach` does not truncate
+      // AuditLog, so earlier tests legitimately left their own approval rows.
+      const approvals = await prisma.auditLog.count({
+        where: { entityId: id, action: "CONCESSION_APPROVED" },
+      })
+      expect(approvals).toBe(0)
+    }, 20_000)
+
+    it("keeps an independent approval reason-optional across the same window", async () => {
+      // The principal did not request it, so no reason is required and the policy
+      // is irrelevant to the outcome: the in-transaction branch must not start
+      // demanding one for someone else's request.
+      await setSelfApprovalPolicy("INDEPENDENT_APPROVAL_REQUIRED")
+      const created = await accountantAgent.post("/api/v1/fees/adjustments").send(concessionPayload(fixtures.invoiceBId))
+      const id = created.body.data.id
+
+      let pending!: Promise<{ status: number }>
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "FeeInvoice" WHERE "id" = ${fixtures.invoiceBId} FOR UPDATE`
+        pending = (async () => principalAgent.post(`/api/v1/fees/adjustments/${id}/approve`).send({}))()
+        await waitForRowLockWaiter(fixtures.invoiceBId)
+        // A tightening flip cannot affect a requester who is not the approver.
+        await setSelfApprovalPolicy("SELF_APPROVAL_ALLOWED")
+      }, { timeout: 15_000 })
+
+      const res = await pending
+      expect(res.status).toBe(200)
+
+      const adjustment = await prisma.feeAdjustment.findUniqueOrThrow({ where: { id } })
+      expect(adjustment.status).toBe("APPROVED")
+      const invoice = await prisma.feeInvoice.findUniqueOrThrow({ where: { id: fixtures.invoiceBId } })
+      expect(invoice.totalAmount.toNumber()).toBe(1000)
+    }, 20_000)
+
+    it("never lets the in-transaction re-check turn an override into a self-approval", async () => {
+      // `selfApproved` is hoisted so the guard and the audit metadata agree. This
+      // pins that the hoist cannot leak across the override branch: a SUPER_ADMIN
+      // who is the requester is still refused even with the policy wide open.
+      await setSelfApprovalPolicy("SELF_APPROVAL_ALLOWED")
+      const created = await adminAgent.post("/api/v1/fees/adjustments").send(concessionPayload(fixtures.invoiceBId))
+      const res = await adminAgent
+        .post(`/api/v1/fees/adjustments/${created.body.data.id}/override`)
+        .send({ overrideReason: "Director override" })
+
+      expect(res.status).toBe(403)
+      expect(res.body.error.code).toBe("FORBIDDEN")
+
+      const adjustment = await prisma.feeAdjustment.findUniqueOrThrow({
+        where: { id: created.body.data.id },
+      })
+      expect(adjustment.status).toBe("REQUESTED")
+      expect(adjustment.overridden).toBe(false)
     })
   })
 })

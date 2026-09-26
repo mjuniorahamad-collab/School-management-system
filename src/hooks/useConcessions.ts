@@ -56,7 +56,11 @@ export function useRequestConcession() {
 export function useApproveConcession() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (id: string) => concessionsService.approve(id),
+    // The payload carries a reason, which is MANDATORY when the actor is
+    // approving their own request under a permissive school policy and optional
+    // for an independent approval.
+    mutationFn: ({ id, payload }: { id: string; payload: AdjustActionInput }) =>
+      concessionsService.approve(id, payload),
     onSuccess: (detail) => {
       invalidateAfterConcessionChange(queryClient)
       toast.success("Concession approved", {

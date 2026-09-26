@@ -3,17 +3,25 @@ import { badRequestError, forbiddenError, notFoundError } from "../../lib/ApiErr
 import { getPrisma } from "../../lib/database.js"
 import { lockInvoiceForUpdate } from "../../lib/db-locks.js"
 import { roundMoney, toMoney } from "../../lib/money.js"
+import {
+  DEFAULT_CONCESSION_SELF_APPROVAL,
+  readConcessionSelfApprovalPolicy,
+  type ConcessionSelfApprovalPolicy,
+} from "../../lib/school-settings.js"
 import type { AuthUser } from "../../types/auth.js"
 import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import { deriveInstallmentStatus, deriveInvoiceStatus, toDateISO, todayISODate } from "../fee-invoices/fee-invoice.rules.js"
 import { SUPER_ADMIN_ROLE } from "../../permissions/permissions.js"
 import {
+  assertCanApproveAdjustment,
   assertFinancialReconciliation,
   assertNotSelfApproval,
   assertValidAdjustmentTransition,
   computeComputedAmount,
   computeNetObligation,
+  isSelfApproval,
   reduceInstallments,
+  requiresSelfApprovalReason,
   reverseApplication,
   sumAdjustmentAmounts,
   type InstallmentApplicationLine,
@@ -53,6 +61,21 @@ function assertNotSelfApprovalOrForbid(requestedById: string | null, approverId:
     assertNotSelfApproval(requestedById, approverId)
   } catch {
     throw forbiddenError("An adjustment requester cannot approve their own concession")
+  }
+}
+
+/** Policy-aware form of the self-approval guard, for the ordinary approve path. */
+function assertCanApproveOrForbid(input: {
+  policy: ConcessionSelfApprovalPolicy
+  requestedById: string | null
+  approverId: string
+}): void {
+  try {
+    assertCanApproveAdjustment(input)
+  } catch {
+    throw forbiddenError(
+      "An adjustment requester cannot approve their own concession because this school requires independent approval",
+    )
   }
 }
 
@@ -219,9 +242,31 @@ async function applyApproval(
     throw forbiddenError("Only a SUPER_ADMIN can override an approval")
   }
 
+  // The school's concession self-approval policy decides whether the ordinary
+  // approve path tolerates approver == requester. It is resolved from the tenant
+  // the caller is already authenticated in, so it can never be supplied or
+  // spoofed by the client. Override never consults it: override keeps the strict
+  // rule, and is not the mechanism through which a school enables self-approval.
+  const policy = override
+    ? DEFAULT_CONCESSION_SELF_APPROVAL
+    : await readConcessionSelfApprovalPolicy(prisma, schoolId)
+
   const pending = await prisma.feeAdjustment.findFirst({ where: { id, schoolId } })
   if (!pending) throw notFoundError("Fee adjustment not found")
-  assertNotSelfApprovalOrForbid(pending.requestedById, actor.id)
+
+  if (override) {
+    assertNotSelfApprovalOrForbid(pending.requestedById, actor.id)
+  } else {
+    assertCanApproveOrForbid({ policy, requestedById: pending.requestedById, approverId: actor.id })
+    // Segregation of duties is being waived, so the decision must carry a
+    // rationale of its own. Independent approvals keep the reason optional.
+    if (
+      requiresSelfApprovalReason({ policy, requestedById: pending.requestedById, approverId: actor.id }) &&
+      !options.approveReason?.trim()
+    ) {
+      throw badRequestError("A reason is required when approving your own concession")
+    }
+  }
 
   await prisma.$transaction(async (tx: Tx) => {
     // Serialize against every other financial mutation of this invoice (payments
@@ -238,7 +283,43 @@ async function applyApproval(
       include: APPROVE_INCLUDE,
     })
     if (!current) throw notFoundError("Fee adjustment not found")
-    assertNotSelfApprovalOrForbid(current.requestedById, actor.id)
+
+    // AUTHORITATIVE re-check inside the lock. The policy and the requester are
+    // re-read from the database alongside the transition re-check below, so a
+    // concurrent approval, or a policy flip racing this call, cannot slip past
+    // the pre-transaction fast-fail above. The fast-fail is only ever a hint: it
+    // can be stale in the permissive direction, and this read corrects it.
+    const currentPolicy = override
+      ? DEFAULT_CONCESSION_SELF_APPROVAL
+      : await readConcessionSelfApprovalPolicy(tx, schoolId)
+    // The same-person fact, taken once from the row as read under the lock, so
+    // the guard below and the audit metadata cannot disagree.
+    const selfApproved = !override && isSelfApproval(current.requestedById, actor.id)
+    if (override) {
+      assertNotSelfApprovalOrForbid(current.requestedById, actor.id)
+    } else {
+      assertCanApproveOrForbid({
+        policy: currentPolicy,
+        requestedById: current.requestedById,
+        approverId: actor.id,
+      })
+      // AUTHORITATIVE for the reason as well, not merely for the authorization:
+      // it is evaluated against `currentPolicy`, the value actually in force at
+      // the decision point, rather than the pre-transaction hint. Authorization
+      // is deliberately checked first so a strict school still answers 403
+      // (a segregation-of-duties refusal) instead of 400 (a malformed request).
+      if (
+        selfApproved &&
+        requiresSelfApprovalReason({
+          policy: currentPolicy,
+          requestedById: current.requestedById,
+          approverId: actor.id,
+        }) &&
+        !options.approveReason?.trim()
+      ) {
+        throw badRequestError("A reason is required when approving your own concession")
+      }
+    }
     ruleValue(() => assertValidAdjustmentTransition(current.status, "APPROVED"))
 
     const invoice = current.invoice
@@ -341,7 +422,7 @@ async function applyApproval(
       action: override ? "CONCESSION_OVERRIDE" : "CONCESSION_APPROVED",
       entityType: "FEE_ADJUSTMENT",
       entityId: current.id,
-      summary: `${override ? "Overrode" : "Approved"} a ${current.kind} concession of ${computedAmount} on invoice ${invoice.invoiceNumber}`,
+      summary: `${override ? "Overrode" : "Approved"} a ${current.kind} concession of ${computedAmount} on invoice ${invoice.invoiceNumber}${selfApproved ? " (self-approved)" : ""}`,
       metadata: {
         kind: current.kind,
         value: toMoney(current.value),
@@ -349,6 +430,12 @@ async function applyApproval(
         reduction: reduction.lines,
         totalAmountAfter: net.totalAmount,
         balanceAfter: net.balance,
+        // The policy actually in force for this decision, plus the explicit
+        // same-person fact (with the requester id) so a self-approval is
+        // identifiable from the audit row alone, without joining the ledger.
+        approvalPolicy: currentPolicy,
+        selfApproved,
+        ...(selfApproved ? { requestedById: current.requestedById } : {}),
         ...(options.approveReason ? { approveReason: options.approveReason } : {}),
         ...(override ? { overrideReason: options.overrideReason } : {}),
       },
@@ -674,20 +761,27 @@ export async function listAdjustments(
 
   const page = query.page
   const pageSize = query.pageSize
-  const [total, rows] = await prisma.$transaction([
-    prisma.feeAdjustment.count({ where }),
-    prisma.feeAdjustment.findMany({
-      where,
-      include: FEE_ADJUSTMENT_LIST_INCLUDE,
-      orderBy,
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
+  const [[total, rows], policy] = await Promise.all([
+    prisma.$transaction([
+      prisma.feeAdjustment.count({ where }),
+      prisma.feeAdjustment.findMany({
+        where,
+        include: FEE_ADJUSTMENT_LIST_INCLUDE,
+        orderBy,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]),
+    // Shipped with the list so the client can decide which actions to surface
+    // without a second, separately permission-gated settings read: the roles
+    // that request concessions are not guaranteed to hold `settings:view`.
+    readConcessionSelfApprovalPolicy(prisma, schoolId),
   ])
 
   return {
     items: rows.map((row) => mapAdjustmentListItem(row as FeeAdjustmentListItemRow)),
     pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
+    approvalPolicy: policy,
   }
 }
 

@@ -66,4 +66,26 @@ describe("concessionsService", () => {
     await concessionsService.reverse("adj-1")
     expect(api.post).toHaveBeenCalledWith("/fees/adjustments/adj-1/reverse", {})
   })
+
+  it("sends the approval reason required for a self-approval", async () => {
+    vi.mocked(api.post).mockResolvedValue({ id: "adj-1" } as never)
+
+    await concessionsService.approve("adj-1", { reason: "Sibling discount confirmed" })
+
+    expect(api.post).toHaveBeenCalledWith("/fees/adjustments/adj-1/approve", {
+      reason: "Sibling discount confirmed",
+    })
+  })
+
+  it("reads the self-approval policy off the list response", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      items: [],
+      pagination: { page: 1 },
+      approvalPolicy: "SELF_APPROVAL_ALLOWED",
+    } as never)
+
+    const result = await concessionsService.list()
+
+    expect(result.approvalPolicy).toBe("SELF_APPROVAL_ALLOWED")
+  })
 })

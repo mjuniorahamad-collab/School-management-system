@@ -3,6 +3,7 @@
 // fee-adjustment.schema.ts). Keep the two sides in sync when the API changes.
 
 import type { Pagination } from "@/types/fees"
+import type { ConcessionSelfApprovalPolicy } from "@/types/settings"
 
 export const ADJUSTMENT_KINDS = ["FIXED_AMOUNT", "PERCENTAGE"] as const
 export type AdjustmentKind = (typeof ADJUSTMENT_KINDS)[number]
@@ -106,6 +107,13 @@ export interface AdjustmentDetail {
 export interface AdjustmentListResult {
   items: AdjustmentListItem[]
   pagination: Pagination
+  /**
+   * The school's resolved concession self-approval policy, shipped with the list
+   * so the UI can mirror the server's approve/reject gating without a separate,
+   * permission-gated settings read. Fails safe to
+   * `INDEPENDENT_APPROVAL_REQUIRED` when absent.
+   */
+  approvalPolicy: ConcessionSelfApprovalPolicy
 }
 
 export interface AdjustmentQuery {

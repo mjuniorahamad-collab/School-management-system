@@ -1,15 +1,19 @@
 import { describe, expect, it } from "vitest"
 import {
   ADJUSTMENT_TRANSITIONS,
+  assertCanApproveAdjustment,
   assertFinancialReconciliation,
   assertNotSelfApproval,
   assertValidAdjustmentTransition,
   canAdjust,
+  canApproveAdjustment,
   canTransitionAdjustmentStatus,
   computeComputedAmount,
   computeNetObligation,
   isSelfApproval,
+  isSelfApprovalAllowed,
   reduceInstallments,
+  requiresSelfApprovalReason,
   reverseApplication,
   sumAdjustmentAmounts,
 } from "../src/modules/fee-adjustments/fee-adjustment.rules.js"
@@ -17,6 +21,12 @@ import {
   deriveInstallmentStatus,
   deriveInvoiceStatus,
 } from "../src/modules/fee-invoices/fee-invoice.rules.js"
+import {
+  CONCESSION_SELF_APPROVAL_SETTING_KEY,
+  CONCESSION_SELF_APPROVAL_VALUES,
+  DEFAULT_CONCESSION_SELF_APPROVAL,
+  parseConcessionSelfApproval,
+} from "../src/lib/school-settings.js"
 
 describe("percentage concession computation (database-free)", () => {
   it("computes 10% of ₹40,000 exactly", () => {
@@ -334,6 +344,96 @@ describe("self-approval rule (database-free)", () => {
   it("applies identically for every user, including SUPER_ADMIN (role-blind)", () => {
     expect(isSelfApproval("super-admin", "super-admin")).toBe(true)
     expect(() => assertNotSelfApproval("super-admin", "super-admin")).toThrow()
+  })
+})
+
+describe("self-approval policy parsing (database-free)", () => {
+  it("owns a stable key and a fail-safe default", () => {
+    expect(CONCESSION_SELF_APPROVAL_SETTING_KEY).toBe("feeConcessionSelfApproval")
+    expect(DEFAULT_CONCESSION_SELF_APPROVAL).toBe("INDEPENDENT_APPROVAL_REQUIRED")
+    expect(CONCESSION_SELF_APPROVAL_VALUES).toHaveLength(2)
+  })
+
+  it("parses both known values", () => {
+    expect(parseConcessionSelfApproval("INDEPENDENT_APPROVAL_REQUIRED")).toBe("INDEPENDENT_APPROVAL_REQUIRED")
+    expect(parseConcessionSelfApproval("SELF_APPROVAL_ALLOWED")).toBe("SELF_APPROVAL_ALLOWED")
+  })
+
+  it("falls back to the restrictive default for anything unrecognized", () => {
+    // A school that never saved the key, a hand-edited row, or a corrupt value
+    // must never silently open self-approval.
+    expect(parseConcessionSelfApproval(null)).toBe("INDEPENDENT_APPROVAL_REQUIRED")
+    expect(parseConcessionSelfApproval(undefined)).toBe("INDEPENDENT_APPROVAL_REQUIRED")
+    expect(parseConcessionSelfApproval("")).toBe("INDEPENDENT_APPROVAL_REQUIRED")
+    expect(parseConcessionSelfApproval("self_approval_allowed")).toBe("INDEPENDENT_APPROVAL_REQUIRED")
+    expect(parseConcessionSelfApproval("BOTH_ALLOWED")).toBe("INDEPENDENT_APPROVAL_REQUIRED")
+    expect(parseConcessionSelfApproval("true")).toBe("INDEPENDENT_APPROVAL_REQUIRED")
+  })
+})
+
+describe("school self-approval policy (database-free)", () => {
+  it("treats only SELF_APPROVAL_ALLOWED as permitting self-approval", () => {
+    expect(isSelfApprovalAllowed("SELF_APPROVAL_ALLOWED")).toBe(true)
+    expect(isSelfApprovalAllowed("INDEPENDENT_APPROVAL_REQUIRED")).toBe(false)
+  })
+
+  it("forbids a self-approval when independent approval is required", () => {
+    expect(canApproveAdjustment({ policy: "INDEPENDENT_APPROVAL_REQUIRED", requestedById: "user-1", approverId: "user-1" })).toBe(false)
+    expect(() =>
+      assertCanApproveAdjustment({ policy: "INDEPENDENT_APPROVAL_REQUIRED", requestedById: "user-1", approverId: "user-1" }),
+    ).toThrow(/requires independent approval/)
+  })
+
+  it("permits a self-approval when the school allows it", () => {
+    expect(canApproveAdjustment({ policy: "SELF_APPROVAL_ALLOWED", requestedById: "user-1", approverId: "user-1" })).toBe(true)
+    expect(() =>
+      assertCanApproveAdjustment({ policy: "SELF_APPROVAL_ALLOWED", requestedById: "user-1", approverId: "user-1" }),
+    ).not.toThrow()
+  })
+
+  it("never restricts an independent approval, under either policy", () => {
+    for (const policy of CONCESSION_SELF_APPROVAL_VALUES) {
+      expect(canApproveAdjustment({ policy, requestedById: "user-1", approverId: "user-2" })).toBe(true)
+      expect(() => assertCanApproveAdjustment({ policy, requestedById: "user-1", approverId: "user-2" })).not.toThrow()
+    }
+  })
+
+  it("is role-blind: the policy is the only relaxed rule", () => {
+    // No role parameter exists, so a SUPER_ADMIN is treated exactly like anyone
+    // else — including being allowed to self-approve once the school says so.
+    expect(canApproveAdjustment({ policy: "INDEPENDENT_APPROVAL_REQUIRED", requestedById: "sa", approverId: "sa" })).toBe(false)
+    expect(canApproveAdjustment({ policy: "SELF_APPROVAL_ALLOWED", requestedById: "sa", approverId: "sa" })).toBe(true)
+  })
+
+  it("treats a deleted requester as an independent approval", () => {
+    // requestedById is nullable (onDelete: SetNull): no requester means no
+    // same-person fact, so the policy is irrelevant.
+    for (const policy of CONCESSION_SELF_APPROVAL_VALUES) {
+      expect(canApproveAdjustment({ policy, requestedById: null, approverId: "user-1" })).toBe(true)
+    }
+  })
+
+  it("requires a reason only for a permitted self-approval", () => {
+    expect(
+      requiresSelfApprovalReason({ policy: "SELF_APPROVAL_ALLOWED", requestedById: "user-1", approverId: "user-1" }),
+    ).toBe(true)
+    expect(
+      requiresSelfApprovalReason({ policy: "INDEPENDENT_APPROVAL_REQUIRED", requestedById: "user-1", approverId: "user-1" }),
+    ).toBe(false)
+    expect(
+      requiresSelfApprovalReason({ policy: "SELF_APPROVAL_ALLOWED", requestedById: "user-1", approverId: "user-2" }),
+    ).toBe(false)
+    expect(requiresSelfApprovalReason({ policy: "SELF_APPROVAL_ALLOWED", requestedById: null, approverId: "user-1" })).toBe(false)
+  })
+
+  it("keeps override on the strict, policy-free rule", () => {
+    // The override path is a distinct SUPER_ADMIN action: it may never act on the
+    // actor's own request even when the school allows self-approval.
+    for (const policy of CONCESSION_SELF_APPROVAL_VALUES) {
+      expect(isSelfApproval("super-admin", "super-admin")).toBe(true)
+      expect(() => assertNotSelfApproval("super-admin", "super-admin")).toThrow(/cannot approve their own/)
+      expect(isSelfApprovalAllowed(policy)).toBe(policy === "SELF_APPROVAL_ALLOWED")
+    }
   })
 })
 

@@ -1041,8 +1041,16 @@ model FeeReceipt {
 //   REQUESTED → APPROVED | REJECTED | CANCELLED | REVERSED
 //   - Approval recomputes the invoice net + installments in the SAME
 //     transaction (FIFO on earliest unpaid installments).
-//   - Requester can never approve their own concession. The only exception is
-//     CONCESSION_OVERRIDE by a SUPER_ADMIN (explicitly audited, needs a reason).
+//   - Self-approval is governed by the SCHOOL-SCOPED `feeConcessionSelfApproval`
+//     SchoolSetting key (INDEPENDENT_APPROVAL_REQUIRED | SELF_APPROVAL_ALLOWED,
+//     default the former, so a missing row fails safe and needs no backfill). It
+//     is a business rule, not a permission: it only relaxes the guard for actors
+//     who already hold `concessions:approve`, and a permitted self-approval must
+//     carry a reason and is audited with `selfApproved: true`.
+//   - CONCESSION_OVERRIDE by a SUPER_ADMIN stays a DISTINCT action (explicitly
+//     audited, needs a reason) and may never act on the actor's own request,
+//     whatever the school's policy says. It is not how a school enables
+//     self-approval.
 //   - Reversal is a compensating record (`reversalOfId` → original); approved
 //     adjustments are never deleted or mutilated.
 //   - `computedAmount` is a frozen monetary snapshot taken at approval;
@@ -1084,7 +1092,8 @@ model FeeAdjustment {
   // absorbed the concession and by how much, so reversal restores exact amounts.
   installmentApplication Json?
   // Override provenance: set ONLY when a SUPER_ADMIN explicitly overrides
-  // (allowed solely for another user's request, never self-approval).
+  // (SUPER_ADMIN-only, and allowed solely for another user's request — never
+  // self-approval, regardless of the school's self-approval policy).
   overridden            Boolean              @default(false)
   overriddenById        String?
   overrideReason        String?
