@@ -32,7 +32,9 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["server/tests/**/*.test.ts", "src/**/*.test.ts"],
+    // `.test.tsx` suites opt into a DOM per file with
+    // `// @vitest-environment jsdom`; everything else runs in node.
+    include: ["server/tests/**/*.test.ts", "src/**/*.test.ts", "src/**/*.test.tsx"],
     env: integrationEnv,
     // The audit-logs suite runs `prisma migrate deploy` on a cold test DB in
     // beforeAll, which can exceed the default 10s hook timeout.

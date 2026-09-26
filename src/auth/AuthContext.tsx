@@ -6,30 +6,18 @@ import { canUser } from "@/auth/can"
 import { AuthContext, ME_QUERY_KEY } from "@/auth/context"
 import type { AuthContextValue } from "@/auth/context"
 import type { LoginInput } from "@/auth/types"
-import { clearActiveSchoolId, getActiveSchoolId, setActiveSchoolId } from "@/auth/activeSchool"
+import { getActiveSchoolId, setActiveSchoolId } from "@/auth/activeSchool"
+import { isAuthQueryKey, resetSessionState } from "@/auth/sessionReset"
 import { fetchMe, login as loginRequest, logout as logoutRequest } from "@/services/authService"
-
-// Auth-namespaced query keys survive a tenant switch so identity can be
-// reloaded; everything else is tenant scoped and must be cleared.
-function isAuthQueryKey(key: readonly unknown[]): boolean {
-  return key[0] === "auth"
-}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
 
   // When a request fails a 401 and the refresh token is also rejected, the
   // session is over. Drop the active school plus every cached tenant payload
-  // so the next sign-in can never observe a previous tenant's data.
-  useEffect(
-    () =>
-      onSignedOut(() => {
-        clearActiveSchoolId()
-        queryClient.clear()
-        queryClient.setQueryData(ME_QUERY_KEY, { user: null })
-      }),
-    [queryClient],
-  )
+  // so the next sign-in can never observe a previous tenant's data, and settle
+  // the auth query on `{ user: null }` so loading always terminates.
+  useEffect(() => onSignedOut(() => resetSessionState(queryClient)), [queryClient])
 
   const meQuery = useQuery({
     queryKey: ME_QUERY_KEY,
@@ -82,9 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Best-effort revocation: local auth state must still clear if offline.
     }
-    clearActiveSchoolId()
-    queryClient.clear()
-    queryClient.setQueryData(ME_QUERY_KEY, { user: null })
+    resetSessionState(queryClient)
   }, [queryClient])
 
   const switchSchool = useCallback(
