@@ -203,6 +203,7 @@ export interface InvoiceQuery {
   pageSize?: number
   sessionId?: string
   classId?: string
+  studentId?: string
   status?: InvoiceStatus
   search?: string
   sortBy?: "createdAt" | "invoiceNumber" | "totalAmount" | "studentName"

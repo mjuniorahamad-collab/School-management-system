@@ -20,15 +20,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { InvoiceStatusBadge } from "@/components/fees/FeeStatusBadges"
 import { useFeeInvoices } from "@/hooks/useFeeInvoices"
 import { useCreatePayment } from "@/hooks/usePayments"
-import { formatINR } from "@/lib/format"
+import { formatFullDate, formatINR } from "@/lib/format"
 import { PAYMENT_METHOD_OPTIONS } from "@/types/fees"
-import type { CreatePaymentInput, PaymentMethod } from "@/types/fees"
+import type { CreatePaymentInput, FeeInvoiceListItem, PaymentMethod } from "@/types/fees"
 
 interface PaymentFormDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /**
+   * Contextual mode: lock the payment to this invoice and replace the global
+   * invoice picker with a read-only summary. Omit for the global picker flow.
+   */
+  selectedInvoice?: FeeInvoiceListItem | null
 }
 
 function todayISOString(): string {
@@ -39,16 +45,30 @@ function todayISOString(): string {
   return `${year}-${month}-${day}`
 }
 
-export function PaymentFormDialog({ open, onOpenChange }: PaymentFormDialogProps) {
+export function PaymentFormDialog({ open, onOpenChange, selectedInvoice }: PaymentFormDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {open && <PaymentFormContent key="new-payment" onOpenChange={onOpenChange} />}
+      {open && (
+        <PaymentFormContent
+          key="new-payment"
+          onOpenChange={onOpenChange}
+          selectedInvoice={selectedInvoice ?? null}
+        />
+      )}
     </Dialog>
   )
 }
 
-function PaymentFormContent({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
-  const [invoiceId, setInvoiceId] = useState("")
+function PaymentFormContent({
+  onOpenChange,
+  selectedInvoice,
+}: {
+  onOpenChange: (open: boolean) => void
+  selectedInvoice: FeeInvoiceListItem | null
+}) {
+  const contextual = selectedInvoice !== null
+
+  const [invoiceId, setInvoiceId] = useState(selectedInvoice?.id ?? "")
   const [amount, setAmount] = useState("")
   const [method, setMethod] = useState<PaymentMethod>("CASH")
   const [paymentDate, setPaymentDate] = useState(todayISOString)
@@ -56,11 +76,21 @@ function PaymentFormContent({ onOpenChange }: { onOpenChange: (open: boolean) =>
   const [notes, setNotes] = useState("")
   const [idempotencyKey] = useState(() => crypto.randomUUID())
 
-  const invoicesQuery = useFeeInvoices({ pageSize: 100 })
+  // Contextual mode already knows the target, so the global list is not fetched.
+  const invoicesQuery = useFeeInvoices({ pageSize: 100 }, { enabled: !contextual })
   const createMutation = useCreatePayment()
 
+  // Global mode lists the fetched page verbatim, exactly as it did before this
+  // dialog gained a contextual mode. Eligibility is deliberately NOT applied
+  // here: this picker is the pre-existing Payments-page control, and narrowing
+  // it would change that flow. Over-payment is rejected server-side anyway, and
+  // the contextual Collect Fee path applies its own rule where the action is
+  // actually offered.
   const invoices = invoicesQuery.data?.items ?? []
-  const selectedInvoice = invoices.find((invoice) => invoice.id === invoiceId)
+  // The fixed contextual invoice is authoritative and may sit outside the
+  // global page, so it never depends on the fetched list.
+  const targetInvoice =
+    selectedInvoice ?? invoices.find((invoice) => invoice.id === invoiceId) ?? null
 
   const isSaving = createMutation.isPending
 
@@ -100,26 +130,72 @@ function PaymentFormContent({ onOpenChange }: { onOpenChange: (open: boolean) =>
       </DialogHeader>
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="payment-invoice">Invoice</Label>
-          <Select value={invoiceId || undefined} onValueChange={setInvoiceId}>
-            <SelectTrigger id="payment-invoice" className="w-full">
-              <SelectValue placeholder="Select an invoice" />
-            </SelectTrigger>
-            <SelectContent>
-              {(invoicesQuery.data?.items ?? []).map((invoice) => (
-                <SelectItem key={invoice.id} value={invoice.id}>
-                  {invoice.invoiceNumber} — {invoice.student.fullName} · {formatINR(invoice.balance)} due
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {invoicesQuery.isError && (
+          {/* The label belongs to the Select, so it is rendered with the Select.
+              In contextual mode there is no control to label, and a label
+              pointing at a removed id is worse than no label at all. */}
+          {contextual ? (
+            <div className="rounded-md border border-border bg-muted/40 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-mono text-sm font-medium">{selectedInvoice.invoiceNumber}</span>
+                <InvoiceStatusBadge status={selectedInvoice.status} />
+              </div>
+              <p className="mt-1 text-sm text-foreground">{selectedInvoice.student.fullName}</p>
+              <p className="text-xs text-muted-foreground">
+                {selectedInvoice.student.admissionNumber} · {selectedInvoice.className}
+                {selectedInvoice.sectionName ? ` · ${selectedInvoice.sectionName}` : ""} ·{" "}
+                {selectedInvoice.sessionName}
+              </p>
+              <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-border pt-3">
+                <div>
+                  <dt className="text-xs text-muted-foreground">Total fee</dt>
+                  <dd className="text-sm font-semibold tabular-nums">
+                    {formatINR(selectedInvoice.totalAmount)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Paid</dt>
+                  <dd className="text-sm font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                    {formatINR(selectedInvoice.amountPaid)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Due</dt>
+                  <dd className="text-sm font-semibold tabular-nums text-red-600 dark:text-red-400">
+                    {formatINR(selectedInvoice.balance)}
+                  </dd>
+                </div>
+              </dl>
+              {selectedInvoice.nextDueDate && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Next installment due {formatFullDate(selectedInvoice.nextDueDate)}
+                </p>
+              )}
+            </div>
+          ) : (
+            <>
+              <Label htmlFor="payment-invoice">Invoice</Label>
+              <Select value={invoiceId || undefined} onValueChange={setInvoiceId}>
+                <SelectTrigger id="payment-invoice" className="w-full">
+                  <SelectValue placeholder="Select an invoice" />
+                </SelectTrigger>
+                <SelectContent>
+                  {invoices.map((invoice) => (
+                    <SelectItem key={invoice.id} value={invoice.id}>
+                      {invoice.invoiceNumber} — {invoice.student.fullName} · {formatINR(invoice.balance)}{" "}
+                      due
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </>
+          )}
+          {!contextual && invoicesQuery.isError && (
             <p className="text-xs text-red-700 dark:text-red-300">Could not load invoices.</p>
           )}
-          {selectedInvoice && (
+          {targetInvoice && (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Info className="size-3.5 shrink-0" aria-hidden="true" />
-              Outstanding balance is {formatINR(selectedInvoice.balance)} — amounts above this will
+              Outstanding balance is {formatINR(targetInvoice.balance)} — amounts above this will
               be rejected.
             </div>
           )}

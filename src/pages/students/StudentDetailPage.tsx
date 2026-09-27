@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom"
 import { useAuth } from "@/auth/useAuth"
 import { PageContainer } from "@/components/layout/PageContainer"
 import { ProfilePhotoField } from "@/components/shared/ProfilePhotoField"
+import { StudentFeesCard } from "@/components/students/StudentFeesCard"
 import { StudentStatusBadge } from "@/components/students/StudentStatusBadge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -226,6 +227,15 @@ export function StudentDetailPage() {
                 )}
               </CardContent>
             </Card>
+
+            {place && can("fees:view") && (
+              <StudentFeesCard
+                studentId={student.id}
+                sessionId={place.academicSession.id}
+                sessionName={place.academicSession.name}
+                sessionStatus={place.academicSession.status}
+              />
+            )}
           </div>
         </div>
       )}

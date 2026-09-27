@@ -13,6 +13,7 @@ interface Fixtures {
   schoolId: string
   otherSchoolId: string
   sessionId: string
+  pastSessionId: string
   otherSessionId: string
   classId: string
   sectionId: string
@@ -30,6 +31,7 @@ const fixtures: Fixtures = {
   schoolId: "",
   otherSchoolId: "",
   sessionId: "",
+  pastSessionId: "",
   otherSessionId: "",
   classId: "",
   sectionId: "",
@@ -81,6 +83,21 @@ describe.skipIf(!TEST_DATABASE_URL)("Fees payments & receipts API (integration)"
       },
     })
     fixtures.sessionId = session.id
+
+    // A second session in the SAME school. The studentId filter is scoped to the
+    // tenant, so cross-tenant emptiness proves nothing about session composition;
+    // this fixture is what makes "right student, wrong session" a real assertion.
+    const pastSession = await prisma.academicSession.create({
+      data: {
+        schoolId: school.id,
+        name: "Fees Year 2025",
+        code: "FEY2025",
+        startDate: new Date("2025-04-01T00:00:00.000Z"),
+        endDate: new Date("2026-03-31T00:00:00.000Z"),
+        status: "ARCHIVED",
+      },
+    })
+    fixtures.pastSessionId = pastSession.id
 
     const classSix = await prisma.class.create({
       data: { schoolId: school.id, name: "Six", sortOrder: 6 },
@@ -184,6 +201,43 @@ describe.skipIf(!TEST_DATABASE_URL)("Fees payments & receipts API (integration)"
         },
       })
     ).id
+
+    // A second invoice in the same session for a different student, so the
+    // studentId filter has a same-tenant row it must exclude.
+    await prisma.feeInvoice.create({
+      data: {
+        schoolId: school.id,
+        studentId: studentB.id,
+        enrollmentId: (
+          await prisma.studentEnrollment.findFirstOrThrow({ where: { studentId: studentB.id } })
+        ).id,
+        sessionId: session.id,
+        invoiceNumber: "INV-2026-1002",
+        className: "Six",
+        sectionName: "A",
+        sessionName: "Fees Year",
+        grossAmount: 800,
+        totalAmount: 800,
+        amountPaid: 0,
+        balance: 800,
+        status: "UNPAID",
+        items: [{ feeHeadCode: tuition.code, feeHeadName: tuition.name, amount: 800 }],
+        installments: {
+          create: [
+            {
+              schoolId: school.id,
+              installmentNo: 1,
+              label: "Term 1",
+              amount: 800,
+              dueDate: new Date("2027-01-15T00:00:00.000Z"),
+              amountPaid: 0,
+              balance: 800,
+              sortOrder: 1,
+            },
+          ],
+        },
+      },
+    })
 
     const superRole = await prisma.role.create({
       data: { name: SUPER_ADMIN_ROLE, description: "Test super admin" },
@@ -550,6 +604,103 @@ const payments = await adminAgent.get("/api/v1/payments")
       const res = await otherAgent.get("/api/v1/payments")
       expect(res.status).toBe(200)
       expect(res.body.data.items).toEqual([])
+    })
+  })
+
+  describe("invoice list studentId filter", () => {
+    it("returns only the requested student's invoice for the session", async () => {
+      const res = await adminAgent
+        .get("/api/v1/fees/invoices")
+        .query({ studentId: fixtures.studentAId, sessionId: fixtures.sessionId })
+
+      expect(res.status).toBe(200)
+      // The student+session pair is unique, so the student profile fee card can
+      // rely on a single row and treat `items[0]` as authoritative.
+      expect(res.body.data.pagination.total).toBe(1)
+      expect(res.body.data.items).toHaveLength(1)
+      expect(res.body.data.items[0].id).toBe(fixtures.invoiceAId)
+      expect(res.body.data.items[0].invoiceNumber).toBe("INV-2026-1001")
+      expect(res.body.data.items[0].student.admissionNumber).toBe("STU-2026-0001")
+    })
+
+    it("excludes another student's invoice in the same session", async () => {
+      const res = await adminAgent
+        .get("/api/v1/fees/invoices")
+        .query({ studentId: fixtures.studentBId, sessionId: fixtures.sessionId })
+
+      expect(res.status).toBe(200)
+      expect(res.body.data.pagination.total).toBe(1)
+      expect(res.body.data.items[0].invoiceNumber).toBe("INV-2026-1002")
+      expect(res.body.data.items[0].id).not.toBe(fixtures.invoiceAId)
+    })
+
+    it("returns nothing for the right student in another session of the same school", async () => {
+      const res = await adminAgent
+        .get("/api/v1/fees/invoices")
+        .query({ studentId: fixtures.studentAId, sessionId: fixtures.pastSessionId })
+
+      expect(res.status).toBe(200)
+      expect(res.body.data.items).toEqual([])
+      expect(res.body.data.pagination.total).toBe(0)
+    })
+
+    it("filters by student alone across every session in the tenant", async () => {
+      const res = await adminAgent.get("/api/v1/fees/invoices").query({ studentId: fixtures.studentAId })
+      expect(res.status).toBe(200)
+      expect(res.body.data.items).toHaveLength(1)
+      expect(res.body.data.items[0].id).toBe(fixtures.invoiceAId)
+    })
+
+    // Tenant isolation: an other-school student id must return an empty page,
+    // not a 403 and not the row. The 200-with-nothing shape is deliberate - the
+    // caller is authorized for their own tenant, the row simply is not theirs.
+    it("does not leak another tenant's invoice for a foreign studentId", async () => {
+      const res = await adminAgent
+        .get("/api/v1/fees/invoices")
+        .query({ studentId: fixtures.otherStudentId, sessionId: fixtures.sessionId })
+
+      expect(res.status).toBe(200)
+      expect(res.body.data.items).toEqual([])
+      expect(res.body.data.pagination.total).toBe(0)
+    })
+
+    it("rejects a blank and an over-long studentId", async () => {
+      // A blank value is normalized to "absent" rather than widened, so the
+      // result is the unfiltered list, never a silently broken filter.
+      const blank = await adminAgent.get("/api/v1/fees/invoices").query({ studentId: "" })
+      expect(blank.status).toBe(200)
+      expect(blank.body.data.pagination.total).toBeGreaterThan(1)
+
+      const tooLong = await adminAgent
+        .get("/api/v1/fees/invoices")
+        .query({ studentId: "s".repeat(65) })
+      expect(tooLong.status).toBe(400)
+      expect(tooLong.body.error.code).toBe("VALIDATION_ERROR")
+    })
+
+    it("requires the fees:view permission", async () => {
+      const res = await viewerAgent
+        .get("/api/v1/fees/invoices")
+        .query({ studentId: fixtures.studentAId })
+      expect(res.status).toBe(403)
+      expect(res.body.error.code).toBe("FORBIDDEN")
+    })
+
+    // Regression: the unfiltered list must be untouched by the new filter.
+    it("leaves the unfiltered invoice list unchanged", async () => {
+      const res = await adminAgent.get("/api/v1/fees/invoices")
+      expect(res.status).toBe(200)
+      expect(res.body.data.pagination.total).toBe(2)
+      const numbers = res.body.data.items.map((invoice: { invoiceNumber: string }) => invoice.invoiceNumber)
+      expect(numbers).toEqual(expect.arrayContaining(["INV-2026-1001", "INV-2026-1002"]))
+    })
+
+    it("keeps listing an invoice's payments by invoiceId", async () => {
+      await adminAgent.post("/api/v1/payments").send(paymentPayload(fixtures.invoiceAId))
+      const res = await adminAgent.get("/api/v1/payments").query({ invoiceId: fixtures.invoiceAId })
+      expect(res.status).toBe(200)
+      expect(res.body.data.pagination.total).toBe(1)
+      expect(res.body.data.items[0].invoice.id).toBe(fixtures.invoiceAId)
     })
   })
 

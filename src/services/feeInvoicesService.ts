@@ -14,6 +14,7 @@ function queryString(query: InvoiceQuery): string {
   if (query.pageSize) params.set("pageSize", String(query.pageSize))
   if (query.sessionId) params.set("sessionId", query.sessionId)
   if (query.classId) params.set("classId", query.classId)
+  if (query.studentId) params.set("studentId", query.studentId)
   if (query.status) params.set("status", query.status)
   if (query.search) params.set("search", query.search)
   if (query.sortBy) params.set("sortBy", query.sortBy)

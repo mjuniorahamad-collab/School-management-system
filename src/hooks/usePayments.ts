@@ -7,11 +7,32 @@ const PAYMENTS_GROUP = ["payments"] as const
 const INVOICES_GROUP = ["fee-invoices"] as const
 const RECEIPTS_GROUP = ["receipts"] as const
 
-export function usePayments(query: PaymentQuery) {
+export function usePayments(query: PaymentQuery, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ["payments", "list", query],
     queryFn: () => paymentsService.list(query),
+    enabled: options?.enabled ?? true,
   })
+}
+
+/**
+ * Recent payments for a single invoice, newest first. Delegates to
+ * `usePayments` so it shares the same cache entry and the ["payments"] group
+ * invalidation that `useCreatePayment` performs.
+ *
+ * The caller's `enabled` is combined with the presence of an invoice id, the
+ * same way `usePayment` guards its own id. Without that, `enabled: true` with a
+ * null id would fetch the unfiltered list of every payment in the tenant.
+ */
+export function useInvoicePayments(
+  invoiceId: string | null,
+  pageSize = 5,
+  options?: { enabled?: boolean },
+) {
+  return usePayments(
+    { invoiceId: invoiceId ?? undefined, pageSize, sortBy: "paymentDate", sortDir: "desc" },
+    { enabled: Boolean(invoiceId) && (options?.enabled ?? true) },
+  )
 }
 
 export function usePayment(id: string | null) {

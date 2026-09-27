@@ -110,6 +110,40 @@ describe("installment/invoice status derivation (database-free)", () => {
       deriveInvoiceStatus([{ amountPaid: 0, balance: 100, dueDateISO: "2026-10-01" }], T),
     ).toBe("UNPAID")
   })
+
+  // The collection dialog only offers invoices matching
+  // `balance > 0 && status !== "PAID"`. That predicate is only safe because
+  // these two derivations agree, so the coupling is pinned here: a settled
+  // invoice is always PAID, and any invoice with money outstanding is
+  // something other than PAID. OVERDUE in particular must stay collectable -
+  // an overdue invoice is exactly the one a bursar most needs to collect.
+  it("agrees with the collection eligibility rule (balance > 0 && status !== PAID)", () => {
+    const settled = [
+      { amountPaid: 50, balance: 0, dueDateISO: "2026-01-01" },
+      { amountPaid: 50, balance: 0, dueDateISO: "2026-07-01" },
+    ]
+    const statusOf = (installments: Parameters<typeof deriveInvoiceStatus>[0]) =>
+      deriveInvoiceStatus(installments, T)
+    const isCollectable = (installments: Parameters<typeof deriveInvoiceStatus>[0]) => {
+      const outstanding = installments.reduce((sum, installment) => sum + installment.balance, 0)
+      return outstanding > 0 && statusOf(installments) !== "PAID"
+    }
+
+    // Settled: excluded from collection.
+    expect(isCollectable(settled)).toBe(false)
+    expect(statusOf(settled)).toBe("PAID")
+
+    // Outstanding, including OVERDUE: all three included in collection.
+    const outstanding = [
+      { amountPaid: 0, balance: 100, dueDateISO: "2026-08-01" }, // OVERDUE
+      { amountPaid: 10, balance: 40, dueDateISO: "2026-10-01" }, // PARTIAL
+      { amountPaid: 0, balance: 100, dueDateISO: "2026-12-01" }, // UNPAID (not earliest)
+    ]
+    expect(isCollectable(outstanding)).toBe(true)
+    expect(statusOf(outstanding)).toBe("OVERDUE")
+    expect(isCollectable([{ amountPaid: 0, balance: 100, dueDateISO: "2026-10-01" }])).toBe(true)
+    expect(statusOf([{ amountPaid: 0, balance: 100, dueDateISO: "2026-10-01" }])).toBe("UNPAID")
+  })
 })
 
 describe("installment totals (database-free)", () => {
@@ -235,6 +269,28 @@ describe("fee-invoice schemas (database-free)", () => {
 
   it("rejects unknown invoice statuses", () => {
     const result = listInvoicesQuerySchema.safeParse({ status: "REFUNDED" })
+    expect(result.success).toBe(false)
+  })
+
+  it("accepts a studentId filter and composes it with the session filter", () => {
+    const parsed = listInvoicesQuerySchema.safeParse({ studentId: "stu-1", sessionId: "sess-1" })
+    expect(parsed.success).toBe(true)
+    if (parsed.success) {
+      expect(parsed.data.studentId).toBe("stu-1")
+      expect(parsed.data.sessionId).toBe("sess-1")
+    }
+  })
+
+  // A blank studentId must not widen the query into an unfiltered list, so
+  // `optionalParam` normalizes it to undefined rather than passing it through.
+  it("treats a blank studentId as absent", () => {
+    const parsed = listInvoicesQuerySchema.safeParse({ studentId: "", sessionId: "sess-1" })
+    expect(parsed.success).toBe(true)
+    if (parsed.success) expect(parsed.data.studentId).toBeUndefined()
+  })
+
+  it("rejects an over-long studentId", () => {
+    const result = listInvoicesQuerySchema.safeParse({ studentId: "s".repeat(65) })
     expect(result.success).toBe(false)
   })
 })

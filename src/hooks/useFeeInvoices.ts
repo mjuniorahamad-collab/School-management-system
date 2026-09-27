@@ -5,10 +5,11 @@ import type { GenerateInvoicesInput, InvoiceQuery } from "@/types/fees"
 
 const GROUP = ["fee-invoices"] as const
 
-export function useFeeInvoices(query: InvoiceQuery) {
+export function useFeeInvoices(query: InvoiceQuery, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ["fee-invoices", "list", query],
     queryFn: () => feeInvoicesService.list(query),
+    enabled: options?.enabled ?? true,
   })
 }
 

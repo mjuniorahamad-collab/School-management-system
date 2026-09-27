@@ -412,6 +412,7 @@ export async function listInvoices(
   const where: Prisma.FeeInvoiceWhereInput = { schoolId }
   if (query.sessionId) where.sessionId = query.sessionId
   if (query.classId) where.enrollment = { classId: query.classId }
+  if (query.studentId) where.studentId = query.studentId
   if (query.status) where.status = query.status
 
   const search = query.search?.trim()

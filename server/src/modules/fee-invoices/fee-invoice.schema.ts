@@ -47,6 +47,7 @@ export const listInvoicesQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   sessionId: optionalParam(z.string().trim().min(1).max(64)),
   classId: optionalParam(z.string().trim().min(1).max(64)),
+  studentId: optionalParam(z.string().trim().min(1).max(64)),
   status: z.enum(INVOICE_STATUSES).optional(),
   search: optionalParam(z.string().trim().min(1).max(100)),
   sortBy: z.enum(INVOICE_SORT_BY).optional().default("createdAt"),
