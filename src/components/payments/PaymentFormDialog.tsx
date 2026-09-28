@@ -24,7 +24,7 @@ import { InvoiceStatusBadge } from "@/components/fees/FeeStatusBadges"
 import { useFeeInvoices } from "@/hooks/useFeeInvoices"
 import { useCreatePayment } from "@/hooks/usePayments"
 import { formatFullDate, formatINR } from "@/lib/format"
-import { PAYMENT_METHOD_OPTIONS } from "@/types/fees"
+import { PAYMENT_METHOD_LABELS, PAYMENT_METHOD_OPTIONS } from "@/types/fees"
 import type { CreatePaymentInput, FeeInvoiceListItem, PaymentMethod } from "@/types/fees"
 
 interface PaymentFormDialogProps {
@@ -224,7 +224,7 @@ function PaymentFormContent({
               <SelectContent>
                 {PAYMENT_METHOD_OPTIONS.map((option) => (
                   <SelectItem key={option} value={option}>
-                    {option.charAt(0).toUpperCase() + option.slice(1).toLowerCase().replace("_", " ")}
+                    {PAYMENT_METHOD_LABELS[option]}
                   </SelectItem>
                 ))}
               </SelectContent>

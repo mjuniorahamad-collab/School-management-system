@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select"
 import { usePayments } from "@/hooks/usePayments"
 import { formatFullDate, formatINR } from "@/lib/format"
-import { PAYMENT_METHOD_OPTIONS } from "@/types/fees"
+import { PAYMENT_METHOD_LABELS, PAYMENT_METHOD_OPTIONS } from "@/types/fees"
 import type { PaymentListResult, PaymentMethod } from "@/types/fees"
 
 const SEARCH_DEBOUNCE_MS = 350
@@ -109,7 +109,7 @@ export function PaymentsPage() {
                     <SelectItem value="all">All methods</SelectItem>
                     {PAYMENT_METHOD_OPTIONS.map((option) => (
                       <SelectItem key={option} value={option}>
-                        {option.charAt(0).toUpperCase() + option.slice(1).toLowerCase().replace("_", " ")}
+                        {PAYMENT_METHOD_LABELS[option]}
                       </SelectItem>
                     ))}
                   </SelectContent>

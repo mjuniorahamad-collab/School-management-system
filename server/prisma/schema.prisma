@@ -863,6 +863,7 @@ enum PaymentMethod {
   CHEQUE
   CARD
   OTHER
+  UPI
 }
 
 // A recorded FeePayment is always a completed, successful payment: funds are

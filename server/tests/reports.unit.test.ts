@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { PERMISSION_CODES } from "../src/permissions/permissions.js"
 import { REPORT_CATALOG, getReportDefinition } from "../src/modules/reports/report.catalog.js"
 import { monthKeyOf, ratioPercent, summarizeAttendanceCounts } from "../src/modules/reports/report.rules.js"
+import { paymentRegisterQuerySchema } from "../src/modules/reports/report.schema.js"
 import {
   academicPerformanceToCsv,
   admissionsSummaryToCsv,
@@ -310,5 +311,24 @@ describe("report.csv (individual serializers)", () => {
     })
     expect(csv).toContain('"Month"')
     expect(csv).toContain('"2026-01","2","1"')
+  })
+})
+
+describe("payment register filter scope (deliberate exclusion)", () => {
+  const base = { from: "2026-01-01", to: "2026-06-30" }
+
+  it("offers the five original report methods", () => {
+    for (const method of ["CASH", "BANK_TRANSFER", "CHEQUE", "CARD", "OTHER"]) {
+      expect(paymentRegisterQuerySchema.safeParse({ ...base, method }).success).toBe(true)
+    }
+  })
+
+  it("does not offer UPI as a payment-register filter option", () => {
+    // Deliberate product decision: "Online Payment / UPI" is recorded through the
+    // payment form only. The payment register may not be filtered by it, so a UPI
+    // payment is read from the unfiltered report (rows, methodCounts and CSV are
+    // all data-driven) rather than through a filter chip. Locked here so the
+    // exclusion is not widened by accident.
+    expect(paymentRegisterQuerySchema.safeParse({ ...base, method: "UPI" }).success).toBe(false)
   })
 })

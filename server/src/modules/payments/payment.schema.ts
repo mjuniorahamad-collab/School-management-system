@@ -11,7 +11,14 @@ const paymentDateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "paymentDate must be formatted as YYYY-MM-DD")
 
-export const PAYMENT_METHODS = ["CASH", "BANK_TRANSFER", "CHEQUE", "CARD", "OTHER"] as const
+export const PAYMENT_METHODS = [
+  "CASH",
+  "BANK_TRANSFER",
+  "CHEQUE",
+  "CARD",
+  "UPI",
+  "OTHER",
+] as const
 
 /**
  * Idempotency key: a per-submission token the client generates once and reuses

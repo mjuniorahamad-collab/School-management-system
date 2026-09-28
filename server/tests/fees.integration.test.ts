@@ -94,7 +94,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Fees payments & receipts API (integration)"
         code: "FEY2025",
         startDate: new Date("2025-04-01T00:00:00.000Z"),
         endDate: new Date("2026-03-31T00:00:00.000Z"),
-        status: "ARCHIVED",
+        status: "CLOSED",
       },
     })
     fixtures.pastSessionId = pastSession.id
@@ -581,6 +581,48 @@ const payments = await adminAgent.get("/api/v1/payments")
       const byNumber = await adminAgent.get("/api/v1/receipts").query({ search: "RCT-2026-0002" })
       expect(byNumber.body.data.pagination.total).toBe(1)
       expect(byNumber.body.data.items[0].invoiceNumber).toBe("INV-2026-1001")
+    })
+
+    it("records an Online Payment / UPI payment end to end", async () => {
+      // "Online Payment / UPI" is staff-recorded, exactly like CASH. Persisting
+      // it must touch nothing else: the same allocation, the same receipt, the
+      // same idempotency semantics.
+      const res = await adminAgent
+        .post("/api/v1/payments")
+        .send(paymentPayload(fixtures.invoiceAId, { method: "UPI", transactionRef: "UTR-523418872645" }))
+      expect(res.status).toBe(201)
+      expect(res.body.data.payment.method).toBe("UPI")
+      expect(res.body.data.payment.transactionRef).toBe("UTR-523418872645")
+
+      // The create-payment response embeds a receipt SUMMARY (id, number,
+      // balance), so the receipt's own method is asserted on the receipt detail.
+      const receipt = await adminAgent.get(`/api/v1/receipts/${res.body.data.receipt.id}`)
+      expect(receipt.status).toBe(200)
+      expect(receipt.body.data.method).toBe("UPI")
+      expect(receipt.body.data.transactionRef).toBe("UTR-523418872645")
+
+      const filtered = await adminAgent.get("/api/v1/payments").query({ method: "UPI" })
+      expect(filtered.body.data.pagination.total).toBe(1)
+      expect(filtered.body.data.items[0].id).toBe(res.body.data.payment.id)
+
+      const replay = await adminAgent
+        .post("/api/v1/payments")
+        .send(paymentPayload(fixtures.invoiceAId, { method: "UPI", transactionRef: "UTR-523418872645" }))
+      expect(replay.status).toBe(200)
+      expect(replay.body.data.replayed).toBe(true)
+      expect(replay.body.data.receipt.id).toBe(res.body.data.receipt.id)
+
+      const all = await adminAgent.get("/api/v1/payments")
+      expect(all.body.data.pagination.total).toBe(1)
+    })
+
+    it("accepts a UPI payment with no transaction reference", async () => {
+      // The reference stays optional for every method, UPI included: the server
+      // must never reject a payment staff has already collected.
+      const res = await adminAgent.post("/api/v1/payments").send(paymentPayload(fixtures.invoiceAId, { method: "UPI" }))
+      expect(res.status).toBe(201)
+      expect(res.body.data.payment.method).toBe("UPI")
+      expect(res.body.data.payment.transactionRef ?? null).toBeNull()
     })
 
     it("paginates and reports totalPages", async () => {

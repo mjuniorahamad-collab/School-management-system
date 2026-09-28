@@ -79,11 +79,21 @@ function invoicesEnabled(): unknown {
 }
 
 const invoicePicker = () => screen.queryByRole("combobox", { name: /invoice/i })
+const methodPicker = () => screen.queryByRole("combobox", { name: /method/i })
 
 // Radix opens its listbox from a pointerdown that looks like a real primary
 // click; a bare fireEvent.pointerDown leaves it closed, so the payload matters.
 function openInvoicePicker() {
   fireEvent.pointerDown(invoicePicker() as HTMLElement, {
+    button: 0,
+    ctrlKey: false,
+    pointerType: "mouse",
+  })
+  return screen.queryAllByRole("option").map((option) => option.textContent ?? "")
+}
+
+function openMethodPicker() {
+  fireEvent.pointerDown(methodPicker() as HTMLElement, {
     button: 0,
     ctrlKey: false,
     pointerType: "mouse",
@@ -247,5 +257,57 @@ describe("PaymentFormDialog global picker is unfiltered", () => {
     for (const number of ["INV-PARTIAL", "INV-PAID", "INV-ZERO", "INV-OVERDUE"]) {
       expect(options.some((text) => text.includes(number))).toBe(true)
     }
+  })
+})
+
+describe("PaymentFormDialog payment methods", () => {
+  // "Online Payment / UPI" is the single new recorded method. The five existing
+  // options must render byte-identically to how they did before, which is why
+  // the expected strings are spelled out here rather than derived from the
+  // label map the component now uses.
+  it("offers Online Payment / UPI alongside the five unchanged options", () => {
+    mockInvoices([invoice()])
+    render(<PaymentFormDialog open onOpenChange={vi.fn()} />)
+
+    const options = openMethodPicker()
+    expect(options).toEqual([
+      "Cash",
+      "Bank transfer",
+      "Cheque",
+      "Card",
+      "Online Payment / UPI",
+      "Other",
+    ])
+  })
+
+  it("lists UPI before Other", () => {
+    mockInvoices([invoice()])
+    render(<PaymentFormDialog open onOpenChange={vi.fn()} />)
+
+    const options = openMethodPicker()
+    expect(options.indexOf("Online Payment / UPI")).toBeLessThan(options.indexOf("Other"))
+  })
+
+  it("does not invent provider-specific methods", () => {
+    mockInvoices([invoice()])
+    render(<PaymentFormDialog open onOpenChange={vi.fn()} />)
+
+    const options = openMethodPicker().join("|")
+    for (const provider of ["Google Pay", "PhonePe", "Paytm", "UPI Reference", "UTR"]) {
+      expect(options).not.toContain(provider)
+    }
+  })
+
+  // The reference field is shared by every method. Adding a method must not
+  // have renamed it, made it required, or added a UPI-specific control.
+  it("leaves the transaction reference field untouched", () => {
+    mockInvoices([invoice()])
+    render(<PaymentFormDialog open onOpenChange={vi.fn()} />)
+
+    const field = screen.getByLabelText("Transaction reference")
+    expect(field).toBeDefined()
+    expect(field.getAttribute("required")).toBeNull()
+    expect(field.getAttribute("placeholder")).toBe("Optional, e.g. UPI ref or cheque number")
+    expect(screen.queryByText(/UPI Reference/i)).toBeNull()
   })
 })

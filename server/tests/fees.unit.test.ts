@@ -399,6 +399,20 @@ describe("payment schemas (database-free)", () => {
     expect(result.success).toBe(false)
   })
 
+  it("accepts every recorded payment method, including Online Payment / UPI", () => {
+    for (const method of ["CASH", "BANK_TRANSFER", "CHEQUE", "CARD", "UPI", "OTHER"]) {
+      expect(createPaymentSchema.safeParse({ ...valid, method }).success).toBe(true)
+    }
+  })
+
+  it("keeps transactionRef optional for Online Payment / UPI", () => {
+    // "Online Payment / UPI" is recorded manually by staff. There is deliberately
+    // no UPI-specific validation: a bank reference is optional, exactly as it is
+    // for every other method, and the server must never reject a collected payment.
+    const result = createPaymentSchema.safeParse({ ...valid, method: "UPI" })
+    expect(result.success).toBe(true)
+  })
+
   it("rejects zero and negative amounts", () => {
     expect(createPaymentSchema.safeParse({ ...valid, amount: 0 }).success).toBe(false)
     expect(createPaymentSchema.safeParse({ ...valid, amount: -10 }).success).toBe(false)
@@ -430,6 +444,14 @@ describe("payment schemas (database-free)", () => {
       expect(parsed.data.method).toBe("CASH")
     }
     expect(listPaymentsQuerySchema.safeParse({ method: "BOGUS" }).success).toBe(false)
+  })
+
+  it("filters the payments list by Online Payment / UPI", () => {
+    const parsed = listPaymentsQuerySchema.safeParse({ method: "UPI" })
+    expect(parsed.success).toBe(true)
+    if (parsed.success) {
+      expect(parsed.data.method).toBe("UPI")
+    }
   })
 })
 

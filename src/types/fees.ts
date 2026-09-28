@@ -8,7 +8,14 @@ export type InvoiceStatus = (typeof INVOICE_STATUS_OPTIONS)[number]
 export const INSTALLMENT_STATUS_OPTIONS = ["UNPAID", "PARTIAL", "PAID", "OVERDUE"] as const
 export type InstallmentStatus = (typeof INSTALLMENT_STATUS_OPTIONS)[number]
 
-export const PAYMENT_METHOD_OPTIONS = ["CASH", "BANK_TRANSFER", "CHEQUE", "CARD", "OTHER"] as const
+export const PAYMENT_METHOD_OPTIONS = [
+  "CASH",
+  "BANK_TRANSFER",
+  "CHEQUE",
+  "CARD",
+  "UPI",
+  "OTHER",
+] as const
 export type PaymentMethod = (typeof PAYMENT_METHOD_OPTIONS)[number]
 
 export type PaymentStatus = "SUCCESS"
@@ -32,6 +39,7 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   BANK_TRANSFER: "Bank transfer",
   CHEQUE: "Cheque",
   CARD: "Card",
+  UPI: "Online Payment / UPI",
   OTHER: "Other",
 }
 
