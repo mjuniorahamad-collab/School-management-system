@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react"
-import { ArrowLeftRight, Search, Undo2 } from "lucide-react"
+import { ArrowLeftRight, Printer, Search, Undo2 } from "lucide-react"
 import { useAuth } from "@/auth/useAuth"
 import { LoanStatusBadge } from "@/components/library/libraryBadges"
+import { CirculationPrintDocument } from "@/components/library/CirculationPrintDocument"
 import { IssueLoanDialog } from "@/components/library/IssueLoanDialog"
 import {
   Dialog,
@@ -15,6 +16,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useLibraryLoans, useReturnLibraryLoan } from "@/hooks/useLibrary"
+import { useFullFilteredList } from "@/hooks/useFullFilteredList"
+import { libraryService } from "@/services/libraryService"
+import { printDocument, PRINT_PAGE_SIZE_PARAM } from "@/lib/print"
 import { LIBRARY_BORROWER_TYPE_LABELS } from "@/types/library"
 import type { LibraryLoanListItem } from "@/types/library"
 
@@ -67,9 +71,43 @@ export function LoansTab() {
   const canIssue = can("library:issue")
   const canReturn = can("library:return")
 
+  // Decision D4: the register prints the complete filtered set, collected on
+  // demand. `printRows` is null until a print click succeeds, so nothing is
+  // fetched while the user is merely browsing.
+  const [printRows, setPrintRows] = useState<LibraryLoanListItem[] | null>(null)
+  const [printTotal, setPrintTotal] = useState(0)
+  const filters = { status: filter === "all" ? undefined : filter, search: search || undefined }
+  const { collect, isCollecting } = useFullFilteredList<LibraryLoanListItem>({
+    queryKey: ["library", "loans", filters],
+    fetchPage: (page) =>
+      libraryService.listLoans({ ...filters, page, pageSize: PRINT_PAGE_SIZE_PARAM }),
+  })
+
+  async function handlePrint() {
+    const rows = await collect()
+    if (rows === null) return
+    setPrintRows(rows)
+    setPrintTotal(total)
+  }
+
+  // Printing waits until the collected rows are actually in the DOM. Calling
+  // printDocument() straight from handlePrint opened the print dialog in the same
+  // tick as setPrintRows(), so the browser snapshotted the tab before React had
+  // committed the register. The animation frame runs after the rows are in the DOM
+  // and the document is laid out — the same guarantee PaymentReceiptPrint relies on.
+  useEffect(() => {
+    if (printRows === null) return
+    const frame = requestAnimationFrame(() => {
+      printDocument({ title: "Library Circulation Register" })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [printRows])
+
+  const filterLabel = FILTERS.find((option) => option.value === filter)?.label ?? "All"
+
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between print:hidden">
         <div className="relative w-full sm:max-w-xs">
           <Search
             className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
@@ -92,69 +130,92 @@ export function LoansTab() {
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        {FILTERS.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => {
-              setFilter(option.value)
-              setPage(1)
-            }}
-            aria-pressed={filter === option.value}
-            className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${
-              filter === option.value
-                ? "border-primary bg-primary text-primary-foreground"
-                : "bg-card text-muted-foreground hover:bg-muted"
-            }`}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-
-      {!canView ? (
-        <p className="rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground">
-          You do not have permission to view library loans.
-        </p>
-      ) : (
-        <>
-          <LoansList
-            items={items}
-            isPending={isPending}
-            isError={isError}
-            canReturn={canReturn}
-            onRetry={() => void refetch()}
-            onReturn={(loan) => setReturning(loan)}
-          />
-          {items.length > 0 && (
-            <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-              <span>
-                Page {page} of {totalPages} · {total} loan{total !== 1 ? "s" : ""}
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPage(Math.max(1, page - 1))}
-                  disabled={page <= 1}
-                  className="rounded px-2 py-1 font-medium hover:bg-muted disabled:opacity-40 disabled:pointer-events-none"
-                >
-                  ← Prev
-                </button>
-                <span>Page {page}</span>
-                <button
-                  type="button"
-                  onClick={() => setPage(Math.min(totalPages, page + 1))}
-                  disabled={page >= totalPages}
-                  className="rounded px-2 py-1 font-medium hover:bg-muted disabled:opacity-40 disabled:pointer-events-none"
-                >
-                  Next →
-                </button>
-              </div>
-            </div>
-          )}
-        </>
+      {canView && (
+        /* The register is collected on click, so this action cannot use the
+           synchronous PrintButton. */
+        <div className="flex justify-end print:hidden">
+          <Button variant="outline" size="sm" onClick={() => void handlePrint()} disabled={isCollecting}>
+            <Printer className="size-3.5" aria-hidden="true" />
+            {isCollecting ? "Collecting…" : "Print register"}
+          </Button>
+        </div>
       )}
+
+      {printRows && (
+        <CirculationPrintDocument
+          loans={printRows}
+          scope={{ filterLabel, search: search || null, total: printTotal }}
+        />
+      )}
+
+      {/* Filter chips, the loan list and its pagination are screen chrome. The
+          register above stays outside this wrapper so it has no print:hidden
+          ancestor (see docs/print-architecture.md). */}
+      <div className="flex flex-col gap-3 print:hidden">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {FILTERS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => {
+                setFilter(option.value)
+                setPage(1)
+              }}
+              aria-pressed={filter === option.value}
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${
+                filter === option.value
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "bg-card text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
+        {!canView ? (
+          <p className="rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground">
+            You do not have permission to view library loans.
+          </p>
+        ) : (
+          <>
+            <LoansList
+              items={items}
+              isPending={isPending}
+              isError={isError}
+              canReturn={canReturn}
+              onRetry={() => void refetch()}
+              onReturn={(loan) => setReturning(loan)}
+            />
+            {items.length > 0 && (
+              <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                <span>
+                  Page {page} of {totalPages} · {total} loan{total !== 1 ? "s" : ""}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPage(Math.max(1, page - 1))}
+                    disabled={page <= 1}
+                    className="rounded px-2 py-1 font-medium hover:bg-muted disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    ← Prev
+                  </button>
+                  <span>Page {page}</span>
+                  <button
+                    type="button"
+                    onClick={() => setPage(Math.min(totalPages, page + 1))}
+                    disabled={page >= totalPages}
+                    className="rounded px-2 py-1 font-medium hover:bg-muted disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    Next →
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       <IssueLoanDialog key={issueOpen ? "open" : "closed"} open={issueOpen} onOpenChange={setIssueOpen} />
       <ReturnLoanDialog loan={returning} onClose={() => setReturning(null)} />

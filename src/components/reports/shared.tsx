@@ -26,7 +26,10 @@ export function StatusBadge({ status }: { status: string }) {
   const style = STATUS_TONES[status] ?? STATUS_TONES.INACTIVE
   const label = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()
   return (
-    <Badge variant="outline" className={cn("whitespace-nowrap", style)}>
+    /* `data-print-status` is a print hook, not styling: the print stylesheet
+       flattens the tinted pill to plain ink, because `print-color-adjust: exact`
+       means the screen tint really would print as a coloured chip. */
+    <Badge variant="outline" data-print-status className={cn("whitespace-nowrap", style)}>
       {label}
     </Badge>
   )
@@ -47,7 +50,10 @@ const STAT_TONES: Record<NonNullable<ReportStat["tone"]>, string> = {
 
 export function ReportStatGrid({ stats }: { stats: ReportStat[] }) {
   return (
-    <div className="grid grid-cols-2 gap-3 rounded-xl bg-card p-4 ring-1 ring-foreground/10 sm:grid-cols-3 lg:grid-cols-4">
+    /* `print-document-report-stats` is a print hook: the print stylesheet drops
+       the card's radius, background and ring, so the summary reads as a ruled
+       block on paper instead of a dashboard tile. */
+    <div className="print-document-report-stats grid grid-cols-2 gap-3 rounded-xl bg-card p-4 ring-1 ring-foreground/10 sm:grid-cols-3 lg:grid-cols-4">
       {stats.map((stat) => (
         <div key={stat.label}>
           <p className="text-xs font-medium text-muted-foreground uppercase">{stat.label}</p>
@@ -72,7 +78,7 @@ export function ResultsPagination({
   onPageChange: (page: number) => void
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+    <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground print:hidden">
       <span>
         Page {page} of {totalPages} · {total} record{total !== 1 ? "s" : ""}
       </span>
@@ -137,8 +143,13 @@ export function humanizeToken(token: string): string {
 
 export function TableShell({ children }: { children: ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
-      <div className="overflow-x-auto">{children}</div>
+    /* `print-document-table-shell` is a print hook: the print stylesheet removes
+       the card chrome and re-owns the cell borders, so a report table prints with
+       the same rule as every other table in the app. */
+    <div className="print-document-table-shell overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10 print:overflow-visible">
+      {/* A horizontally scrolling box clips print output to its visible width, so
+          a wide report would lose its right-hand columns on paper. */}
+      <div className="overflow-x-auto print:overflow-visible">{children}</div>
     </div>
   )
 }

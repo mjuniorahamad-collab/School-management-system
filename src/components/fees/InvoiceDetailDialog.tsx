@@ -1,4 +1,7 @@
+import { useAuth } from "@/auth/useAuth"
 import { InstallmentStatusBadge } from "@/components/fees/FeeStatusBadges"
+import { InvoicePrintDocument } from "@/components/fees/InvoicePrintDocument"
+import { PrintButton } from "@/components/print/PrintButton"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -23,7 +26,7 @@ export function InvoiceDetailDialog({ invoiceId, onOpenChange }: InvoiceDetailDi
   return (
     <Dialog open={invoiceId !== null} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
+        <DialogHeader className="print:hidden">
           <DialogTitle className="font-mono text-base">
             {data?.invoiceNumber ?? "Invoice"}
           </DialogTitle>
@@ -31,12 +34,12 @@ export function InvoiceDetailDialog({ invoiceId, onOpenChange }: InvoiceDetailDi
         </DialogHeader>
 
         {isPending ? (
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 print:hidden">
             <Skeleton className="h-16 w-full" />
             <Skeleton className="h-40 w-full" />
           </div>
         ) : isError || !data ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+          <div className="flex flex-col items-center justify-center gap-3 py-12 text-center print:hidden">
             <p className="text-sm text-muted-foreground">Could not load the invoice.</p>
             <Button
               type="button"
@@ -50,14 +53,29 @@ export function InvoiceDetailDialog({ invoiceId, onOpenChange }: InvoiceDetailDi
         ) : (
           <InvoiceContent invoice={data} />
         )}
+
+        {/* Print-only region inside the dialog; hidden on screen by the print
+            stylesheet, laid out as a page when printing. */}
+        {data && <InvoicePrintDocument invoice={data} />}
       </DialogContent>
     </Dialog>
   )
 }
 
 function InvoiceContent({ invoice }: { invoice: FeeInvoiceDetail }) {
+  const { can } = useAuth()
+
   return (
-    <div className="flex flex-col gap-4">
+    /* Screen only. The printed artifact is the sibling InvoicePrintDocument in the
+       dialog, so none of this belongs on the sheet. */
+    <div className="flex flex-col gap-4 print:hidden">
+      <div className="flex justify-end">
+        {/* Decision D1: gated on the read permission of the printed artifact. */}
+        {can("fees:view") && (
+          <PrintButton documentTitle={`Fee Invoice ${invoice.invoiceNumber}`}>Print invoice</PrintButton>
+        )}
+      </div>
+
       <div className="grid grid-cols-2 gap-3 rounded-lg bg-card p-3 text-sm ring-1 ring-foreground/10 sm:grid-cols-4">
         <MetaCard label="Student" value={invoice.student.fullName} />
         <MetaCard label="Admission" value={invoice.student.admissionNumber} />

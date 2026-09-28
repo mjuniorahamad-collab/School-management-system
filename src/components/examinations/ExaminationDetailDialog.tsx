@@ -19,6 +19,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { ExamStatusBadge } from "@/components/shared/ExamStatusBadge"
+import { ExamSchedulePrintDocument } from "@/components/examinations/ExamSchedulePrintDocument"
+import { PrintButton } from "@/components/print/PrintButton"
+import { useAuth } from "@/auth/useAuth"
 import { useExamContext, useExamDetail, useUpdateExamSubjects } from "@/hooks/useExams"
 import { formatFullDate } from "@/lib/format"
 import type { ExamSubjectItem } from "@/types/exams"
@@ -43,6 +46,7 @@ export function ExaminationDetailDialog({
 }: ExaminationDetailDialogProps) {
   const { data: exam } = useExamDetail(examId)
   const { data: context } = useExamContext()
+  const { can } = useAuth()
   const updateSubjects = useUpdateExamSubjects(examId ?? "")
   const [editingRows, setEditingRows] = useState<SubjectDraftRow[] | null>(null)
 
@@ -122,6 +126,9 @@ export function ExaminationDetailDialog({
   return (
     <Dialog open={Boolean(examId)} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        {/* Everything the operator sees is chrome; the printed page carries only
+            the schedule document rendered below. */}
+        <div className="flex flex-col gap-3 print:hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {exam.name}
@@ -146,12 +153,18 @@ export function ExaminationDetailDialog({
 
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-foreground">Subjects</h3>
-          {isDraft && !editing && canUpdateSubjects && (
-            <Button type="button" variant="outline" size="sm" onClick={startEditing}>
-              <Pencil className="size-3.5" aria-hidden="true" />
-              Edit subjects
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {/* Decision D1: gated on the read permission of the printed artifact. */}
+            {can("exams:view") && (
+              <PrintButton documentTitle={`Exam Schedule ${exam.name}`}>Print schedule</PrintButton>
+            )}
+            {isDraft && !editing && canUpdateSubjects && (
+              <Button type="button" variant="outline" size="sm" onClick={startEditing}>
+                <Pencil className="size-3.5" aria-hidden="true" />
+                Edit subjects
+              </Button>
+            )}
+          </div>
         </div>
 
         {editing ? (
@@ -270,6 +283,10 @@ export function ExaminationDetailDialog({
             Close
           </Button>
         </DialogFooter>
+        </div>
+
+        {/* Print-only region; hidden on screen by the print stylesheet. */}
+        <ExamSchedulePrintDocument exam={exam} />
       </DialogContent>
     </Dialog>
   )

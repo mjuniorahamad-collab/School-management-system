@@ -30,6 +30,13 @@ vi.mock("react-router-dom", () => ({
 
 vi.mock("@/auth/useAuth", () => ({ useAuth: useAuthMock }))
 
+// The page renders the Student Profile print document, whose letterhead reads
+// branding through TanStack Query. This suite renders without a QueryClient
+// (the page itself takes its data from mocked hooks), so branding is stubbed.
+vi.mock("@/hooks/useBranding", () => ({
+  useBranding: () => ({ data: { schoolName: "Test School", tagline: "" } }),
+}))
+
 vi.mock("@/hooks/useStudents", () => ({
   useStudent,
   useStudentPhoto: () => ({

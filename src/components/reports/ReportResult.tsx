@@ -1,6 +1,8 @@
-import { Download, Printer } from "lucide-react"
+import { Download } from "lucide-react"
 import { API_BASE_URL } from "@/lib/apiClient"
 import { Button } from "@/components/ui/button"
+import { PrintButton } from "@/components/print/PrintButton"
+import { ReportPrintFrame } from "@/components/reports/ReportPrintFrame"
 import { ReportEmpty, ReportError, ReportSkeleton } from "@/components/reports/shared"
 import { AcademicPerformanceView } from "@/components/reports/results/AcademicPerformanceView"
 import { AdmissionsSummaryView } from "@/components/reports/results/AdmissionsSummaryView"
@@ -26,6 +28,8 @@ interface ReportResultProps {
   isError: boolean
   onRetry: () => void
   canExport: boolean
+  /** Printing is gated on the report's read permission (decision D1). */
+  canPrint: boolean
   exportHref: string | null
   page: number
   totalPages: number
@@ -39,6 +43,7 @@ export function ReportResult({
   isError,
   onRetry,
   canExport,
+  canPrint,
   exportHref,
   page,
   totalPages,
@@ -49,10 +54,9 @@ export function ReportResult({
       <div className="flex flex-wrap items-center justify-between gap-2 print:hidden">
         <p className="max-w-2xl text-sm text-muted-foreground">{report.description}</p>
         <div className="flex shrink-0 items-center gap-2">
-          <Button variant="outline" onClick={() => window.print()} className="shrink-0">
-            <Printer className="size-4" aria-hidden="true" />
-            Print
-          </Button>
+          {canPrint && (
+            <PrintButton documentTitle={report.title}>Print</PrintButton>
+          )}
           {canExport && exportHref && (
             <Button variant="outline" asChild className="shrink-0">
               <a href={`${API_BASE_URL}${exportHref}`} download>
@@ -64,12 +68,23 @@ export function ReportResult({
         </div>
       </div>
 
+      {/* The print frame supplies the letterhead, title block, scope and repeating
+          footer, and the report body is the printed content itself — so the frame
+          only ever wraps a real result, never the empty or error states below. */}
       {isPending ? (
         <ReportSkeleton />
       ) : isError ? (
         <ReportError onRetry={onRetry} />
       ) : data ? (
-        <ReportBody report={report} data={data} page={page} totalPages={totalPages} onPageChange={onPageChange} />
+        <ReportPrintFrame report={report} data={data} page={page} totalPages={totalPages}>
+          <ReportBody
+            report={report}
+            data={data}
+            page={page}
+            totalPages={totalPages}
+            onPageChange={onPageChange}
+          />
+        </ReportPrintFrame>
       ) : (
         <ReportEmpty message="Choose a report and run it to see results here." />
       )}

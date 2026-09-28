@@ -196,38 +196,53 @@ export function ReportsPage() {
   return (
     <PageContainer>
       <div className="flex flex-col gap-4">
-        <PageHeader
-          title="Reports"
-          description="Run predefined reports across academic and financial data. Exports are audited."
-        />
+        {/* The report body prints its own title and scope, so the page header is
+            chrome and must not be printed above it. */}
+        <div className="print:hidden">
+          <PageHeader
+            title="Reports"
+            description="Run predefined reports across academic and financial data. Exports are audited."
+          />
+        </div>
 
         {!canView ? (
           <ReportEmpty message="You do not have permission to view reports." />
         ) : (
           <>
-            <ReportsCatalog items={catalog} selectedKey={selectedKey} onSelect={selectReport} />
+            <div className="print:hidden">
+              <ReportsCatalog items={catalog} selectedKey={selectedKey} onSelect={selectReport} />
+            </div>
 
             {selectedKey && currentReport && (
-              <section className="flex flex-col gap-3 print:hidden">
-                <div>
+              /* The report body must stay printable. Only the chrome around it —
+                 the catalog, the filter panel and the result toolbar — is
+                 `print:hidden`, so the printed page carries the report title
+                 and the data table and nothing else. */
+              <section className="flex flex-col gap-3">
+                {/* The printed report carries its own title block inside
+                    ReportPrintFrame, so this screen heading must not print above
+                    it as a second, unstyled title. */}
+                <div className="print:hidden">
                   <h2 className="text-base font-semibold text-foreground">{currentReport.title}</h2>
                   <p className="text-sm text-muted-foreground">{currentReport.description}</p>
                 </div>
-                <ReportFilterPanel
-                  report={currentReport}
-                  filters={(drafts[selectedKey] ?? EMPTY_FILTERS[selectedKey]) as unknown as Record<string, string>}
-                  canRun={isReportRunnable(
-                    selectedKey,
-                    (drafts[selectedKey] ?? EMPTY_FILTERS[selectedKey]) as unknown as Record<string, string>,
-                  )}
-                  sessions={sessions}
-                  classes={classes}
-                  sections={sections}
-                  exams={exams}
-                  examsPending={examsQuery.isPending}
-                  onChange={(field, value) => handleFilterChange(selectedKey, field, value)}
-                  onRun={() => runReport(selectedKey)}
-                />
+                <div className="print:hidden">
+                  <ReportFilterPanel
+                    report={currentReport}
+                    filters={(drafts[selectedKey] ?? EMPTY_FILTERS[selectedKey]) as unknown as Record<string, string>}
+                    canRun={isReportRunnable(
+                      selectedKey,
+                      (drafts[selectedKey] ?? EMPTY_FILTERS[selectedKey]) as unknown as Record<string, string>,
+                    )}
+                    sessions={sessions}
+                    classes={classes}
+                    sections={sections}
+                    exams={exams}
+                    examsPending={examsQuery.isPending}
+                    onChange={(field, value) => handleFilterChange(selectedKey, field, value)}
+                    onRun={() => runReport(selectedKey)}
+                  />
+                </div>
                 {hasRun && result ? (
                   <ReportResult
                     report={currentReport}
@@ -236,6 +251,7 @@ export function ReportsPage() {
                     isError={result.isError}
                     onRetry={result.refetch}
                     canExport={canExport}
+                    canPrint={canView}
                     exportHref={exportHrefFor(selectedKey)}
                     page={page}
                     totalPages={totalPages}

@@ -8,9 +8,11 @@ import { hashPassword } from "../src/auth/password.js"
 // Tenant branding projection suite. Verifies the chrome's `GET /branding` read
 // is available to ANY authenticated user of the school — including portal-only
 // roles that lack `settings:view` — always resolves the canonical editable
-// SchoolSetting.schoolName (falling back to School.name), stays tenant-isolated,
-// and never loosens the `settings:view` permission model. DB-gated like the
-// other integration suites; requires TEST_DATABASE_URL.
+// SchoolSetting.schoolName (falling back to School.name), projects the public
+// contact block the print letterhead needs (normalising blank stored values to
+// null), stays tenant-isolated, never widens into a settings dump, and never
+// loosens the `settings:view` permission model. DB-gated like the other
+// integration suites; requires TEST_DATABASE_URL.
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL
 const app = createApp()
 
@@ -76,6 +78,23 @@ describe.skipIf(!TEST_DATABASE_URL)("Tenant branding projection (integration)", 
     })
     await prisma.schoolSetting.create({
       data: { schoolId: schoolA.id, key: "tagline", value: "Learn. Grow. Shine." },
+    })
+
+    // School A's public contact block, as the print letterhead consumes it.
+    // `addressLine2` is stored as "" and `state` as whitespace only: the key/value
+    // store has no null, so both must be normalised to null by the projection.
+    await prisma.schoolSetting.createMany({
+      data: [
+        { schoolId: schoolA.id, key: "schoolShortName", value: "PSA" },
+        { schoolId: schoolA.id, key: "contactPhone", value: "+91 80 4000 1000" },
+        { schoolId: schoolA.id, key: "contactEmail", value: "office@portalschoola.example.com" },
+        { schoolId: schoolA.id, key: "addressLine1", value: "12 Lake Road" },
+        { schoolId: schoolA.id, key: "addressLine2", value: "" },
+        { schoolId: schoolA.id, key: "city", value: "Bengaluru" },
+        { schoolId: schoolA.id, key: "state", value: "   " },
+        { schoolId: schoolA.id, key: "postalCode", value: "560001" },
+        { schoolId: schoolA.id, key: "country", value: "India" },
+      ],
     })
 
     async function makeUser(name: string, email: string, roleId: string, schoolId: string): Promise<void> {
@@ -144,6 +163,82 @@ describe.skipIf(!TEST_DATABASE_URL)("Tenant branding projection (integration)", 
   it("a portal-only user still cannot read the full settings payload", async () => {
     const res = await parentAAgent.get("/api/v1/settings")
     expect(res.status).toBe(403)
+  })
+
+  it("projects the public contact block the print letterhead needs", async () => {
+    const res = await parentAAgent.get("/api/v1/branding")
+    expect(res.status).toBe(200)
+    expect(res.body.data).toMatchObject({
+      schoolShortName: "PSA",
+      contactPhone: "+91 80 4000 1000",
+      contactEmail: "office@portalschoola.example.com",
+      addressLine1: "12 Lake Road",
+      city: "Bengaluru",
+      postalCode: "560001",
+      country: "India",
+    })
+  })
+
+  it("normalises blank and whitespace-only stored values to null", async () => {
+    const res = await parentAAgent.get("/api/v1/branding")
+    // addressLine2 is stored as "", state as whitespace only. Neither is a value
+    // the letterhead may print, and neither may leak through as a blank string.
+    expect(res.body.data.addressLine2).toBeNull()
+    expect(res.body.data.state).toBeNull()
+  })
+
+  it("returns null for every contact field a tenant has never set", async () => {
+    const res = await parentBAgent.get("/api/v1/branding")
+    expect(res.status).toBe(200)
+    for (const key of [
+      "schoolShortName",
+      "contactPhone",
+      "contactEmail",
+      "addressLine1",
+      "addressLine2",
+      "city",
+      "state",
+      "postalCode",
+      "country",
+    ]) {
+      expect(res.body.data[key], `${key} must be null, got ${JSON.stringify(res.body.data[key])}`).toBeNull()
+    }
+  })
+
+  it("never projects operational settings — the projection is not a settings dump", async () => {
+    const res = await parentAAgent.get("/api/v1/branding")
+    const projected = Object.keys(res.body.data).sort()
+    expect(projected).toEqual(
+      [
+        "addressLine1",
+        "addressLine2",
+        "city",
+        "contactEmail",
+        "contactPhone",
+        "country",
+        "postalCode",
+        "schoolName",
+        "schoolShortName",
+        "state",
+        "tagline",
+      ].sort(),
+    )
+    // Explicit guard: these stay behind `settings:view` and must never be widened
+    // into an unauthenticated-by-role projection by a future change.
+    for (const forbidden of [
+      "gradingPassPercent",
+      "gradingScale",
+      "attendanceWorkdays",
+      "timetablePeriodsPerDay",
+      "feeCurrency",
+      "feeDefaultDueDay",
+      "feeEnableOnlinePayments",
+      "feeConcessionSelfApproval",
+      "primaryColor",
+      "logoUrl",
+    ]) {
+      expect(res.body.data, `${forbidden} must stay behind settings:view`).not.toHaveProperty(forbidden)
+    }
   })
 })
 

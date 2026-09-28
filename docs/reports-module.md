@@ -106,6 +106,16 @@ summary) — no-data is never an error.
   ship their bounded rows.
 - **Printable HTML** in the browser (`window.print()` + Tailwind `print:`
   variants). PDF generation/document infrastructure is explicitly deferred.
+- **Print gating** is by `ReportResult`'s existing `canView` decision (the same
+  permission the catalog and the fetch already enforce) — there is no `*:print`
+  permission, and printing is not audit-logged. The header action is a
+  `PrintButton`; reports are always A4 portrait.
+- **The report body is the print layer.** `print:hidden` belongs to the catalog,
+  filter panel, result toolbar and pagination — never to the body wrapper, or the
+  report would print nothing. The body prints its own title, scope and data, and
+  `TableShell` must allow overflow in print so columns are never clipped. This
+  exact regression is guarded by `src/components/reports/report-print.test.tsx`
+  and `server/tests/print-surfaces.test.ts`.
 
 ## 9. Database / migration plan
 

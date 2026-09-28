@@ -7,6 +7,9 @@ import { AttendanceToolbar } from "@/components/attendance/AttendanceToolbar"
 import { AttendanceMarking } from "@/components/attendance/AttendanceMarking"
 import type { MarkingStudentRow } from "@/components/attendance/AttendanceMarking"
 import { AttendanceSummaryView } from "@/components/attendance/AttendanceSummary"
+import { AttendanceRegisterPrintDocument } from "@/components/attendance/AttendanceRegisterPrintDocument"
+import { PrintButton } from "@/components/print/PrintButton"
+import { academicSessionsService } from "@/services/academicSessionsService"
 import { AttendanceList } from "@/components/attendance/AttendanceList"
 import { AttendanceFormDialog } from "@/components/attendance/AttendanceFormDialog"
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog"
@@ -123,9 +126,22 @@ export function AttendancePage() {
       dateTo: date,
     })
 
+  const records = recordsData?.items ?? []
+
+  // Same query key the toolbar uses, so this resolves from the shared cache; it
+  // only labels the printed register.
+  const { data: sessions } = useQuery({
+    queryKey: ["academic-sessions", "options"],
+    queryFn: () => academicSessionsService.list({}),
+  })
+  const session = (sessions?.items ?? []).find((item) => item.id === academicSessionId)
+
   return (
     <PageContainer>
       <div className="flex flex-col gap-4">
+      {/* The screen header and filter toolbar are chrome; the printed register
+          states its own scope. */}
+      <div className="print:hidden">
         <PageHeader title="Attendance" description="Mark and review daily class attendance." />
 
         <AttendanceToolbar
@@ -149,9 +165,11 @@ export function AttendancePage() {
           onDateChange={setDate}
           sections={sections}
         />
+      </div>
 
-        {canView && (
-          <div className="flex flex-wrap items-center gap-2">
+      {canView && (
+        /* The tab switcher is navigation: the printed page is always the register. */
+        <div className="print:hidden flex flex-wrap items-center gap-2">
             {(
               [
                 { id: "marking", label: "Daily Marking" },
@@ -223,8 +241,21 @@ export function AttendancePage() {
         )}
 
         {tab === "records" && (
+          <>
+            {canView && (
+              /* Decision D6: printing exists only for persisted records, and only
+                 on the Records tab — never from the in-progress marking grid. An
+                 empty register is still a legitimate artifact: it states that no
+                 records exist for that date and class. */
+              <div className="flex justify-end print:hidden">
+                <PrintButton documentTitle={`Attendance Register ${date}`}>
+                  Print register
+                </PrintButton>
+              </div>
+            )}
+            <div className="print:hidden">
           <AttendanceList
-            items={recordsData?.items ?? []}
+            items={records}
             isPending={recordsPending}
             isError={recordsError}
             canEdit={canEdit}
@@ -233,6 +264,17 @@ export function AttendancePage() {
             onEdit={(record) => setEditing(record)}
             onDelete={(record) => setDeleting(record)}
           />
+            </div>
+            <AttendanceRegisterPrintDocument
+              records={records}
+              scope={{
+                academicSession: session?.name ?? academicSessionId,
+                className: records[0]?.className ?? classId,
+                sectionName: records[0]?.sectionName ?? (sectionId || "All sections"),
+                date,
+              }}
+            />
+          </>
         )}
 
         <AttendanceFormDialog

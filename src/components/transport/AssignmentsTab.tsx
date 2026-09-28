@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Plus, Search } from "lucide-react"
+import { Plus, Printer, Search } from "lucide-react"
 import { useAuth } from "@/auth/useAuth"
 import { AssignmentFormDialog } from "@/components/transport/AssignmentFormDialog"
+import { RoutePassengerListPrintDocument } from "@/components/transport/RoutePassengerListPrintDocument"
 import { EmptyState, ListSkeleton } from "@/components/transport/transportBits"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -13,6 +14,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useTransportAssignmentContext, useTransportAssignments, useUpdateTransportAssignment } from "@/hooks/useTransport"
+import { useFullFilteredList } from "@/hooks/useFullFilteredList"
+import { transportService } from "@/services/transportService"
+import { printDocument, PRINT_PAGE_SIZE_PARAM } from "@/lib/print"
 import {
   TRANSPORT_ASSIGNMENT_STATUS_LABELS,
   TRANSPORT_ASSIGNMENT_STATUS_OPTIONS,
@@ -73,9 +77,54 @@ export function AssignmentsTab() {
   const canCreate = can("transport:create")
   const canUpdate = can("transport:update")
 
+  // Decision D4: the passenger list prints the complete filtered set, collected on
+  // demand. Nothing is fetched until the user asks to print.
+  const [printRows, setPrintRows] = useState<TransportAssignmentListItem[] | null>(null)
+  const [printTotal, setPrintTotal] = useState(0)
+  const filters = {
+    search: search || undefined,
+    routeId: routeId || undefined,
+    academicSessionId: sessionId || undefined,
+    direction: direction || undefined,
+    status: status || undefined,
+  }
+  const { collect, isCollecting } = useFullFilteredList<TransportAssignmentListItem>({
+    queryKey: ["transport", "assignments", filters],
+    fetchPage: (page) =>
+      transportService.listAssignments({ ...filters, page, pageSize: PRINT_PAGE_SIZE_PARAM }),
+  })
+
+  async function handlePrint() {
+    const rows = await collect()
+    if (rows === null) return
+    setPrintRows(rows)
+    setPrintTotal(total)
+  }
+
+  // Printing waits until the collected rows are actually in the DOM. Calling
+  // printDocument() straight from handlePrint opened the print dialog in the same
+  // tick as setPrintRows(), so the browser snapshotted the tab before React had
+  // committed the passenger list. The animation frame runs after the rows are in
+  // the DOM and the document is laid out — the same guarantee PaymentReceiptPrint
+  // relies on.
+  useEffect(() => {
+    if (printRows === null) return
+    const frame = requestAnimationFrame(() => {
+      printDocument({ title: "Route Passenger List" })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [printRows])
+
+  const scopeLabels = {
+    session: sessions.find((item) => item.id === sessionId)?.name ?? "All sessions",
+    route: routes.find((item) => item.id === routeId)?.name ?? "All routes",
+    direction: direction ? TRANSPORT_DIRECTION_LABELS[direction] : "All directions",
+    status: status ? TRANSPORT_ASSIGNMENT_STATUS_LABELS[status] : "Any status",
+  }
+
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between print:hidden">
         <div className="relative w-full sm:max-w-xs">
           <Search
             className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
@@ -98,7 +147,24 @@ export function AssignmentsTab() {
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      {canView && (
+        /* Collected on click, so this action cannot use the synchronous PrintButton. */
+        <div className="flex justify-end print:hidden">
+          <Button variant="outline" size="sm" onClick={() => void handlePrint()} disabled={isCollecting}>
+            <Printer className="size-3.5" aria-hidden="true" />
+            {isCollecting ? "Collecting…" : "Print passenger list"}
+          </Button>
+        </div>
+      )}
+
+      {printRows && (
+        <RoutePassengerListPrintDocument
+          assignments={printRows}
+          scope={{ ...scopeLabels, search: search || null, total: printTotal }}
+        />
+      )}
+
+      <div className="flex flex-wrap items-center gap-2 print:hidden">
         <Select value={sessionId} onValueChange={(value) => { setSessionId(value === "all" ? "" : value); setPage(1) }}>
           <SelectTrigger className="w-full sm:w-auto" aria-label="Filter by session">
             <SelectValue placeholder="All sessions" />
@@ -153,46 +219,51 @@ export function AssignmentsTab() {
         </Select>
       </div>
 
-      {!canView ? (
-        <p className="rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground">
-          You do not have permission to view transport assignments.
-        </p>
-      ) : (
-        <AssignmentsList
-          items={items}
-          isPending={isPending}
-          isError={isError}
-          canUpdate={canUpdate}
-          onRetry={() => void refetch()}
-        />
-      )}
+      {/* The assignment list and its pagination are screen chrome. The passenger
+          list above stays outside this wrapper so it has no print:hidden ancestor
+          (see docs/print-architecture.md). */}
+      <div className="flex flex-col gap-3 print:hidden">
+        {!canView ? (
+          <p className="rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground">
+            You do not have permission to view transport assignments.
+          </p>
+        ) : (
+          <AssignmentsList
+            items={items}
+            isPending={isPending}
+            isError={isError}
+            canUpdate={canUpdate}
+            onRetry={() => void refetch()}
+          />
+        )}
 
-      {items.length > 0 && (
-        <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-          <span>
-            Page {page} of {totalPages} · {total} assignment{total !== 1 ? "s" : ""}
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setPage(Math.max(1, page - 1))}
-              disabled={page <= 1}
-              className="rounded px-2 py-1 font-medium hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
-            >
-              ← Prev
-            </button>
-            <span>Page {page}</span>
-            <button
-              type="button"
-              onClick={() => setPage(Math.min(totalPages, page + 1))}
-              disabled={page >= totalPages}
-              className="rounded px-2 py-1 font-medium hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
-            >
-              Next →
-            </button>
+        {items.length > 0 && (
+          <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+            <span>
+              Page {page} of {totalPages} · {total} assignment{total !== 1 ? "s" : ""}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage(Math.max(1, page - 1))}
+                disabled={page <= 1}
+                className="rounded px-2 py-1 font-medium hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
+              >
+                ← Prev
+              </button>
+              <span>Page {page}</span>
+              <button
+                type="button"
+                onClick={() => setPage(Math.min(totalPages, page + 1))}
+                disabled={page >= totalPages}
+                className="rounded px-2 py-1 font-medium hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
+              >
+                Next →
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       <AssignmentFormDialog open={formOpen} onOpenChange={setFormOpen} />
     </div>

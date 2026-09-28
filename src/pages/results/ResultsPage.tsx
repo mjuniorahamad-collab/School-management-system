@@ -3,6 +3,8 @@ import { useSearchParams } from "react-router-dom"
 import { useAuth } from "@/auth/useAuth"
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog"
 import { ResultSheetGrid } from "@/components/results/ResultSheetGrid"
+import { ResultSheetPrintDocument } from "@/components/results/ResultSheetPrintDocument"
+import { PrintButton } from "@/components/print/PrintButton"
 import { ResultsToolbar } from "@/components/results/ResultsToolbar"
 import { PageContainer } from "@/components/layout/PageContainer"
 import { PageHeader } from "@/components/layout/PageHeader"
@@ -57,10 +59,26 @@ export function ResultsPage() {
   return (
     <PageContainer>
       <div className="flex flex-col gap-4">
-        <PageHeader
-          title="Results"
-          description="Enter marks for published examinations, finalize grade sheets, and reopen for corrections."
-        />
+        {/* The screen header is chrome; the printed sheet carries its own title. */}
+        <div className="print:hidden">
+          <PageHeader
+            title="Results"
+            description="Enter marks for published examinations, finalize grade sheets, and reopen for corrections."
+            actions={
+              /* Decision D5: the result sheet is wide, so it prints landscape.
+                   Decision D1: gated on the read permission of the printed artifact. */
+              canView && sheet && sheet.rows.length > 0 ? (
+                <PrintButton
+                  documentTitle={`Result Sheet ${sheet.exam.name}`}
+                  orientation="landscape"
+                >
+                  Print sheet
+                </PrintButton>
+              ) : undefined
+            }
+          />
+        </div>
+        <div className="print:hidden">
         <ResultsToolbar
           exams={availableExams}
           selectedExamId={selectedExamId}
@@ -73,6 +91,7 @@ export function ResultsPage() {
           onFinalize={() => setPendingAction("finalize")}
           onReopen={() => setPendingAction("reopen")}
         />
+        </div>
 
         {!canView ? (
           <EmptyState message="You do not have permission to view results." />
@@ -84,7 +103,9 @@ export function ResultsPage() {
           <ErrorState onRetry={() => void sheetQuery.refetch()} />
         ) : sheet ? (
           <>
-            <div className="grid grid-cols-2 gap-3 rounded-lg bg-card p-3 text-sm ring-1 ring-foreground/10 sm:grid-cols-4">
+            {/* The result document below prints this same exam metadata in its own
+                header block, so the screen card would duplicate it on paper. */}
+            <div className="grid grid-cols-2 gap-3 rounded-lg bg-card p-3 text-sm ring-1 ring-foreground/10 sm:grid-cols-4 print:hidden">
               <MetaCard label="Examination" value={sheet.exam.name} />
               <MetaCard
                 label="Target"
@@ -99,7 +120,12 @@ export function ResultsPage() {
             {sheet.rows.length === 0 ? (
               <EmptyState message="No students are enrolled in this examination's class." />
             ) : (
-              <ResultSheetGrid sheet={sheet} isSaving={isActing} onSaveSubject={handleSaveSubject} />
+              <>
+                <div className="print:hidden">
+                  <ResultSheetGrid sheet={sheet} isSaving={isActing} onSaveSubject={handleSaveSubject} />
+                </div>
+                <ResultSheetPrintDocument sheet={sheet} />
+              </>
             )}
           </>
         ) : null}
@@ -127,7 +153,7 @@ export function ResultsPage() {
           }}
         />
 
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-muted-foreground print:hidden">
           Absences are excluded rather than counted as zero; overall grades and ranks appear once every subject has
           marks for a student.
         </p>

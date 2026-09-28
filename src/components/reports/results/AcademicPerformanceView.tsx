@@ -42,7 +42,7 @@ export function AcademicPerformanceView({ report }: { report: AcademicPerformanc
           {summary.subjects.map((subject) => (
             <span
               key={subject.examSubjectId}
-              className="rounded-full border bg-muted/40 px-2.5 py-0.5 text-xs font-medium text-muted-foreground tabular-nums"
+              className="print-document-report-chips rounded-full border bg-muted/40 px-2.5 py-0.5 text-xs font-medium text-muted-foreground tabular-nums"
             >
               {subject.subjectName}:{" "}
               {subject.averagePercentage === null ? "—" : formatPercent(subject.averagePercentage, 0)}
@@ -148,7 +148,11 @@ function MetaCard({ label, value }: { label: string; value: string }) {
 
 function PassFail({ isPass }: { isPass: boolean }) {
   return (
+    /* `data-print-status` flattens the green/red chip to plain ink in print: the
+       result is already spelled out in the text, and a hue alone is not a
+       dependable signal on a monochrome print. */
     <span
+      data-print-status
       className={
         isPass
           ? "rounded-full border bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700"

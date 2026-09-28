@@ -128,17 +128,42 @@ export async function getSettings(schoolId: string): Promise<SettingsResponse> {
 }
 
 /**
- * Branding projection for the application chrome. Presolves the same canonical
- * `SchoolSetting` rows `getSettings` reads (falling back to the tenant's
- * `School.name` when the editable name is empty) so any authenticated user of
- * the tenant — including portal-only roles without `settings:view` — can render
- * the school's editable branding. Always scoped to the caller's own school.
+ * The key/value store has no null: an unset key reads back as `""`. The branding
+ * contract speaks `null` for "this tenant has not set it", so a client can tell
+ * unset from a real value without sniffing for blank strings. A whitespace-only
+ * value counts as unset.
+ */
+export function brandingText(value: string | undefined): string | null {
+  const trimmed = value?.trim()
+  return trimmed === undefined || trimmed === "" ? null : trimmed
+}
+
+/**
+ * Branding projection for the application chrome and the print letterhead.
+ * Presolves the same canonical `SchoolSetting` rows `getSettings` reads
+ * (falling back to the tenant's `School.name` when the editable name is empty)
+ * so any authenticated user of the tenant — including portal-only roles without
+ * `settings:view` — can render the school's identity. Always scoped to the
+ * caller's own school.
+ *
+ * Only identity and the public contact block are projected. This is not a
+ * settings dump: grading, attendance, timetable, fee, currency and colour
+ * settings stay behind the `settings:view` route.
  */
 export async function getBranding(schoolId: string): Promise<BrandingResponse> {
   const { settings, school } = await getSettings(schoolId)
   return {
     schoolName: settings.schoolName.trim() || school.name,
-    tagline: settings.tagline?.trim() || null,
+    tagline: brandingText(settings.tagline),
+    schoolShortName: brandingText(settings.schoolShortName),
+    contactPhone: brandingText(settings.contactPhone),
+    contactEmail: brandingText(settings.contactEmail),
+    addressLine1: brandingText(settings.addressLine1),
+    addressLine2: brandingText(settings.addressLine2),
+    city: brandingText(settings.city),
+    state: brandingText(settings.state),
+    postalCode: brandingText(settings.postalCode),
+    country: brandingText(settings.country),
   }
 }
 

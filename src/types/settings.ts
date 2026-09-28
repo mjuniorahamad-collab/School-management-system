@@ -1,9 +1,31 @@
 // Domain type for the Settings module. Mirrors the backend contract
 // (server/src/modules/settings/).
 
+/**
+ * Branding projection consumed by the application chrome (sidebar/header) and by
+ * the print letterhead. It is a server-side projection of the canonical
+ * SchoolSetting store — the same rows the Settings UI reads — so any
+ * authenticated user (including portal-only roles) can render the school's
+ * editable name and public contact details without the full settings payload,
+ * which stays behind `settings:view`.
+ *
+ * Mirrors `BrandingResponse` in server/src/modules/settings/setting.types.ts.
+ * Every optional field is `string | null` because the server normalises an unset
+ * key/value row to `null`; `null` means "this tenant has not set it" and must
+ * render as absent, never as a fallback value belonging to another school.
+ */
 export interface BrandingResponse {
   schoolName: string
   tagline: string | null
+  schoolShortName: string | null
+  contactPhone: string | null
+  contactEmail: string | null
+  addressLine1: string | null
+  addressLine2: string | null
+  city: string | null
+  state: string | null
+  postalCode: string | null
+  country: string | null
 }
 
 /**
@@ -65,13 +87,4 @@ export interface SchoolSettings {
 export interface SettingsResponse {
   school: { id: string; name: string; code: string | null }
   settings: SchoolSettings
-}
-
-// Branding projection consumed by the application chrome (sidebar/header). It is
-// a server-side projection of the canonical SchoolSetting store — the same rows
-// the Settings UI reads — so any authenticated user (including portal-only
-// roles) can render the editable school name without the full settings payload.
-export interface BrandingResponse {
-  schoolName: string
-  tagline: string | null
 }

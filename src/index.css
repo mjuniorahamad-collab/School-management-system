@@ -144,3 +144,524 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Print foundation — see docs/print-architecture.md
+   ────────────────────────────────────────────────────────────────────────────
+   Every printable surface follows one contract: application chrome is hidden
+   (either with Tailwind `print:hidden` on the element, or by the element-type and
+   data-slot rules below for chrome that portals to <body> outside the shell), and
+   a dedicated `hidden print:block` document region renders a clean artifact.
+
+   Tailwind's JIT emits the `print:hidden` and `print:block` utilities from the
+   literal class strings in the source, so they are intentionally NOT written by
+   hand here — duplicating them would fork the generated rules.
+
+   @page orientation: portrait by default. A wide artifact opts into landscape
+   with its own @page rule, because one document's page size cannot be scoped
+   from a descendant selector.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+@page {
+  size: A4 portrait;
+  margin: 14mm;
+}
+
+@media print {
+  /* 1. Reset the document element. !important is required to beat Radix's inline
+        scroll-lock styles on <body>. This does NOT reach the AppShell box — see 1b. */
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  /* 1b. Neutralise the AppShell box itself. The rule above only reaches
+        html/body, but the shell root is `flex h-dvh overflow-hidden` and <main>
+        is `overflow-y-auto`. In paged media h-dvh resolves to exactly one page
+        box, so the shell still reserved a whole blank page and still clipped
+        whatever stayed visible inside main. Every dialog print document is a
+        Radix portal, i.e. a <body> sibling of #root, so it then began one full
+        page late — blank page 1, receipt on page 2. */
+  [data-print-shell],
+  [data-print-shell] main {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /* 1c. Release Radix's modal scroll lock. A modal Dialog locks the page through
+        react-remove-scroll-bar, which injects a singleton <style> into <head> at
+        RUNTIME — i.e. after this stylesheet, so a same-specificity rule here would
+        lose to it on source order. It sets
+        `body[data-scroll-locked] { overflow: hidden !important; position: relative
+        !important; margin-right: Npx !important; padding-* }`, which would leave
+        every dialog-hosted print document printing from inside a clip container:
+        one page fits and anything taller is silently cut instead of paginating.
+        The `html` qualifier is what actually out-specifies it. Print-only: on
+        screen the scroll lock is wanted and untouched. */
+  html body[data-scroll-locked] {
+    height: auto !important;
+    overflow: visible !important;
+    overscroll-behavior: auto !important;
+    position: static !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* 2. Force the light palette. `.dark` is applied to <html> by ThemeProvider, so
+        a dark session would otherwise print dark chrome. This block comes after
+        both :root and .dark, so it wins the cascade. */
+  :root,
+  .dark {
+    --background: #fff;
+    --foreground: #000;
+    --card: #fff;
+    --card-foreground: #000;
+    --popover: #fff;
+    --popover-foreground: #000;
+    --primary: #000;
+    --primary-foreground: #fff;
+    --secondary: #f1f5f9;
+    --secondary-foreground: #000;
+    --muted: #f1f5f9;
+    --muted-foreground: #334155;
+    --accent: #f1f5f9;
+    --accent-foreground: #000;
+    --destructive: #b91c1c;
+    --border: #cbd5e1;
+    --input: #cbd5e1;
+    --ring: #000;
+  }
+
+  /* 3. Suppress chrome. These are all portalled to <body>, outside the shell, so a
+        shell-level `print:hidden` cannot reach them. */
+  header,
+  aside,
+  nav[aria-label="Main navigation"],
+  [data-slot="dialog-overlay"],
+  [data-slot="dialog-close"],
+  [data-slot="sheet-overlay"],
+  [data-slot="sheet-close"],
+  [data-slot="dropdown-menu-content"],
+  [data-slot="popover-content"],
+  [data-slot="select-content"],
+  [data-slot="command-dialog"],
+  [data-sonner-toaster] {
+    display: none !important;
+  }
+
+  /* 4. Un-fix dialogs: they are position:fixed portals, centred with
+        top-1/2 -translate-y-1/2, so a static, full-width box is required before
+        their print document can lay out as a page. DialogContent is `grid gap-4`
+        for screen, so display and gap are reset too — as a grid item the print
+        document would otherwise be sized by the grid rather than by the page
+        box, and would carry the 1rem row gap.
+
+        `transform` is reset because tw-animate-css's @keyframes enter/exit
+        animate the `transform` shorthand, so this is what suppresses zoom. The
+        `translate` property is reset in its own rule at 5b — read the note
+        there before moving it in here. */
+  [data-slot="dialog-content"] {
+    position: static !important;
+    transform: none !important;
+    display: block !important;
+    gap: 0 !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  /* 5. Preserve authored shading and rules (status chips, shaded table heads). */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* 5b. Un-translate dialogs — a SEPARATE rule, and it must stay one.
+         Tailwind v4 does not implement `-translate-x-1/2` / `-translate-y-1/2`
+         with the transform shorthand; it emits the standalone property
+         `translate: var(--tw-translate-x) var(--tw-translate-y)`. So the
+         `transform: none` at 4 does not touch the dialog's centring at all, and
+         the dialog stayed translated by (-50%, -50%) on paper: every dialog-hosted
+         print document was painted half off the LEFT edge of the page and upward
+         off the top. `translate` also establishes a containing block for
+         `position: fixed` descendants, so it captured `.print-document-footer`
+         and clipped the footer band with everything else.
+
+         The reset is a real `translate: none` — not a zero value — because
+         `translate: 0 0` is still a non-`none` value and would keep establishing
+         that fixed-position containing block.
+
+         It lives in its own rule because Lightning CSS folds `translate: none`
+         into `transform: translate(0)` whenever one block declares both, and
+         `transform: translate(0)` does NOT reset the standalone property. That
+         fold is silent: the fix works in dev and disappears in the production
+         bundle. It only folds for ADJACENT same-selector rules, which is what
+         rule 5 above is for. Do not move this next to rule 4, and do not merge
+         them — server/tests/print-foundation.test.ts fails if you do. */
+  [data-slot="dialog-content"] {
+    translate: none !important;
+  }
+
+  /* 6. The print design system.
+     ────────────────────────────────────────────────────────────────────────────
+     One named type scale, one border rule, one footer. Every printed artifact
+     takes its typography and rules from here, so a receipt and a 6-page register
+     share a design LANGUAGE even though they share no template.
+
+     The scale (all pt, so it tracks the A4 page rather than the 96px screen):
+       title 15 · hero 14 · total 12 · body/value 10.5 · subtitle 10 · table 9.5
+       table-compact 8.5 · section 10.5 caps · label 8.5 · note 8.5
+     A component must never hand-write a text size; add a class here instead. */
+
+  .print-document {
+    font-size: 10.5pt;
+    line-height: 1.4;
+    color: #000;
+    /* Reserve the foot of every page for the fixed footer band so it can never
+       sit on top of the last row of a table. */
+    padding-bottom: 16mm;
+  }
+
+  /* Single-page financial documents carry an outer document frame. Long flowing
+     registers must NOT use it: a border wrapped around a multi-page document
+     reads as a broken rectangle, not a frame. */
+  .print-document.print-document-frame {
+    border: 1px solid #0f172a;
+    padding: 6mm 6mm 18mm;
+  }
+
+  /* 6a. Identity block ------------------------------------------------------- */
+
+  .print-document .print-document-letterhead {
+    display: flex;
+    align-items: flex-start;
+    gap: 4mm;
+    padding-bottom: 2mm;
+    border-bottom: 1pt solid #0f172a;
+  }
+
+  .print-document .print-document-monogram {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 11mm;
+    height: 11mm;
+    border: 1pt solid #0f172a;
+    font-size: 11pt;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: #0f172a;
+  }
+
+  .print-document .print-document-school-name {
+    font-size: 14pt;
+    font-weight: 700;
+    line-height: 1.15;
+    color: #0f172a;
+  }
+
+  .print-document .print-document-tagline {
+    font-size: 10pt;
+    color: #334155;
+  }
+
+  /* 6b. Title block ---------------------------------------------------------- */
+
+  .print-document .print-document-eyebrow {
+    font-size: 8pt;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #475569;
+  }
+
+  .print-document .print-document-title {
+    font-size: 15pt;
+    font-weight: 700;
+    line-height: 1.2;
+    color: #0f172a;
+  }
+
+  .print-document .print-document-subtitle {
+    font-size: 10pt;
+    color: #334155;
+  }
+
+  /* 6c. Sections ------------------------------------------------------------- */
+
+  .print-document .print-document-section-block {
+    /* Keeps a section heading attached to the block it introduces. */
+    break-inside: avoid-page;
+  }
+
+  .print-document .print-document-section {
+    font-size: 10pt;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #0f172a;
+    padding-bottom: 1.5pt;
+    margin-bottom: 3pt;
+    border-bottom: 0.5pt solid #cbd5e1;
+  }
+
+  /* 6d. Fields, labels, notes ------------------------------------------------ */
+
+  .print-document .print-document-label {
+    font-size: 8.5pt;
+    color: #475569;
+  }
+
+  .print-document .print-document-value {
+    font-size: 10.5pt;
+    color: #000;
+  }
+
+  .print-document .print-document-note {
+    font-size: 8.5pt;
+    color: #334155;
+  }
+
+  /* 6e. Totals --------------------------------------------------------------- */
+
+  .print-document .print-document-totals {
+    /* A totals block must never be split across a page break. */
+    break-inside: avoid;
+  }
+
+  .print-document .print-document-totals-strip {
+    border-top: 0.5pt solid #cbd5e1;
+    border-bottom: 0.5pt solid #cbd5e1;
+    padding: 2mm 0;
+  }
+
+  .print-document .print-document-totals-ledger {
+    margin-left: auto;
+    width: 62%;
+  }
+
+  .print-document .print-document-total-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    column-gap: 6mm;
+    font-size: 10.5pt;
+    padding: 1pt 0;
+  }
+
+  .print-document .print-document-total {
+    font-size: 12pt;
+    font-weight: 600;
+  }
+
+  .print-document .print-document-total-emphasis {
+    font-size: 12pt;
+    font-weight: 700;
+    color: #0f172a;
+  }
+
+  /* 6f. Tables --------------------------------------------------------------- */
+
+  .print-document .print-document-table {
+    font-size: 9.5pt;
+  }
+
+  .print-document .print-document-table-compact {
+    font-size: 8.5pt;
+  }
+
+  .print-document .print-document-table th,
+  .print-document .print-document-table td {
+    padding: 3pt 5pt;
+  }
+
+  .print-document .print-document-table-compact th,
+  .print-document .print-document-table-compact td {
+    padding: 2pt 4pt;
+  }
+
+  /* THE border rule. It lives here and nowhere else: a document must not add its
+     own per-cell border or it prints a visibly different rule from every other
+     table in the app. */
+  .print-document th,
+  .print-document td {
+    border: 0.5pt solid #cbd5e1;
+    vertical-align: top;
+  }
+
+  .print-document thead {
+    display: table-header-group;
+  }
+
+  .print-document tfoot {
+    display: table-footer-group;
+  }
+
+  .print-document thead th {
+    background: #f1f5f9;
+    color: #0f172a;
+  }
+
+  .print-document tfoot td {
+    font-weight: 700;
+    background: #f8fafc;
+  }
+
+  .print-document tr {
+    break-inside: avoid;
+  }
+
+  /* 6g. Signatures and stamp ------------------------------------------------- */
+
+  .print-document .print-document-signatures {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 10mm;
+    margin-top: 10mm;
+    break-inside: avoid;
+  }
+
+  .print-document .print-document-signatures-no-stamp {
+    margin-top: 10mm;
+    break-inside: avoid;
+  }
+
+  .print-document .print-document-signature-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8mm;
+    flex: 1 1 auto;
+  }
+
+  .print-document .print-document-signatures-no-stamp .print-document-signature-grid {
+    margin-left: 34%;
+  }
+
+  .print-document .print-document-signature-rule {
+    height: 8mm;
+    border-bottom: 0.5pt solid #0f172a;
+  }
+
+  .print-document .print-document-stamp {
+    flex: 0 0 34mm;
+    height: 22mm;
+    border: 0.5pt solid #cbd5e1;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-bottom: 1mm;
+  }
+
+  /* 6h. Footer band ---------------------------------------------------------- */
+
+  /* `fixed` is what makes Chromium re-render this at the foot of EVERY physical
+     page, so a 6-page register carries the document's identity throughout. */
+  .print-document .print-document-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    gap: 2mm;
+    border-top: 0.5pt solid #cbd5e1;
+    padding-top: 1.5mm;
+    font-size: 8pt;
+    color: #475569;
+    background: #fff;
+  }
+
+  .print-document .print-document-footer-school {
+    font-weight: 600;
+    color: #0f172a;
+  }
+
+  /* Never leak a URL onto paper. */
+  .print-document a[href]::after {
+    content: none;
+  }
+
+  /* 6i. Report body ---------------------------------------------------------- */
+
+  /* A report is the one artifact whose printed content IS the screen content, so
+     there is no second copy of the rows to print from. The web card chrome is
+     neutralised here rather than reprinted: a dashboard tile or a tinted status
+     pill on a formal report reads as an unfinished screen grab, and
+     `print-color-adjust: exact` means those screen tints really would print. */
+
+  .print-document .print-document-report-stats {
+    border: 0.5pt solid #cbd5e1;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    padding: 2mm 3mm;
+  }
+
+  .print-document .print-document-table-shell {
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+  }
+
+  /* Re-own the cell rule for report tables. The views author `border-b` on the
+     head and `divide-y` on the body, which would otherwise print at a different
+     weight from every other table; the shorthand also collapses those longhands. */
+  .print-document .print-document-table-shell table {
+    width: 100%;
+    font-size: 9.5pt;
+  }
+
+  .print-document .print-document-table-shell table th,
+  .print-document .print-document-table-shell table td {
+    border: 0.5pt solid #cbd5e1;
+  }
+
+  .print-document .print-document-table-shell table thead {
+    display: table-header-group;
+  }
+
+  .print-document .print-document-table-shell table thead th {
+    background: #f1f5f9;
+  }
+
+  .print-document .print-document-table-shell table tr {
+    break-inside: avoid;
+  }
+
+  /* Status pills flatten to plain ink: a filled chip is a screen affordance, and
+     the shaded variants carry meaning by hue, which is not available on paper. */
+  .print-document [data-print-status] {
+    border: 0 !important;
+    background: none !important;
+    box-shadow: none !important;
+    color: #0f172a !important;
+    padding: 0 !important;
+  }
+
+  /* Summary chips (e.g. the class breakdown in the roster) print as plain text. */
+  .print-document .print-document-report-chips {
+    border: 0;
+    border-radius: 0;
+    background: none;
+    padding: 0;
+    font-size: 9pt;
+  }
+}
+
+/* Wide artifacts (weekly timetable, multi-subject result sheet) opt into
+   landscape at print time: printDocument() injects a scoped @page override for
+   the duration of the print, because @page is a top-level at-rule and a named
+   page (`page: landscape`) is not honoured by Chromium. The rule is removed again
+   on afterprint so the on-screen document is unaffected. */

@@ -14,18 +14,25 @@ export function TransportPage() {
 
   return (
     <PageContainer>
-      <div className="flex flex-col gap-4">
-        <PageHeader
-          title="Transport"
-          description="Manage vehicles, routes and stops, drivers, and per-trip student assignments."
-        />
+        <div className="flex flex-col gap-4">
+        {/* PageHeader renders a <div>, not a <header>, so the print stylesheet's
+            bare-`header` rule cannot reach it. Without this the page title and
+            description would print above the route passenger list. */}
+        <div className="print:hidden">
+          <PageHeader
+            title="Transport"
+            description="Manage vehicles, routes and stops, drivers, and per-trip student assignments."
+          />
+        </div>
         {!can("transport:view") ? (
           <p className="rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground">
             You do not have permission to view transport.
           </p>
         ) : (
           <Tabs value={tab} onValueChange={setTab} className="gap-4">
-            <TabsList>
+            {/* The tab strip is navigation: the printed page is always the
+                passenger list for the filters the user is looking at. */}
+            <TabsList className="print:hidden">
               <TabsTrigger value="vehicles">Vehicles</TabsTrigger>
               <TabsTrigger value="routes">Routes & Stops</TabsTrigger>
               <TabsTrigger value="drivers">Drivers</TabsTrigger>

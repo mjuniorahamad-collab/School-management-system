@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -8,9 +9,11 @@ import {
 } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { InvoiceStatusBadge, PaymentMethodLabel, PaymentStatusBadge } from "@/components/fees/FeeStatusBadges"
+import { PaymentReceiptPrint } from "@/components/payments/PaymentReceiptPrint"
+import { ReceiptPrintDocument } from "@/components/receipts/ReceiptPrintDocument"
 import { usePayment } from "@/hooks/usePayments"
 import { formatFullDate, formatINR } from "@/lib/format"
-import type { InvoiceStatus, PaymentDetail } from "@/types/fees"
+import type { InvoiceStatus, PaymentDetail, ReceiptDetail } from "@/types/fees"
 
 interface PaymentDetailDialogProps {
   paymentId: string | null
@@ -19,11 +22,16 @@ interface PaymentDetailDialogProps {
 
 export function PaymentDetailDialog({ paymentId, onOpenChange }: PaymentDetailDialogProps) {
   const { data, isPending, isError, refetch } = usePayment(paymentId)
+  const [printReceipt, setPrintReceipt] = useState<ReceiptDetail | null>(null)
+
+  const onReceiptLoaded = useCallback((receipt: ReceiptDetail) => {
+    setPrintReceipt(receipt)
+  }, [])
 
   return (
     <Dialog open={paymentId !== null} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
+        <DialogHeader className="print:hidden">
           <DialogTitle className="font-mono text-base">
             {data?.paymentNumber ?? "Payment"}
           </DialogTitle>
@@ -31,28 +39,47 @@ export function PaymentDetailDialog({ paymentId, onOpenChange }: PaymentDetailDi
         </DialogHeader>
 
         {isPending ? (
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 print:hidden">
             <Skeleton className="h-16 w-full" />
             <Skeleton className="h-40 w-full" />
           </div>
         ) : isError || !data ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+          <div className="flex flex-col items-center justify-center gap-3 py-12 text-center print:hidden">
             <p className="text-sm text-muted-foreground">Could not load the payment.</p>
             <Button type="button" variant="outline" size="sm" onClick={() => void refetch()}>
               Try again
             </Button>
           </div>
         ) : (
-          <PaymentContent payment={data} />
+          <PaymentContent payment={data} onReceiptLoaded={onReceiptLoaded} />
+        )}
+
+        {/* The print document lives inside the dialog so the print stylesheet can
+            un-fix it, and it is a direct child of DialogContent — never nested in
+            a screen card or flex row, which would make it a flex item sized by its
+            own content rather than by the page box. It is `hidden print:block`, so
+            it never appears on screen. The receiptId guard keeps a receipt loaded
+            for a previously viewed payment from ever reaching the print region. */}
+        {printReceipt !== null && printReceipt.id === data?.receipt?.id && (
+          <ReceiptPrintDocument receipt={printReceipt} />
         )}
       </DialogContent>
     </Dialog>
   )
 }
 
-function PaymentContent({ payment }: { payment: PaymentDetail }) {
+function PaymentContent({
+  payment,
+  onReceiptLoaded,
+}: {
+  payment: PaymentDetail
+  onReceiptLoaded: (receipt: ReceiptDetail) => void
+}) {
   return (
-    <div className="flex flex-col gap-4">
+    /* All of this is screen chrome. The receipt print document is mounted by the
+       dialog itself as a direct child of DialogContent, so this whole block can
+       simply be hidden from the sheet. */
+    <div className="flex flex-col gap-4 print:hidden">
       <div className="grid grid-cols-2 gap-3 rounded-lg bg-card p-3 text-sm ring-1 ring-foreground/10 sm:grid-cols-4">
         <MetaCard label="Amount" value={formatINR(payment.amount)} />
         <MetaCard label="Date" value={formatFullDate(payment.paymentDate)} />
@@ -96,6 +123,8 @@ function PaymentContent({ payment }: { payment: PaymentDetail }) {
         </dl>
       </SectionCard>
 
+      {/* Trigger only. It hands the loaded receipt back to the dialog, which owns
+          the document — see PaymentReceiptPrint. */}
       <SectionCard title="Receipt">
         {payment.receipt ? (
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -105,9 +134,15 @@ function PaymentContent({ payment }: { payment: PaymentDetail }) {
                 Balance after this payment: {formatINR(payment.receipt.balanceAfter)}
               </p>
             </div>
+            <PaymentReceiptPrint
+              receiptId={payment.receipt.id}
+              onLoaded={onReceiptLoaded}
+            />
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">No receipt was issued for this payment.</p>
+          <p className="text-sm text-muted-foreground">
+            No receipt was issued for this payment.
+          </p>
         )}
       </SectionCard>
 

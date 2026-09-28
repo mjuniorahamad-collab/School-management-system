@@ -1,3 +1,4 @@
+import { useAuth } from "@/auth/useAuth"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -8,6 +9,8 @@ import {
 } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PaymentMethodLabel } from "@/components/fees/FeeStatusBadges"
+import { PrintButton } from "@/components/print/PrintButton"
+import { ReceiptPrintDocument } from "@/components/receipts/ReceiptPrintDocument"
 import { useReceipt } from "@/hooks/useReceipts"
 import { formatFullDate, formatINR } from "@/lib/format"
 import type { ReceiptDetail } from "@/types/fees"
@@ -23,7 +26,7 @@ export function ReceiptDetailDialog({ receiptId, onOpenChange }: ReceiptDetailDi
   return (
     <Dialog open={receiptId !== null} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-xl">
-        <DialogHeader>
+        <DialogHeader className="print:hidden">
           <DialogTitle className="font-mono text-base">
             {data?.receiptNumber ?? "Receipt"}
           </DialogTitle>
@@ -31,12 +34,12 @@ export function ReceiptDetailDialog({ receiptId, onOpenChange }: ReceiptDetailDi
         </DialogHeader>
 
         {isPending ? (
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 print:hidden">
             <Skeleton className="h-16 w-full" />
             <Skeleton className="h-40 w-full" />
           </div>
         ) : isError || !data ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+          <div className="flex flex-col items-center justify-center gap-3 py-12 text-center print:hidden">
             <p className="text-sm text-muted-foreground">Could not load the receipt.</p>
             <Button type="button" variant="outline" size="sm" onClick={() => void refetch()}>
               Try again
@@ -45,14 +48,30 @@ export function ReceiptDetailDialog({ receiptId, onOpenChange }: ReceiptDetailDi
         ) : (
           <ReceiptContent receipt={data} />
         )}
+
+        {/* The print document lives inside the dialog so the print stylesheet can
+            un-fix it; it is `hidden print:block`, so it never appears on screen. */}
+        {data && <ReceiptPrintDocument receipt={data} />}
       </DialogContent>
     </Dialog>
   )
 }
 
 function ReceiptContent({ receipt }: { receipt: ReceiptDetail }) {
+  // Decision D1: printing is gated on the read permission of the artifact being
+  // printed, never on a dedicated `*:print` permission.
+  const { can } = useAuth()
+
   return (
-    <div className="flex flex-col gap-4">
+    /* Screen only. The printed artifact is the sibling ReceiptPrintDocument below,
+       so none of this belongs on the sheet. */
+    <div className="flex flex-col gap-4 print:hidden">
+      <div className="flex justify-end">
+        {can("receipts:view") && (
+          <PrintButton documentTitle={`Fee Receipt ${receipt.receiptNumber}`}>Print receipt</PrintButton>
+        )}
+      </div>
+
       <div className="flex items-start justify-between gap-3 rounded-lg bg-card p-4 ring-1 ring-foreground/10">
         <div>
           <p className="text-sm font-medium text-foreground">{receipt.student.fullName}</p>

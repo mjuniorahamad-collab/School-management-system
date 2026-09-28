@@ -31,7 +31,7 @@ export function PaymentRegisterView({ report, page, totalPages, onPageChange }: 
             {methodChips.map(([method, count]) => (
               <span
                 key={method}
-                className="rounded-full border bg-muted/40 px-2.5 py-0.5 text-xs font-medium text-muted-foreground tabular-nums"
+                className="print-document-report-chips rounded-full border bg-muted/40 px-2.5 py-0.5 text-xs font-medium text-muted-foreground tabular-nums"
               >
                 {humanizeToken(method)}: {count}
               </span>

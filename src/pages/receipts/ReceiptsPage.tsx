@@ -47,60 +47,66 @@ export function ReceiptsPage() {
   return (
     <PageContainer>
       <div className="flex flex-col gap-4">
-        <PageHeader
-          title="Receipts"
-          description="Immutable records issued for every successful fee payment. Receipts cannot be edited or deleted."
-        />
+        {/* The list screen chrome is not part of any printed artifact, so it is
+            hidden from the print sheet. The dialog below stays outside this
+            wrapper: the receipt document it owns must have no print:hidden
+            ancestor (see docs/print-architecture.md). */}
+        <div className="flex flex-col gap-4 print:hidden">
+          <PageHeader
+            title="Receipts"
+            description="Immutable records issued for every successful fee payment. Receipts cannot be edited or deleted."
+          />
 
-        {!canView ? (
-          <p className="rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground">
-            You do not have permission to view receipts.
-          </p>
-        ) : (
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="relative w-full sm:max-w-xs">
-                <Search
-                  className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-                  aria-hidden="true"
-                />
-                <Input
-                  type="search"
-                  value={searchDraft}
-                  onChange={(event) => setSearchDraft(event.target.value)}
-                  placeholder="Search receipt, invoice, student…"
-                  aria-label="Search receipts"
-                  className="pl-9"
-                />
+          {!canView ? (
+            <p className="rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground">
+              You do not have permission to view receipts.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="relative w-full sm:max-w-xs">
+                  <Search
+                    className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  <Input
+                    type="search"
+                    value={searchDraft}
+                    onChange={(event) => setSearchDraft(event.target.value)}
+                    placeholder="Search receipt, invoice, student…"
+                    aria-label="Search receipts"
+                    className="pl-9"
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    type="date"
+                    value={from}
+                    onChange={(event) => setFrom(event.target.value)}
+                    aria-label="From date"
+                    className="w-40"
+                  />
+                  <span className="text-xs text-muted-foreground">to</span>
+                  <Input
+                    type="date"
+                    value={to}
+                    onChange={(event) => setTo(event.target.value)}
+                    aria-label="To date"
+                    className="w-40"
+                  />
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Input
-                  type="date"
-                  value={from}
-                  onChange={(event) => setFrom(event.target.value)}
-                  aria-label="From date"
-                  className="w-40"
-                />
-                <span className="text-xs text-muted-foreground">to</span>
-                <Input
-                  type="date"
-                  value={to}
-                  onChange={(event) => setTo(event.target.value)}
-                  aria-label="To date"
-                  className="w-40"
-                />
-              </div>
+
+              <ReceiptsList
+                data={data}
+                isPending={isPending}
+                isError={isError}
+                onRetry={() => void refetch()}
+                onOpen={(id) => setSelectedId(id)}
+              />
             </div>
-
-            <ReceiptsList
-              data={data}
-              isPending={isPending}
-              isError={isError}
-              onRetry={() => void refetch()}
-              onOpen={(id) => setSelectedId(id)}
-            />
-          </div>
-        )}
+          )}
+        </div>
 
         <ReceiptDetailDialog
           receiptId={selectedId}

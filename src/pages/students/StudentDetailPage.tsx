@@ -5,6 +5,8 @@ import { PageContainer } from "@/components/layout/PageContainer"
 import { ProfilePhotoField } from "@/components/shared/ProfilePhotoField"
 import { StudentFeesCard } from "@/components/students/StudentFeesCard"
 import { StudentStatusBadge } from "@/components/students/StudentStatusBadge"
+import { StudentProfilePrintDocument } from "@/components/students/StudentProfilePrintDocument"
+import { PrintButton } from "@/components/print/PrintButton"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -42,21 +44,29 @@ export function StudentDetailPage() {
 
   return (
     <PageContainer>
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center justify-between gap-2 print:hidden">
         <Button variant="ghost" size="sm" asChild>
           <Link to="/students">
             <ArrowLeft className="size-4" aria-hidden="true" />
             Back to students
           </Link>
         </Button>
-        {can("students:update") && student && (
-          <Button variant="outline" size="sm" asChild>
-            <Link to={`/students/${student.id}/edit`}>
-              <Pencil className="size-4" aria-hidden="true" />
-              Edit student
-            </Link>
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Decision D1: gated on the read permission of the printed artifact. */}
+          {can("students:view") && student && (
+            <PrintButton documentTitle={`Student Profile ${student.admissionNumber}`}>
+              Print profile
+            </PrintButton>
+          )}
+          {can("students:update") && student && (
+            <Button variant="outline" size="sm" asChild>
+              <Link to={`/students/${student.id}/edit`}>
+                <Pencil className="size-4" aria-hidden="true" />
+                Edit student
+              </Link>
+            </Button>
+          )}
+        </div>
       </div>
 
       {isPending && <StudentDetailSkeleton />}
@@ -71,7 +81,9 @@ export function StudentDetailPage() {
       )}
 
       {student && (
-        <div className="flex flex-col gap-4">
+        /* The cards are the screen view; the printed page carries only the
+           profile document rendered at the end of the page. */
+        <div className="flex flex-col gap-4 print:hidden">
           <Card>
             <CardContent className="flex flex-col gap-4 pt-6 sm:flex-row sm:items-start">
               <ProfilePhotoField
@@ -239,6 +251,8 @@ export function StudentDetailPage() {
           </div>
         </div>
       )}
+
+      {student && <StudentProfilePrintDocument student={student} />}
     </PageContainer>
   )
 }

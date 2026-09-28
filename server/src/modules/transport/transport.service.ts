@@ -1028,7 +1028,11 @@ export async function listAssignments(
     prisma.transportAssignment.findMany({
       where,
       include: ASSIGNMENT_INCLUDE,
-      orderBy: [{ createdAt: "desc" }],
+      // createdAt alone is not unique, so a tie at a page boundary would let an
+      // offset-paginated walk duplicate or skip a row. The id tiebreaker makes the
+      // order total, which both the on-screen list and the bounded print
+      // collection depend on.
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       skip: (query.page - 1) * query.pageSize,
       take: query.pageSize,
     }),

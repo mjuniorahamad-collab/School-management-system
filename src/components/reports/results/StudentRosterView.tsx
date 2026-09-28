@@ -28,7 +28,7 @@ export function StudentRosterView({ report, page, totalPages, onPageChange }: St
             {breakdown.map((entry) => (
               <span
                 key={entry.classId}
-                className="rounded-full border bg-muted/40 px-2.5 py-0.5 text-xs font-medium text-muted-foreground tabular-nums"
+                className="print-document-report-chips rounded-full border bg-muted/40 px-2.5 py-0.5 text-xs font-medium text-muted-foreground tabular-nums"
               >
                 {entry.className}: {entry.count}
               </span>

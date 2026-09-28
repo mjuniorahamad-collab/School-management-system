@@ -89,3 +89,96 @@ export function getInitials(name: string): string {
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("")
 }
+
+/* ── Amount in words ───────────────────────────────────────────────────────────
+ * Pure RENDERING of an authoritative amount for a printed financial document.
+ * It performs no arithmetic of its own: it does not round, does not re-derive the
+ * figure, and does not touch the payment. The value passed in is the value the
+ * server returned and that `formatINR` already prints; this only spells it out.
+ *
+ * Indian numbering (lakh/crore) because that is the target market of the school
+ * fee documents these appear on.
+ *
+ * The currency word is the SAME hardcoded INR assumption `formatINR` above already
+ * makes. It is deliberately not a second currency system: SchoolSetting.feeCurrency
+ * exists but reaches no DTO, and switching the app's money formatting is a billing
+ * change, not a print change. Both must be revisited together.
+ */
+
+const ONES = [
+  "",
+  "One",
+  "Two",
+  "Three",
+  "Four",
+  "Five",
+  "Six",
+  "Seven",
+  "Eight",
+  "Nine",
+  "Ten",
+  "Eleven",
+  "Twelve",
+  "Thirteen",
+  "Fourteen",
+  "Fifteen",
+  "Sixteen",
+  "Seventeen",
+  "Eighteen",
+  "Nineteen",
+]
+
+const TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"]
+
+/** 0-99. A tens+unit compound is hyphenated: "Twenty-Five", not "Twenty Five". */
+function twoDigitWords(value: number): string {
+  if (value < 20) return ONES[value]
+  const tens = TENS[Math.floor(value / 10)]
+  const ones = ONES[value % 10]
+  return ones === "" ? tens : `${tens}-${ones}`
+}
+
+/** 0-999. */
+function threeDigitWords(value: number): string {
+  const hundreds = Math.floor(value / 100)
+  const rest = value % 100
+  const head = hundreds === 0 ? "" : `${ONES[hundreds]} Hundred`
+  if (rest === 0) return head
+  return head === "" ? twoDigitWords(rest) : `${head} ${twoDigitWords(rest)}`
+}
+
+/** "Rupees" → "Rupee" for a single unit, so a ₹1 receipt reads correctly. */
+function singularCurrency(label: string): string {
+  return label.endsWith("s") ? label.slice(0, -1) : label
+}
+
+/**
+ * Spells an amount in Indian words, e.g. 125000 → "One Lakh Twenty-Five Thousand".
+ * Rounds to the nearest rupee to match `formatINR`'s `maximumFractionDigits: 0`,
+ * so the words and the printed figure can never disagree.
+ */
+export function formatAmountInWords(value: number, currencyLabel = "Rupees"): string {
+  if (!Number.isFinite(value)) return `${currencyLabel} only`
+
+  const negative = value < 0
+  const rounded = Math.abs(Math.round(value))
+  const label = rounded === 1 ? singularCurrency(currencyLabel) : currencyLabel
+
+  if (rounded === 0) return `Zero ${label} only`
+
+  const crore = Math.floor(rounded / 10_000_000)
+  const remainderAfterCrore = rounded % 10_000_000
+  const lakh = Math.floor(remainderAfterCrore / 100_000)
+  const remainderAfterLakh = remainderAfterCrore % 100_000
+  const thousand = Math.floor(remainderAfterLakh / 1000)
+  const hundred = remainderAfterLakh % 1000
+
+  const parts: string[] = []
+  if (crore > 0) parts.push(`${threeDigitWords(crore)} Crore`)
+  if (lakh > 0) parts.push(`${twoDigitWords(lakh)} Lakh`)
+  if (thousand > 0) parts.push(`${twoDigitWords(thousand)} Thousand`)
+  if (hundred > 0) parts.push(threeDigitWords(hundred))
+
+  const words = parts.join(" ")
+  return `${negative === true ? "Minus " : ""}${words} ${label} only`
+}

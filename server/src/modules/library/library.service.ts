@@ -610,10 +610,20 @@ export async function listLoans(
       return { items: [], pagination: toPagination(query.page, query.pageSize, 0) }
     }
   }
+  // These three filters must partition the loan table exactly the way
+  // deriveLoanStatus() (library.rules.ts) classifies each row, otherwise a filter
+  // and the status badge the user sees on its rows disagree.
+  //   returned -> returnedAt IS NOT NULL
+  //   active   -> returnedAt IS NULL AND dueAt >= today
+  //   overdue  -> returnedAt IS NULL AND dueAt <  today
+  // Due dates are UTC calendar dates (@db.Date, see library.rules.ts), so today is
+  // parsed the same way the mapper parses it — no time-of-day drift.
   if (query.status === "returned") {
     where.returnedAt = { not: null }
   } else if (query.status === "active" || query.status === "overdue") {
     where.returnedAt = null
+    const today = parseLocalDate(todayLocalDate())
+    where.dueAt = query.status === "active" ? { gte: today } : { lt: today }
   }
   if (query.search) {
     where.OR = [
@@ -633,7 +643,11 @@ export async function listLoans(
         issuedByUser: { select: { name: true } },
         returnedByUser: { select: { name: true } },
       },
-      orderBy: [{ createdAt: "desc" }],
+      // createdAt alone is not unique, so a tie at a page boundary would let an
+      // offset-paginated walk duplicate or skip a row. The id tiebreaker makes the
+      // order total, which both the on-screen list and the bounded print
+      // collection depend on.
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       skip: (query.page - 1) * query.pageSize,
       take: query.pageSize,
     }),

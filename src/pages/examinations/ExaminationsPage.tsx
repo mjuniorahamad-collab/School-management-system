@@ -87,82 +87,87 @@ export function ExaminationsPage() {
   return (
     <PageContainer>
       <div className="flex flex-col gap-4">
-        <PageHeader
-          title="Examinations"
-          description="Schedule examination cycles, map subjects to teachers, and track lifecycle."
-        />
-        <ExaminationToolbar
-          search={searchDraft}
-          status={status}
-          canCreate={canCreate}
-          onSearchChange={setSearchDraft}
-          onStatusChange={(value) => updateFilter("status", value)}
-          onCreateClick={() => {
-            setEditing(null)
-            setDialogOpen(true)
-          }}
-        />
-        <ExaminationTable
-          items={items}
-          isPending={isPending}
-          isError={isError}
-          canEdit={canEdit}
-          canPublish={canEdit}
-          canDelete={canDelete}
-          onRetry={() => void refetch()}
-          onView={(exam) => setViewingId(exam.id)}
-          onEdit={(exam) => {
-            setEditing(exam)
-            setDialogOpen(true)
-          }}
-          onPublish={(exam) => publishMutation.mutate(exam.id)}
-          onArchive={(exam) => archiveMutation.mutate(exam.id)}
-          onDelete={setDeleting}
-        />
-        <ExaminationCards
-          items={items}
-          isPending={isPending}
-          isError={isError}
-          canEdit={canEdit}
-          canPublish={canEdit}
-          canDelete={canDelete}
-          onRetry={() => void refetch()}
-          onView={(exam) => setViewingId(exam.id)}
-          onEdit={(exam) => {
-            setEditing(exam)
-            setDialogOpen(true)
-          }}
-          onPublish={(exam) => publishMutation.mutate(exam.id)}
-          onArchive={(exam) => archiveMutation.mutate(exam.id)}
-          onDelete={setDeleting}
-        />
+        {/* The exam list screen chrome is not part of the printed exam schedule.
+            The dialogs below stay outside this wrapper: the schedule document the
+            detail dialog owns must have no print:hidden ancestor. */}
+        <div className="flex flex-col gap-4 print:hidden">
+          <PageHeader
+            title="Examinations"
+            description="Schedule examination cycles, map subjects to teachers, and track lifecycle."
+          />
+          <ExaminationToolbar
+            search={searchDraft}
+            status={status}
+            canCreate={canCreate}
+            onSearchChange={setSearchDraft}
+            onStatusChange={(value) => updateFilter("status", value)}
+            onCreateClick={() => {
+              setEditing(null)
+              setDialogOpen(true)
+            }}
+          />
+          <ExaminationTable
+            items={items}
+            isPending={isPending}
+            isError={isError}
+            canEdit={canEdit}
+            canPublish={canEdit}
+            canDelete={canDelete}
+            onRetry={() => void refetch()}
+            onView={(exam) => setViewingId(exam.id)}
+            onEdit={(exam) => {
+              setEditing(exam)
+              setDialogOpen(true)
+            }}
+            onPublish={(exam) => publishMutation.mutate(exam.id)}
+            onArchive={(exam) => archiveMutation.mutate(exam.id)}
+            onDelete={setDeleting}
+          />
+          <ExaminationCards
+            items={items}
+            isPending={isPending}
+            isError={isError}
+            canEdit={canEdit}
+            canPublish={canEdit}
+            canDelete={canDelete}
+            onRetry={() => void refetch()}
+            onView={(exam) => setViewingId(exam.id)}
+            onEdit={(exam) => {
+              setEditing(exam)
+              setDialogOpen(true)
+            }}
+            onPublish={(exam) => publishMutation.mutate(exam.id)}
+            onArchive={(exam) => archiveMutation.mutate(exam.id)}
+            onDelete={setDeleting}
+          />
 
-        {items.length > 0 && (
-          <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-            <span>
-              Page {page} of {totalPages} · {total} item{total !== 1 ? "s" : ""}
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => goToPage(Math.max(1, page - 1))}
-                disabled={page <= 1}
-                className="rounded px-2 py-1 font-medium hover:bg-muted disabled:opacity-40 disabled:pointer-events-none"
-              >
-                ← Prev
-              </button>
-              <span>Page {page}</span>
-              <button
-                type="button"
-                onClick={() => goToPage(Math.min(totalPages, page + 1))}
-                disabled={page >= totalPages}
-                className="rounded px-2 py-1 font-medium hover:bg-muted disabled:opacity-40 disabled:pointer-events-none"
-              >
-                Next →
-              </button>
+          {items.length > 0 && (
+            <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+              <span>
+                Page {page} of {totalPages} · {total} item{total !== 1 ? "s" : ""}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => goToPage(Math.max(1, page - 1))}
+                  disabled={page <= 1}
+                  className="rounded px-2 py-1 font-medium hover:bg-muted disabled:opacity-40 disabled:pointer-events-none"
+                >
+                  ← Prev
+                </button>
+                <span>Page {page}</span>
+                <button
+                  type="button"
+                  onClick={() => goToPage(Math.min(totalPages, page + 1))}
+                  disabled={page >= totalPages}
+                  className="rounded px-2 py-1 font-medium hover:bg-muted disabled:opacity-40 disabled:pointer-events-none"
+                >
+                  Next →
+                </button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         <ExaminationFormDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} />
         <ExaminationDetailDialog

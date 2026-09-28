@@ -7,7 +7,7 @@ import { SidebarProvider } from "@/components/layout/SidebarProvider"
 export function AppShell() {
   return (
     <SidebarProvider>
-      <div className="flex h-dvh w-full overflow-hidden">
+      <div data-print-shell className="flex h-dvh w-full overflow-hidden">
         <MobileSidebar />
         <Sidebar />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">

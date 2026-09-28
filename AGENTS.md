@@ -62,6 +62,11 @@ tests):
   scoped), Users & Roles management, Settings, Audit Logs (with redaction).
 - Production Readiness & Operations: health/readiness, backup/restore scripts,
   operations runbook, Docker/deploy configuration, CI workflow.
+- Print architecture (browser print, no PDF service): a shared print foundation
+  plus print documents for Fee Invoice, Payment Receipt, Exam Schedule, Student
+  Profile, Attendance Register, Result Sheet, Timetable, Library Circulation
+  Register, Transport Route Passenger List, and every Reports V1 catalog report
+  (design in `docs/print-architecture.md`).
 - Testing: vitest + supertest (DB-free unit tests always run; DB-backed
   integration suites opt in via `TEST_DATABASE_URL`).
 
@@ -286,6 +291,33 @@ Fresh-clone setup:
   `src/data/moduleMeta.ts` (module-detail copy for placeholder pages) — labeled
   TEMPORARY MOCK, consumed only through its own seam. Convert per-feature when a
   real endpoint exists; never extend it.
+
+## 16a. Print rules
+
+Full design in `docs/print-architecture.md`. The rules that are easy to break:
+
+- Every artifact is two layers: the screen UI (action rows and controls carry
+  `print:hidden`) and a `PrintDocument` with `hidden print:block`. Never put
+  `print:hidden` on an ancestor of a print document, and never let screen chrome
+  sit outside a `print:hidden` wrapper on a printing page.
+- `PrintLetterhead` uses a `<div>`, not a `<header>`, because the print
+  stylesheet hides bare `header` elements.
+- No `*:print` permissions — printing is reading. Each artifact gates on the
+  permission that already guards its data; Payment → Receipt uses `receipts:view`.
+  Printing is not audit-logged.
+- Print documents format already-authorized server DTO values; they never fetch,
+  never aggregate and never recompute. A printed count must come from the API
+  (`pagination.total`), not from the rows on the page.
+- Library Circulation and Transport Passenger List print the complete filtered set
+  via `collectFullList` / `useFullFilteredList`, fetched at `pageSize: 100`, capped
+  at 500 rows, verified against `pagination.total`. Over the cap or an
+  inconsistent total is a hard failure — never print a partial register.
+- Landscape is requested by `printDocument()`; `@page` is a top-level at-rule, so
+  do not add a named `@page` rule for a single document.
+- CSS/geometry/`print:hidden` regressions are guarded by the textual source
+  contract tests in `server/tests/print-*.test.ts` (they live there because the
+  frontend tsconfig has no Node types). JSDOM cannot verify print layout — a new
+  artifact must still be printed once in Chrome/Edge before release.
 
 ## 17. Error-handling rules
 

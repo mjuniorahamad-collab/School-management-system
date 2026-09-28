@@ -59,54 +59,59 @@ export function FeeInvoicesTab() {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative w-full sm:max-w-xs">
-          <Search
-            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <Input
-            type="search"
-            value={searchDraft}
-            onChange={(event) => setSearchDraft(event.target.value)}
-            placeholder="Search invoice, student…"
-            aria-label="Search invoices"
-            className="pl-9"
-          />
+      {/* Search, filters and the invoice list are screen chrome, not part of the
+          printed invoice. Both dialogs stay outside this wrapper so the invoice
+          document they own has no print:hidden ancestor. */}
+      <div className="flex flex-col gap-3 print:hidden">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative w-full sm:max-w-xs">
+            <Search
+              className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <Input
+              type="search"
+              value={searchDraft}
+              onChange={(event) => setSearchDraft(event.target.value)}
+              placeholder="Search invoice, student…"
+              aria-label="Search invoices"
+              className="pl-9"
+            />
+          </div>
+          {canCreate && (
+            <Button onClick={() => setGenerateOpen(true)} className="shrink-0">
+              <Plus className="size-4" aria-hidden="true" />
+              Generate Invoices
+            </Button>
+          )}
         </div>
-        {canCreate && (
-          <Button onClick={() => setGenerateOpen(true)} className="shrink-0">
-            <Plus className="size-4" aria-hidden="true" />
-            Generate Invoices
-          </Button>
-        )}
-      </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <FeeSessionSelect value={sessionId} onValueChange={(value) => setSessionId(value === "all" ? "" : (value ?? ""))} />
-        <FeeClassSelect value={classId} onValueChange={(value) => setClassId(value === "all" ? "" : (value ?? ""))} />
-        <Select value={status} onValueChange={(value) => setStatus(value === "all" ? "" : value)}>
-          <SelectTrigger className="w-full sm:w-44" aria-label="Invoice status">
-            <SelectValue placeholder="All statuses" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All statuses</SelectItem>
-            {INVOICE_STATUS_OPTIONS.map((option) => (
-              <SelectItem key={option} value={option}>
-                {option.charAt(0).toUpperCase() + option.slice(1).toLowerCase()}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <FeeSessionSelect value={sessionId} onValueChange={(value) => setSessionId(value === "all" ? "" : (value ?? ""))} />
+          <FeeClassSelect value={classId} onValueChange={(value) => setClassId(value === "all" ? "" : (value ?? ""))} />
+          <Select value={status} onValueChange={(value) => setStatus(value === "all" ? "" : value)}>
+            <SelectTrigger className="w-full sm:w-44" aria-label="Invoice status">
+              <SelectValue placeholder="All statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              {INVOICE_STATUS_OPTIONS.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {option.charAt(0).toUpperCase() + option.slice(1).toLowerCase()}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-      <InvoicesList
-        data={data}
-        isPending={isPending}
-        isError={isError}
-        onRetry={() => void refetch()}
-        onOpen={(id) => setSelectedInvoiceId(id)}
-      />
+        <InvoicesList
+          data={data}
+          isPending={isPending}
+          isError={isError}
+          onRetry={() => void refetch()}
+          onOpen={(id) => setSelectedInvoiceId(id)}
+        />
+      </div>
 
       <InvoiceDetailDialog
         invoiceId={selectedInvoiceId}
