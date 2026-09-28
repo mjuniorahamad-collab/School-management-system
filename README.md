@@ -189,12 +189,30 @@ checks:
 
 ```
 createdb school_management_test   # your usual tooling
-$env:TEST_DATABASE_URL="postgresql://.../@.../school_management_test"; npm test
+$env:TEST_DATABASE_URL="postgresql://.../@127.0.0.1:5433/school_management_test"; npm test
 ```
 
-The integration suite applies migrations to that database on startup and isolates
-itself with per-test cleanup. Skip if a test database is unavailable — unit tests
-still cover the rules.
+**This database is destroyed, not tidied.** The integration suites apply
+migrations on startup, and their teardown deletes every row in every core table
+— schools, users, roles, permissions, classes, students — rather than only the
+rows they created. There is no transaction and no rollback, so treat the target
+as disposable and never point it at a database you care about.
+
+Because of that, `npm test` refuses to start the integration suites unless
+`TEST_DATABASE_URL` is both:
+
+- a **loopback** target — `127.0.0.0/8`, `localhost`, `::1`, or a Unix socket, and
+- a database whose **name contains `test`**.
+
+A mistyped value fails the run with an explanation instead of quietly deleting
+data. The check lives in `server/tests/helpers/test-database-guard.ts` and runs at
+vitest config load, before any worker can be given a `DATABASE_URL`. A deliberate
+throwaway *remote* test database (CI service container, Neon test branch) is
+possible via `ALLOW_REMOTE_TEST_DATABASE=1`, which relaxes the loopback rule but
+still requires the `test` database name.
+
+If a test database is unavailable, leave `TEST_DATABASE_URL` unset — the unit
+tests still cover the rules.
 
 ### Deployment (container)
 

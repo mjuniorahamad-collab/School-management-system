@@ -1,5 +1,6 @@
 import path from "node:path"
 import { defineConfig } from "vitest/config"
+import { assertSafeTestDatabaseUrl } from "./server/tests/helpers/test-database-guard.ts"
 
 // Load .env early so TEST_DATABASE_URL is available before vitest's env injection.
 // This mirrors what server/src/config/env.ts does at import time.
@@ -8,6 +9,13 @@ try {
 } catch {
   // .env not found — rely on shell-injected env vars.
 }
+
+// Refuse to hand the integration suites anything but a disposable local test
+// database. Their teardown deletes every row in the target, so this must run
+// BEFORE `integrationEnv` is built — a worker must never be able to receive an
+// unvalidated DATABASE_URL. A misconfiguration fails the whole run loudly rather
+// than silently skipping coverage.
+assertSafeTestDatabaseUrl(process.env.TEST_DATABASE_URL)
 
 // When a test database is configured (TEST_DATABASE_URL), the integration
 // suites run against it; otherwise they skip and only DB-free tests execute.
