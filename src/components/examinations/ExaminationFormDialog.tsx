@@ -86,6 +86,14 @@ function ExaminationFormInner({
   const selectedClass = classes.find((item) => item.id === form.classId)
   const sectionOptions = selectedClass?.sections ?? []
 
+  // Derive the effective session instead of syncing state in an effect: the
+  // create form falls back to the ACTIVE session, so a context query that
+  // resolves late still self-populates, and an explicit choice always wins.
+  // Same rule the Homework and Assignments forms use.
+  const defaultSessionId =
+    sessions.find((session) => session.status === "ACTIVE")?.id ?? sessions[0]?.id ?? ""
+  const effectiveSessionId = form.academicSessionId || defaultSessionId
+
   const createMutation = useCreateExam()
   const updateMutation = useUpdateExam(editing?.id ?? "")
   const isSaving = createMutation.isPending || updateMutation.isPending
@@ -118,18 +126,19 @@ function ExaminationFormInner({
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault()
-    const errors = validateExamForm(form)
+    const effective: ExamFormValue = { ...form, academicSessionId: effectiveSessionId }
+    const errors = validateExamForm(effective, editing ? "edit" : "create")
     if (errors.length > 0) {
       toast.error(errors[0].message)
       return
     }
     if (editing) {
-      updateMutation.mutate(examMetadataToPayload(form), {
+      updateMutation.mutate(examMetadataToPayload(effective), {
         onSuccess: () => onOpenChange(false),
         onError: (error) => toast.error(error.message),
       })
     } else {
-      createMutation.mutate(examFormToPayload(form), {
+      createMutation.mutate(examFormToPayload(effective), {
         onSuccess: () => onOpenChange(false),
         onError: (error) => toast.error(error.message),
       })
@@ -141,11 +150,56 @@ function ExaminationFormInner({
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {/* Session, exam type and class are the exam's identity: the update
+            contract is a strict metadata patch, so they are only choosable on
+            create and stay read-only once the exam exists. */}
         <Field label="Academic session" required>
-          <Input value={sessions.find((s) => s.id === form.academicSessionId)?.name ?? "—"} disabled />
+          {isCreate ? (
+            <Select
+              value={effectiveSessionId}
+              onValueChange={(value) => setField("academicSessionId", value)}
+            >
+              <SelectTrigger className="w-full" aria-label="Academic session">
+                <SelectValue placeholder="Select…" />
+              </SelectTrigger>
+              <SelectContent>
+                {sessions.map((session) => (
+                  <SelectItem key={session.id} value={session.id}>
+                    {session.name} ({session.code})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Input
+              value={sessions.find((s) => s.id === form.academicSessionId)?.name ?? "—"}
+              disabled
+            />
+          )}
         </Field>
         <Field label="Exam type" required>
-          <Input value={examTypes.find((t) => t.id === form.examTypeId)?.name ?? "—"} disabled />
+          {isCreate ? (
+            <Select
+              value={form.examTypeId}
+              onValueChange={(value) => setField("examTypeId", value)}
+            >
+              <SelectTrigger className="w-full" aria-label="Exam type">
+                <SelectValue placeholder="Select…" />
+              </SelectTrigger>
+              <SelectContent>
+                {examTypes.map((examType) => (
+                  <SelectItem key={examType.id} value={examType.id}>
+                    {examType.name} ({examType.code})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Input
+              value={examTypes.find((t) => t.id === form.examTypeId)?.name ?? "—"}
+              disabled
+            />
+          )}
         </Field>
       </div>
       <Field label="Name" required>

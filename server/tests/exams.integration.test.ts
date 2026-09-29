@@ -402,6 +402,28 @@ describe.skipIf(!TEST_DATABASE_URL)("Exams API (integration)", () => {
       expect((data.academicSessions as Array<{ id: string }>).length).toBeGreaterThan(0)
     })
 
+    // The create form needs to pick the session without a second round trip, and
+    // to decide whether to pre-select one. Both `code` and `status` must be on
+    // the option, not fetched per session.
+    it("includes each session's code and status so the form can label and default it", async () => {
+      const res = await adminAgent.get("/api/v1/exams/context")
+      expect(res.status).toBe(200)
+      const sessions = res.body.data.academicSessions as Array<{
+        id: string
+        name: string
+        code: string
+        status: string
+      }>
+      const own = sessions.find((s) => s.id === fixtures.sessionId)
+      expect(own).toMatchObject({ code: "EX2026", status: "ACTIVE" })
+    })
+
+    it("never offers another school's sessions", async () => {
+      const res = await adminAgent.get("/api/v1/exams/context")
+      const sessions = res.body.data.academicSessions as Array<{ id: string }>
+      expect(sessions.map((s) => s.id)).not.toContain(fixtures.otherSessionId)
+    })
+
     it("restricts a teacher to their own profile, subjects, classes, and self", async () => {
       const res = await teacherAgent.get("/api/v1/exams/context")
       expect(res.status).toBe(200)
@@ -469,6 +491,11 @@ describe.skipIf(!TEST_DATABASE_URL)("Exams API (integration)", () => {
     })
 
     it("rejects cross-school references", async () => {
+      // The session is the field the create form now sends, so its tenant check
+      // is on the same critical path as examTypeId and subjectId.
+      await expect(
+        adminAgent.post("/api/v1/exams").send(examPayload({ academicSessionId: fixtures.otherSessionId })),
+      ).resolves.toMatchObject({ status: 400 })
       await expect(
         adminAgent.post("/api/v1/exams").send(examPayload({ examTypeId: "00000000-0000-4000-8000-000000000001" })),
       ).resolves.toMatchObject({ status: 400 })

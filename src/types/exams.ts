@@ -1,6 +1,10 @@
 // Domain types for the Examinations module. Mirrors the backend contract
 // (server/src/modules/exams/exam.types.ts and exam.schema.ts).
 
+import type { AcademicSessionStatus } from "@/types/academicSessions"
+
+export type { AcademicSessionStatus }
+
 export type ExamStatus = "DRAFT" | "PUBLISHED" | "FINAL" | "ARCHIVED"
 
 export const EXAM_STATUS_OPTIONS: readonly ExamStatus[] = [
@@ -63,9 +67,12 @@ export interface ExamListResult {
   pagination: { page: number; pageSize: number; total: number; totalPages: number }
 }
 
+/** `code`/`status` back the `name (code)` option label and the ACTIVE default. */
 export interface ExamSessionOption {
   id: string
   name: string
+  code: string
+  status: AcademicSessionStatus
 }
 
 export interface ExamTypeOption {

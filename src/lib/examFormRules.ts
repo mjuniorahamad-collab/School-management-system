@@ -56,7 +56,18 @@ export function emptySubjectRow(): ExamSubjectRow {
   return { subjectId: "", teacherId: "", maxMarks: "", passMarks: "" }
 }
 
-export function validateExamForm(value: ExamFormValue): ExamFormError[] {
+/**
+ * `create` is the default so the stricter behaviour is what a caller gets if it
+ * forgets to pass a mode. Only the subject-list cardinality differs between the
+ * two modes: on edit the subject list is not surfaced here at all (it is managed
+ * from the detail view), so requiring one would make the update path
+ * unsubmittable. The backend's `subjectListSchema()` still enforces 1–30 on
+ * create, so this is a UX guard, not the boundary.
+ */
+export function validateExamForm(
+  value: ExamFormValue,
+  mode: "create" | "edit" = "create",
+): ExamFormError[] {
   const errors: ExamFormError[] = []
   if (!value.academicSessionId) errors.push({ field: "academicSessionId", message: "Academic session is required" })
   if (!value.examTypeId) errors.push({ field: "examTypeId", message: "Exam type is required" })
@@ -96,11 +107,13 @@ export function validateExamForm(value: ExamFormValue): ExamFormError[] {
     }
   })
 
-  if (value.subjects.length === 0) {
-    errors.push({ field: "subjects.row", message: "At least one subject is required" })
-  }
-  if (value.subjects.length > 30) {
-    errors.push({ field: "subjects.row", message: "At most 30 subjects per exam" })
+  if (mode === "create") {
+    if (value.subjects.length === 0) {
+      errors.push({ field: "subjects.row", message: "At least one subject is required" })
+    }
+    if (value.subjects.length > 30) {
+      errors.push({ field: "subjects.row", message: "At most 30 subjects per exam" })
+    }
   }
   if (!CREATABLE_EXAM_STATUSES.includes(value.status)) {
     errors.push({ field: "status", message: "Choose draft or published" })

@@ -1,4 +1,7 @@
+import type { AcademicSessionStatus } from "@prisma/client"
 import type { ExamStatus } from "./exam.rules.js"
+
+export type { AcademicSessionStatus }
 
 export interface ExamListItem {
   id: string
@@ -43,9 +46,16 @@ export interface ExamListResult {
   pagination: { page: number; pageSize: number; total: number; totalPages: number }
 }
 
+/**
+ * `code` and `status` are carried so the create form can label the option the
+ * way Homework does and default to the ACTIVE session, without a second
+ * academic-session fetch. Both come from the same school-scoped query.
+ */
 export interface ExamSessionOption {
   id: string
   name: string
+  code: string
+  status: AcademicSessionStatus
 }
 
 export interface ExamTypeOption {

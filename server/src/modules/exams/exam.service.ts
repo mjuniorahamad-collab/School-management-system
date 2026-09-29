@@ -22,7 +22,12 @@ import type {
   UpdateExamSubjectsInput,
   UpdateExamStatusInput,
 } from "./exam.schema.js"
-import type { ExamContext, ExamDetail, ExamListResult } from "./exam.types.js"
+import type {
+  ExamContext,
+  ExamDetail,
+  ExamListResult,
+  ExamSessionOption,
+} from "./exam.types.js"
 
 type PrismaClient = NonNullable<Awaited<ReturnType<typeof getPrisma>>>
 
@@ -723,10 +728,10 @@ export async function getExamContext(
 async function listAcademicSessionOptions(
   prisma: PrismaClient,
   schoolId: string,
-): Promise<{ id: string; name: string }[]> {
+): Promise<ExamSessionOption[]> {
   return prisma.academicSession.findMany({
     where: { schoolId },
-    select: { id: true, name: true },
+    select: { id: true, name: true, code: true, status: true },
     orderBy: { startDate: "desc" },
   })
 }
