@@ -17,6 +17,13 @@ import {
   type GradingBandRule,
 } from "./grading.js"
 import { assignCompetitionRanks } from "./ranking.js"
+import {
+  bulkUpdateResultAggregates,
+  bulkUpdateResultRanks,
+  bulkUpsertExamMarks,
+  type ExamMarkBulkRow,
+  type ResultAggregateBulkRow,
+} from "./result-bulk-writes.js"
 import type { PutSubjectMarksInput, ResultSheetQuery } from "./result.schema.js"
 import type {
   FinalizeResult,
@@ -245,113 +252,138 @@ export async function putSubjectMarks(
     }
   }
 
-  const saved = await prisma.$transaction(async (tx) => {
-    const existingResults = await tx.examResult.findMany({
-      where: { examId, enrollmentId: { in: enrollmentIds } },
-      select: { id: true, enrollmentId: true },
-    })
-    const resultByEnrollment = new Map(existingResults.map((row) => [row.enrollmentId, row.id]))
-
-    const touched: string[] = []
-    for (const row of input.rows) {
-      const enrollment = enrollmentById.get(row.enrollmentId)
-      if (!enrollment) throw badRequestError("Student enrollment is not part of this exam")
-
-      let resultId = resultByEnrollment.get(row.enrollmentId)
-      if (!resultId) {
-        const created = await tx.examResult.create({
-          data: {
-            schoolId: actor.schoolId,
-            examId,
-            studentId: enrollment.studentId,
-            enrollmentId: row.enrollmentId,
-          },
-          select: { id: true },
-        })
-        resultId = created.id
-        resultByEnrollment.set(row.enrollmentId, resultId)
-      }
-
-      const obtained = row.obtainedMarks ?? null
-      const derivation = deriveSubjectMark({
-        obtainedMarks: obtained,
-        isAbsent: row.isAbsent,
-        maxMarks: maxBy.get(examSubjectId) ?? 0,
-        passMarks: passBy.get(examSubjectId) ?? 0,
-        bands,
+  const saved = await prisma.$transaction(
+    async (tx) => {
+      const existingResults = await tx.examResult.findMany({
+        where: { examId, enrollmentId: { in: enrollmentIds } },
+        select: { id: true, enrollmentId: true },
       })
-      const data = {
-        obtainedMarks: obtained === null ? null : new Prisma.Decimal(obtained),
-        isAbsent: row.isAbsent,
-        percentage: decimalOrNull(derivation.percentage),
-        grade: derivation.grade,
-        isPass: derivation.isPass,
-        remarks: row.remarks,
-        updatedBy: actor.userId,
+      const resultByEnrollment = new Map(existingResults.map((row) => [row.enrollmentId, row.id]))
+
+      // One statement for every missing result instead of one per student. The
+      // unique index on (examId, enrollmentId) makes skipDuplicates idempotent
+      // against a concurrent create.
+      const missing = enrollmentIds.filter((id) => !resultByEnrollment.has(id))
+      if (missing.length > 0) {
+        await tx.examResult.createMany({
+          data: missing.map((enrollmentId) => {
+            const enrollment = enrollmentById.get(enrollmentId)
+            if (!enrollment) throw badRequestError("Student enrollment is not part of this exam")
+            return {
+              schoolId: actor.schoolId,
+              examId,
+              studentId: enrollment.studentId,
+              enrollmentId,
+            }
+          }),
+          skipDuplicates: true,
+        })
+        // createMany does not return rows, so re-read only the ones just created.
+        const created = await tx.examResult.findMany({
+          where: { examId, enrollmentId: { in: missing } },
+          select: { id: true, enrollmentId: true },
+        })
+        for (const row of created) resultByEnrollment.set(row.enrollmentId, row.id)
       }
-      await tx.examMark.upsert({
-        where: {
-          examResultId_examSubjectId: { examResultId: resultId, examSubjectId },
-        },
-        create: {
-          schoolId: actor.schoolId,
+
+      const markRows: ExamMarkBulkRow[] = []
+      const touched: string[] = []
+      for (const row of input.rows) {
+        if (!enrollmentById.get(row.enrollmentId)) {
+          throw badRequestError("Student enrollment is not part of this exam")
+        }
+        const resultId = resultByEnrollment.get(row.enrollmentId)
+        if (!resultId) {
+          throw badRequestError("Student enrollment is not part of this exam")
+        }
+
+        const obtained = row.obtainedMarks ?? null
+        const derivation = deriveSubjectMark({
+          obtainedMarks: obtained,
+          isAbsent: row.isAbsent,
+          maxMarks: maxBy.get(examSubjectId) ?? 0,
+          passMarks: passBy.get(examSubjectId) ?? 0,
+          bands,
+        })
+        markRows.push({
           examResultId: resultId,
           examSubjectId,
-          ...data,
-          enteredBy: actor.userId,
-          enteredAt: new Date(),
-        },
-        update: data,
-      })
-      touched.push(resultId)
-    }
+          obtainedMarks: obtained === null ? null : new Prisma.Decimal(obtained),
+          isAbsent: row.isAbsent,
+          percentage: decimalOrNull(derivation.percentage),
+          grade: derivation.grade,
+          isPass: derivation.isPass,
+          remarks: row.remarks,
+        })
+        touched.push(resultId)
+      }
 
-    for (const resultId of [...new Set(touched)]) {
-      const result = await tx.examResult.findFirst({
-        where: { id: resultId },
-        include: { marks: true },
+      await bulkUpsertExamMarks(tx, {
+        schoolId: actor.schoolId,
+        enteredBy: actor.userId,
+        rows: markRows,
       })
-      if (!result) continue
-      const marks: GradedMark[] = result.marks.map((mark) => ({
-        examSubjectId: mark.examSubjectId,
-        obtainedMarks: mark.obtainedMarks === null ? null : toNumber(mark.obtainedMarks),
-        isAbsent: mark.isAbsent,
-      }))
-      const aggregate = computeResultAggregate({
-        subjectCount: subjects.length,
-        subjectMaxMarks: Object.fromEntries(maxBy),
-        subjectPassMarks: Object.fromEntries(passBy),
-        marks,
-        bands,
+
+      const touchedUnique = [...new Set(touched)]
+      // Single read of every mark belonging to the touched results, replacing the
+      // previous per-result `findFirst({ include: { marks: true } })`. Only the
+      // four columns the aggregate needs are selected.
+      const marksForTouched = await tx.examMark.findMany({
+        where: { examResultId: { in: touchedUnique } },
+        select: { examResultId: true, examSubjectId: true, obtainedMarks: true, isAbsent: true },
       })
-      await tx.examResult.update({
-        where: { id: resultId },
-        data: {
+      const marksByResult = new Map<string, GradedMark[]>()
+      for (const mark of marksForTouched) {
+        const bucket = marksByResult.get(mark.examResultId) ?? []
+        bucket.push({
+          examSubjectId: mark.examSubjectId,
+          obtainedMarks: mark.obtainedMarks === null ? null : toNumber(mark.obtainedMarks),
+          isAbsent: mark.isAbsent,
+        })
+        marksByResult.set(mark.examResultId, bucket)
+      }
+
+      const aggregateRows: ResultAggregateBulkRow[] = touchedUnique.map((resultId) => {
+        const aggregate = computeResultAggregate({
+          subjectCount: subjects.length,
+          subjectMaxMarks: Object.fromEntries(maxBy),
+          subjectPassMarks: Object.fromEntries(passBy),
+          marks: marksByResult.get(resultId) ?? [],
+          bands,
+        })
+        return {
+          id: resultId,
           totalObtained: decimalOrNull(aggregate.totalObtained),
           totalMaxMarks: decimalOrNull(aggregate.totalMaxMarks),
           totalPercentage: decimalOrNull(aggregate.totalPercentage),
           grade: aggregate.grade,
           isPass: aggregate.isPass,
           isComplete: aggregate.isComplete,
-        },
+        }
       })
-    }
+      await bulkUpdateResultAggregates(tx, aggregateRows)
 
-    await recordAudit(tx, {
-      schoolId: actor.schoolId,
-      actorId: actor.userId,
-      actorName: actor.name,
-      actorRole: actor.roles[0] ?? "USER",
-      actorEmail: actor.email,
-      action: "UPDATE",
-      entityType: "EXAM_RESULT",
-      entityId: touched[0] ?? null,
-      summary: `Saved marks for ${touched.length} student(s) in ${examSubject.subject.name}`,
-      metadata: { saved: touched.length, examId, examSubjectId },
-    })
+      await recordAudit(tx, {
+        schoolId: actor.schoolId,
+        actorId: actor.userId,
+        actorName: actor.name,
+        actorRole: actor.roles[0] ?? "USER",
+        actorEmail: actor.email,
+        action: "UPDATE",
+        entityType: "EXAM_RESULT",
+        entityId: touched[0] ?? null,
+        summary: `Saved marks for ${touched.length} student(s) in ${examSubject.subject.name}`,
+        metadata: { saved: touched.length, examId, examSubjectId },
+      })
 
-    return touched.length
-  })
+      return touched.length
+    },
+    // Bounded-statement transaction: the callback now issues a constant number
+    // of round trips, so this is headroom rather than a workaround for a
+    // long-running loop. Matches the existing project convention
+    // (fee-invoice.service.ts, payment.service.ts).
+    { timeout: 20_000, maxWait: 10_000 },
+  )
 
   return { saved }
 }
@@ -370,6 +402,9 @@ export async function finalizeExam(
     throw badRequestError("Only published exams can be finalized")
   }
 
+  // Bounded-statement transaction, matching putSubjectMarks: the two
+  // per-student update loops (aggregate, then rank) are single batched
+  // statements, so the round-trip count no longer scales with class size.
   const ranked = await prisma.$transaction(async (tx) => {
     const rosterWhere: Prisma.StudentEnrollmentWhereInput = {
       academicSessionId: exam.academicSessionId,
@@ -418,7 +453,7 @@ export async function finalizeExam(
       where: { examId },
       select: { id: true },
     })
-    for (const row of resultIds) {
+    const aggregateRows: ResultAggregateBulkRow[] = resultIds.map((row) => {
       const aggregate = computeResultAggregate({
         subjectCount: subjects.length,
         subjectMaxMarks: Object.fromEntries(maxBy),
@@ -426,18 +461,17 @@ export async function finalizeExam(
         marks: marksByResult.get(row.id) ?? [],
         bands,
       })
-      await tx.examResult.update({
-        where: { id: row.id },
-        data: {
-          totalObtained: decimalOrNull(aggregate.totalObtained),
-          totalMaxMarks: decimalOrNull(aggregate.totalMaxMarks),
-          totalPercentage: decimalOrNull(aggregate.totalPercentage),
-          grade: aggregate.grade,
-          isPass: aggregate.isPass,
-          isComplete: aggregate.isComplete,
-        },
-      })
-    }
+      return {
+        id: row.id,
+        totalObtained: decimalOrNull(aggregate.totalObtained),
+        totalMaxMarks: decimalOrNull(aggregate.totalMaxMarks),
+        totalPercentage: decimalOrNull(aggregate.totalPercentage),
+        grade: aggregate.grade,
+        isPass: aggregate.isPass,
+        isComplete: aggregate.isComplete,
+      }
+    })
+    await bulkUpdateResultAggregates(tx, aggregateRows)
 
     const happenings = await tx.examResult.findMany({
       where: { examId },
@@ -450,12 +484,9 @@ export async function finalizeExam(
         isComplete: row.isComplete,
       })),
     )
-    let rankedCount = 0
-    for (const row of ranks) {
-      if (row.rank === null) continue
-      rankedCount += 1
-      await tx.examResult.update({ where: { id: row.id }, data: { rank: row.rank } })
-    }
+    const rankRows = ranks.flatMap((row) => (row.rank === null ? [] : [{ id: row.id, rank: row.rank }]))
+    const rankedCount = rankRows.length
+    await bulkUpdateResultRanks(tx, rankRows)
     await tx.examResult.updateMany({
       where: { examId, isComplete: false },
       data: { rank: null },
@@ -481,7 +512,7 @@ export async function finalizeExam(
     })
 
     return rankedCount
-  })
+  }, { timeout: 20_000, maxWait: 10_000 })
 
   return { finalized: true, ranked }
 }

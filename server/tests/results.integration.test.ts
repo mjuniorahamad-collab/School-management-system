@@ -28,6 +28,8 @@ interface Fixtures {
   studentCId: string
   enrollmentCId: string
   crossSectionEnrollmentId: string
+  bulkClassId: string
+  bulkSectionId: string
   adminPassword: string
 }
 
@@ -50,6 +52,8 @@ const fixtures: Fixtures = {
   studentCId: "",
   enrollmentCId: "",
   crossSectionEnrollmentId: "",
+  bulkClassId: "",
+  bulkSectionId: "",
   adminPassword: "results-secret-123",
 }
 
@@ -121,6 +125,17 @@ describe.skipIf(!TEST_DATABASE_URL)("Results API (integration)", () => {
     fixtures.sectionAId = sectionA.id
     const sectionB = await prisma.section.create({ data: { classId: classSix.id, name: "B" } })
     fixtures.sectionBId = sectionB.id
+
+    // Separate class for the large-roster bulk tests, so the "Six" cohort that
+    // the behavioural tests assert on stays at exactly three students.
+    const bulkClass = await prisma.class.create({
+      data: { schoolId: school.id, name: "Seven", sortOrder: 7 },
+    })
+    fixtures.bulkClassId = bulkClass.id
+    const bulkSection = await prisma.section.create({
+      data: { classId: bulkClass.id, name: "A" },
+    })
+    fixtures.bulkSectionId = bulkSection.id
 
     const mat = await prisma.subject.create({
       data: { schoolId: school.id, code: "MAT", name: "Mathematics" },
@@ -263,6 +278,17 @@ describe.skipIf(!TEST_DATABASE_URL)("Results API (integration)", () => {
     await prisma.examResult.deleteMany()
     await prisma.examSubject.deleteMany()
     await prisma.exam.deleteMany()
+    // The large-roster helper seeds students into a dedicated class; clear them
+    // so each bulk test starts from a known, empty section.
+    const bulkStudents = await prisma.student.findMany({
+      where: { schoolId: fixtures.schoolId, admissionNumber: { startsWith: "ADM-BULK-" } },
+      select: { id: true },
+    })
+    const bulkIds = bulkStudents.map((s) => s.id)
+    if (bulkIds.length > 0) {
+      await prisma.studentEnrollment.deleteMany({ where: { studentId: { in: bulkIds } } })
+      await prisma.student.deleteMany({ where: { id: { in: bulkIds } } })
+    }
   })
 
   afterAll(async () => {
@@ -329,6 +355,74 @@ describe.skipIf(!TEST_DATABASE_URL)("Results API (integration)", () => {
       { enrollmentId: fixtures.enrollmentBId, obtainedMarks: 50 },
       { enrollmentId: fixtures.enrollmentCId, obtainedMarks: 90 },
     ]
+  }
+
+  /**
+   * Creates an exam over the dedicated large-roster class ("Seven") with a
+   * single subject, so a 100-row save can be exercised without disturbing the
+   * three-student "Six" cohort the behavioural tests rely on.
+   */
+  async function createBulkExam() {
+    const res = await adminAgent.post("/api/v1/exams").send(
+      examPayload({
+        name: "Bulk Term Examination",
+        classId: fixtures.bulkClassId,
+        sectionId: fixtures.bulkSectionId,
+        subjects: [
+          {
+            subjectId: fixtures.matSubjectId,
+            teacherId: fixtures.teacherLinkedId,
+            maxMarks: 100,
+            passMarks: 40,
+          },
+        ],
+      }),
+    )
+    expect(res.status).toBe(201)
+    return res.body.data as { id: string; subjects: Array<{ id: string; subjectCode: string }> }
+  }
+
+  /**
+   * Seeds `count` additional students into the bulk class/section and returns
+   * mark rows for them, spread across pass/fail/blank/absent so the batched
+   * aggregate path is exercised with real variety rather than one value.
+   */
+  async function seedLargeSection(prefix: string, count: number) {
+    const students = await Promise.all(
+      Array.from({ length: count }, (_unused, i) =>
+        prisma.student.create({
+          data: {
+            schoolId: fixtures.schoolId,
+            admissionNumber: `ADM-BULK-${prefix}-${String(i + 1).padStart(4, "0")}`,
+            firstName: `${prefix}${i + 1}`,
+            lastName: "Bulk",
+            gender: i % 2 === 0 ? "MALE" : "FEMALE",
+            dateOfBirth: new Date("2013-01-01T00:00:00.000Z"),
+            admissionDate: new Date("2026-04-01T00:00:00.000Z"),
+            status: "ACTIVE",
+          },
+        }),
+      ),
+    )
+    const enrollments = await Promise.all(
+      students.map((student) =>
+        prisma.studentEnrollment.create({
+          data: {
+            studentId: student.id,
+            academicSessionId: fixtures.sessionId,
+            classId: fixtures.bulkClassId,
+            sectionId: fixtures.bulkSectionId,
+          },
+        }),
+      ),
+    )
+
+    return enrollments.map((enrollment, i) => {
+      if (i % 25 === 7) return { enrollmentId: enrollment.id, isAbsent: true }
+      if (i % 25 === 13) return { enrollmentId: enrollment.id, obtainedMarks: null }
+      if (i % 25 === 19) return { enrollmentId: enrollment.id, obtainedMarks: 25 }
+      return { enrollmentId: enrollment.id, obtainedMarks: 60 + (i % 40) }
+    })
   }
 
   describe("sheet", () => {
@@ -527,6 +621,126 @@ describe.skipIf(!TEST_DATABASE_URL)("Results API (integration)", () => {
       const res = await putMarks(teacherAgent, exam.id, mat.id, fullMarks())
       expect(res.status).toBe(200)
       expect(res.body.data.saved).toBe(3)
+    })
+
+    // Regression guard for the P2028 save failure. The request contract already
+    // allows 100 rows per save and the UI submits a whole result-sheet page, so
+    // a full section must round-trip through the batched path. The old
+    // per-student loop issued ~3N+2 sequential statements inside one
+    // interactive transaction and timed out on a remote database.
+    it("saves the maximum 100-row payload for a full section", async () => {
+      const exam = await createBulkExam()
+      const mat = subjectByCode(exam, "MAT")
+      const rows = await seedLargeSection("A", 100)
+
+      const res = await putMarks(adminAgent, exam.id, mat.id, rows)
+      expect(res.status).toBe(200)
+      expect(res.body.data.saved).toBe(100)
+
+      const results = await prisma.examResult.findMany({
+        where: { examId: exam.id },
+        select: { id: true },
+      })
+      expect(results).toHaveLength(100)
+      const resultIds = results.map((r) => r.id)
+      // ExamMark has no examId column; it hangs off the result.
+      const marks = await prisma.examMark.findMany({ where: { examResultId: { in: resultIds } } })
+      expect(marks).toHaveLength(100)
+
+      // The batched writer must persist the DERIVED per-subject values, not
+      // just the raw obtained marks. Absent and blank cells legitimately carry
+      // no percentage/grade/pass, so they are asserted separately.
+      const absent = marks.filter((m) => m.isAbsent)
+      const blank = marks.filter((m) => !m.isAbsent && m.obtainedMarks === null)
+      const scored = marks.filter((m) => !m.isAbsent && m.obtainedMarks !== null)
+      expect(absent).toHaveLength(4)
+      expect(blank).toHaveLength(4)
+      expect(scored).toHaveLength(92)
+      expect(scored.every((m) => m.percentage !== null && m.grade !== null && m.isPass !== null)).toBe(true)
+      expect([...absent, ...blank].every((m) => m.percentage === null && m.isPass === null)).toBe(true)
+      expect(scored.filter((m) => m.isPass === true).length).toBe(88)
+      expect(scored.filter((m) => m.isPass === false).length).toBe(4)
+      // enteredAt/enteredBy provenance is written on insert and must survive.
+      expect(marks.every((m) => m.enteredAt !== null && m.enteredBy !== null)).toBe(true)
+
+      // The aggregate must be recomputed for every student, not a subset.
+      // pageSize defaults to 50, so ask for the full section explicitly.
+      const sheet = await adminAgent.get(
+        `/api/v1/results/exams/${exam.id}/sheet?page=1&pageSize=100`,
+      )
+      expect(sheet.status).toBe(200)
+      expect(sheet.body.data.pagination.total).toBe(100)
+      expect(sheet.body.data.rows).toHaveLength(100)
+      const sheetRows = sheet.body.data.rows as Array<{
+        isComplete: boolean
+        totalObtained: string | null
+        totalPercentage: string | null
+      }>
+      // Only the 92 complete students carry aggregate totals; the 4 absent and
+      // 4 blank are incomplete by policy and keep nulls.
+      expect(sheetRows.filter((r) => r.isComplete)).toHaveLength(92)
+      expect(sheetRows.filter((r) => !r.isComplete)).toHaveLength(8)
+      expect(
+        sheetRows.every((r) => r.isComplete === (r.totalObtained !== null && r.totalPercentage !== null)),
+      ).toBe(true)
+    })
+
+    it("re-saves the same full-section payload without creating duplicates", async () => {
+      const exam = await createBulkExam()
+      const mat = subjectByCode(exam, "MAT")
+      const rows = await seedLargeSection("B", 100)
+
+      const first = await putMarks(adminAgent, exam.id, mat.id, rows)
+      expect(first.status).toBe(200)
+      const second = await putMarks(adminAgent, exam.id, mat.id, rows)
+      expect(second.status).toBe(200)
+      expect(second.body.data.saved).toBe(100)
+
+      expect(await prisma.examResult.count({ where: { examId: exam.id } })).toBe(100)
+      const resultIds = (await prisma.examResult.findMany({
+        where: { examId: exam.id },
+        select: { id: true },
+      })).map((r) => r.id)
+      expect(await prisma.examMark.count({ where: { examResultId: { in: resultIds } } })).toBe(100)
+    })
+
+    it("rejects a payload above the 100-row cap before touching the database", async () => {
+      const exam = await createBulkExam()
+      const mat = subjectByCode(exam, "MAT")
+      await seedLargeSection("C", 100)
+      const tooMany = Array.from({ length: 101 }, () => ({
+        enrollmentId: fixtures.enrollmentAId,
+        obtainedMarks: 50,
+      }))
+
+      const res = await putMarks(adminAgent, exam.id, mat.id, tooMany)
+      expect(res.status).toBe(400)
+      expect(await prisma.examResult.count({ where: { examId: exam.id } })).toBe(0)
+      expect(await prisma.examMark.count({ where: { examResultId: { in: [fixtures.enrollmentAId] } } })).toBe(0)
+    })
+
+    it("finalizes an exam with a full section and ranks every complete student", async () => {
+      const exam = await createBulkExam()
+      const mat = subjectByCode(exam, "MAT")
+      const rows = await seedLargeSection("D", 100)
+      const saved = await putMarks(adminAgent, exam.id, mat.id, rows)
+      expect(saved.status).toBe(200)
+
+      const res = await adminAgent.post(`/api/v1/results/exams/${exam.id}/finalize`)
+      expect(res.status).toBe(200)
+      expect(res.body.data.finalized).toBe(true)
+      // Per the established policy, a student is complete only when every
+      // subject has an actual mark: the absent and the blanked cells are both
+      // incomplete, so 100 - 4 absent - 4 blank = 92 are ranked.
+      expect(res.body.data.ranked).toBe(92)
+
+      const ranked = await prisma.examResult.findMany({
+        where: { examId: exam.id, rank: { not: null } },
+      })
+      expect(ranked).toHaveLength(92)
+      const ranks = ranked.map((r) => r.rank as number)
+      expect(Math.min(...ranks)).toBe(1)
+      expect(new Set(ranks).size).toBeGreaterThan(1)
     })
   })
 
