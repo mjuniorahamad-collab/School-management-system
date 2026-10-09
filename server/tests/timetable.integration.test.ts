@@ -14,9 +14,14 @@ interface Fixtures {
   sessionId: string
   classId: string
   sectionId: string
+  sectionBId: string
+  otherClassId: string
+  otherSectionId: string
   subjectId: string
   teacherId: string
+  secondTeacherId: string
   periodSlotId: string
+  secondPeriodSlotId: string
   adminPassword: string
 }
 
@@ -25,9 +30,14 @@ const fixtures: Fixtures = {
   sessionId: "",
   classId: "",
   sectionId: "",
+  sectionBId: "",
+  otherClassId: "",
+  otherSectionId: "",
   subjectId: "",
   teacherId: "",
+  secondTeacherId: "",
   periodSlotId: "",
+  secondPeriodSlotId: "",
   adminPassword: "timetable-secret-123",
 }
 
@@ -75,6 +85,17 @@ describe.skipIf(!TEST_DATABASE_URL)("Timetable API (integration)", () => {
     fixtures.classId = cls.id
     const section = await prisma.section.create({ data: { classId: cls.id, name: "A" } })
     fixtures.sectionId = section.id
+    const sectionB = await prisma.section.create({ data: { classId: cls.id, name: "B" } })
+    fixtures.sectionBId = sectionB.id
+
+    const otherClass = await prisma.class.create({
+      data: { schoolId: school.id, name: "9", sortOrder: 9 },
+    })
+    fixtures.otherClassId = otherClass.id
+    const otherSection = await prisma.section.create({
+      data: { classId: otherClass.id, name: "A" },
+    })
+    fixtures.otherSectionId = otherSection.id
 
     const subject = await prisma.subject.create({
       data: { schoolId: school.id, code: "MAT", name: "Mathematics" },
@@ -95,6 +116,20 @@ describe.skipIf(!TEST_DATABASE_URL)("Timetable API (integration)", () => {
     })
     fixtures.teacherId = teacher.id
 
+    const secondTeacher = await prisma.teacher.create({
+      data: {
+        schoolId: school.id,
+        employeeId: "T-TT-0002",
+        firstName: "Rita",
+        lastName: "Reader",
+        gender: "FEMALE",
+        designation: "Teacher",
+        joiningDate: new Date("2026-04-01T00:00:00.000Z"),
+        status: "ACTIVE",
+      },
+    })
+    fixtures.secondTeacherId = secondTeacher.id
+
     const slot = await prisma.periodSlot.create({
       data: {
         schoolId: school.id,
@@ -105,6 +140,17 @@ describe.skipIf(!TEST_DATABASE_URL)("Timetable API (integration)", () => {
       },
     })
     fixtures.periodSlotId = slot.id
+
+    const secondSlot = await prisma.periodSlot.create({
+      data: {
+        schoolId: school.id,
+        name: "Period 2",
+        startTime: "08:45",
+        endTime: "09:30",
+        sortOrder: 2,
+      },
+    })
+    fixtures.secondPeriodSlotId = secondSlot.id
 
     const superAdminRole = await prisma.role.create({ data: { name: SUPER_ADMIN_ROLE, description: "Test super admin" } })
     const teacherRole = await prisma.role.create({ data: { name: "TEACHER", description: "Test teacher" } })
@@ -177,6 +223,103 @@ describe.skipIf(!TEST_DATABASE_URL)("Timetable API (integration)", () => {
       const res = await teacherAgent.get("/api/v1/timetable")
       expect(res.status).toBe(403)
       expect(res.body.error.code).toBe("FORBIDDEN")
+    })
+  })
+
+  describe("multi-entry day/period slots", () => {
+    it("returns both entries when two sections share the same day and period", async () => {
+      const first = await adminAgent.post("/api/v1/timetable").send(entryPayload())
+      expect(first.status).toBe(201)
+      const second = await adminAgent.post("/api/v1/timetable").send(
+        entryPayload({
+          sectionId: fixtures.sectionBId,
+          teacherId: fixtures.secondTeacherId,
+        }),
+      )
+      expect(second.status).toBe(201)
+
+      const res = await adminAgent.get("/api/v1/timetable")
+      expect(res.status).toBe(200)
+      expect(res.body.data.total).toBe(2)
+
+      const ids = res.body.data.items.map((item: { id: string }) => item.id)
+      expect(new Set(ids).size).toBe(2)
+      expect(ids).toContain(first.body.data.id)
+      expect(ids).toContain(second.body.data.id)
+      for (const item of res.body.data.items) {
+        expect(item.dayOfWeek).toBe("MONDAY")
+        expect(item.periodSlotId).toBe(fixtures.periodSlotId)
+      }
+    })
+
+    it("returns both entries when two classes share the same day and period", async () => {
+      const first = await adminAgent.post("/api/v1/timetable").send(entryPayload())
+      expect(first.status).toBe(201)
+      const second = await adminAgent.post("/api/v1/timetable").send(
+        entryPayload({
+          classId: fixtures.otherClassId,
+          sectionId: fixtures.otherSectionId,
+          teacherId: fixtures.secondTeacherId,
+        }),
+      )
+      expect(second.status).toBe(201)
+
+      const res = await adminAgent.get("/api/v1/timetable")
+      expect(res.body.data.total).toBe(2)
+      const classNames = res.body.data.items
+        .map((item: { className: string }) => item.className)
+        .sort()
+      expect(classNames).toEqual(["6", "9"])
+    })
+
+    it("filters the list by classId", async () => {
+      await adminAgent.post("/api/v1/timetable").send(entryPayload())
+      await adminAgent.post("/api/v1/timetable").send(
+        entryPayload({
+          classId: fixtures.otherClassId,
+          sectionId: fixtures.otherSectionId,
+          teacherId: fixtures.secondTeacherId,
+        }),
+      )
+
+      const res = await adminAgent.get(`/api/v1/timetable?classId=${fixtures.classId}`)
+      expect(res.status).toBe(200)
+      expect(res.body.data.total).toBe(1)
+      expect(res.body.data.items[0].classId).toBe(fixtures.classId)
+    })
+
+    it("filters the list by sectionId", async () => {
+      await adminAgent.post("/api/v1/timetable").send(entryPayload())
+      await adminAgent.post("/api/v1/timetable").send(
+        entryPayload({
+          sectionId: fixtures.sectionBId,
+          teacherId: fixtures.secondTeacherId,
+        }),
+      )
+
+      const res = await adminAgent.get(`/api/v1/timetable?sectionId=${fixtures.sectionBId}`)
+      expect(res.status).toBe(200)
+      expect(res.body.data.total).toBe(1)
+      expect(res.body.data.items[0].sectionId).toBe(fixtures.sectionBId)
+    })
+
+    it("orders entries by day and then by period slot order", async () => {
+      await adminAgent.post("/api/v1/timetable").send(
+        entryPayload({ periodSlotId: fixtures.secondPeriodSlotId }),
+      )
+      await adminAgent.post("/api/v1/timetable").send(entryPayload({ dayOfWeek: "TUESDAY" }))
+      await adminAgent.post("/api/v1/timetable").send(entryPayload())
+
+      const res = await adminAgent.get("/api/v1/timetable")
+      expect(res.status).toBe(200)
+      const slots = res.body.data.items.map(
+        (item: { dayOfWeek: string; periodSlotId: string }) => [item.dayOfWeek, item.periodSlotId],
+      )
+      expect(slots).toEqual([
+        ["MONDAY", fixtures.periodSlotId],
+        ["MONDAY", fixtures.secondPeriodSlotId],
+        ["TUESDAY", fixtures.periodSlotId],
+      ])
     })
   })
 

@@ -1,12 +1,9 @@
 import { PrintDocument } from "@/components/print/PrintDocument"
 import { PrintFieldGrid, PrintSection } from "@/components/print/PrintFields"
+import { groupTimetableEntries } from "@/lib/timetableCells"
 import type { PeriodSlotListItem } from "@/types/masterData"
-import {
-  TIMETABLE_DAYS,
-  TIMETABLE_DAY_LABELS,
-  type TimetableDay,
-  type TimetableEntryListItem,
-} from "@/types/timetable"
+import { TIMETABLE_DAYS, TIMETABLE_DAY_LABELS } from "@/types/timetable"
+import type { TimetableEntryListItem } from "@/types/timetable"
 
 export interface TimetablePrintScope {
   academicSession: string
@@ -23,8 +20,10 @@ export interface TimetablePrintScope {
  * paging to reconcile and no completeness check to perform.
  *
  * Rows follow the period slots' own `sortOrder`; columns follow the canonical day
- * order. Empty cells print as an em dash rather than being dropped, so a blank
- * period is visibly blank instead of silently missing.
+ * order. A cell that holds several lessons stacks every one of them in a stable
+ * class/section/subject order, so no valid entry is dropped; empty cells print as
+ * an em dash rather than being dropped, so a blank period is visibly blank instead
+ * of silently missing.
  *
  * This is a grid, not a `PrintTable`: the leading column is a two-line row header
  * and each cell stacks subject, teacher and class. It still takes its type from
@@ -41,11 +40,7 @@ export function TimetablePrintDocument({
   periodSlots: PeriodSlotListItem[]
   scope: TimetablePrintScope
 }) {
-  const byDay = new Map<TimetableDay, Map<string, TimetableEntryListItem>>()
-  for (const entry of entries) {
-    if (!byDay.has(entry.dayOfWeek)) byDay.set(entry.dayOfWeek, new Map())
-    byDay.get(entry.dayOfWeek)!.set(entry.periodSlotId, entry)
-  }
+  const byDay = groupTimetableEntries(entries)
 
   const rows = [...periodSlots].sort((a, b) => a.sortOrder - b.sortOrder)
 
@@ -98,23 +93,27 @@ export function TimetablePrintDocument({
                     </span>
                   </th>
                   {TIMETABLE_DAYS.map((day) => {
-                    const entry = byDay.get(day)?.get(slot.id)
+                    const cellEntries = byDay.get(day)?.get(slot.id)
                     return (
                       <td key={day} className="align-top">
-                        {entry === undefined ? (
+                        {cellEntries === undefined ? (
                           <span className="block text-center">—</span>
                         ) : (
-                          <>
-                            <span className="font-semibold">{entry.subjectCode}</span>
-                            <span className="block">{entry.subjectName}</span>
-                            <span className="block font-normal">{entry.teacherName}</span>
-                            <span className="block font-normal">
-                              {entry.className}
-                              {entry.sectionName !== null && entry.sectionName !== undefined && entry.sectionName !== ""
-                                ? ` · ${entry.sectionName}`
-                                : ""}
+                          cellEntries.map((entry, index) => (
+                            <span key={entry.id} className={index > 0 ? "mt-1 block" : "block"}>
+                              <span className="font-semibold">{entry.subjectCode}</span>
+                              <span className="block">{entry.subjectName}</span>
+                              <span className="block font-normal">{entry.teacherName}</span>
+                              <span className="block font-normal">
+                                {entry.className}
+                                {entry.sectionName !== null &&
+                                entry.sectionName !== undefined &&
+                                entry.sectionName !== ""
+                                  ? ` · ${entry.sectionName}`
+                                  : ""}
+                              </span>
                             </span>
-                          </>
+                          ))
                         )}
                       </td>
                     )

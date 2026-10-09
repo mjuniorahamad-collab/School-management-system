@@ -2,8 +2,9 @@ import { CalendarClock, Pencil, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
+import { groupTimetableEntries } from "@/lib/timetableCells"
 import { TIMETABLE_DAYS, TIMETABLE_DAY_LABELS } from "@/types/timetable"
-import type { TimetableDay, TimetableEntryListItem } from "@/types/timetable"
+import type { TimetableEntryListItem } from "@/types/timetable"
 
 interface TimetableGridProps {
   items: TimetableEntryListItem[]
@@ -32,13 +33,7 @@ export function TimetableGrid({
   if (isError) return <GridError onRetry={onRetry} />
   if (items.length === 0) return <EmptyState />
 
-  const entriesByDay = new Map<TimetableDay, Map<string, TimetableEntryListItem>>()
-  for (const entry of items) {
-    if (!entriesByDay.has(entry.dayOfWeek)) {
-      entriesByDay.set(entry.dayOfWeek, new Map())
-    }
-    entriesByDay.get(entry.dayOfWeek)!.set(entry.periodSlotId, entry)
-  }
+  const entriesByDay = groupTimetableEntries(items)
 
   return (
     <div className="hidden overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10 lg:block">
@@ -70,53 +65,78 @@ export function TimetableGrid({
                   {periodLabel(items, periodId)}
                 </th>
                 {TIMETABLE_DAYS.map((day) => {
-                  const entry = entriesByDay.get(day)?.get(periodId)
+                  const cellEntries = entriesByDay.get(day)?.get(periodId) ?? []
+                  const isMulti = cellEntries.length > 1
                   return (
                     <td key={day} className="border-l border-foreground/10 px-2 py-2">
-                      {entry ? (
+                      {cellEntries.length > 0 ? (
                         <div className="flex flex-col gap-1 rounded-lg bg-indigo-50 p-2 dark:bg-indigo-500/10">
-                          <span className="text-xs font-semibold text-indigo-800 dark:text-indigo-200">
-                            {entry.subjectName}
-                          </span>
-                          <span className="text-xs text-indigo-700/70 dark:text-indigo-300/70">
-                            {entry.teacherName}
-                          </span>
-                          {entry.sectionName && (
-                            <Badge
-                              variant="secondary"
-                              className="w-fit border-transparent text-[10px] font-medium"
-                            >
-                              Sec {entry.sectionName}
-                            </Badge>
-                          )}
-                          {(canEdit || canDelete) && (
-                            <span className="mt-1 flex items-center gap-1">
-                              {canEdit && (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="size-6 text-indigo-700 dark:text-indigo-300"
-                                  onClick={() => onEdit(entry)}
-                                  aria-label={`Edit ${entry.subjectName} on ${TIMETABLE_DAY_LABELS[day]}`}
-                                >
-                                  <Pencil className="size-3.5" aria-hidden="true" />
-                                </Button>
-                              )}
-                              {canDelete && (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="size-6 text-indigo-700/70 hover:text-red-600 dark:text-indigo-300/70"
-                                  onClick={() => onDelete(entry)}
-                                  aria-label={`Delete ${entry.subjectName} on ${TIMETABLE_DAY_LABELS[day]}`}
-                                >
-                                  <Trash2 className="size-3.5" aria-hidden="true" />
-                                </Button>
-                              )}
-                            </span>
-                          )}
+                          {cellEntries.map((entry, index) => {
+                            const context = isMulti
+                              ? ` (${entry.className}${entry.sectionName ? ` ${entry.sectionName}` : ""})`
+                              : ""
+                            return (
+                              <div
+                                key={entry.id}
+                                className={
+                                  index > 0
+                                    ? "flex flex-col gap-1 border-t border-indigo-200 pt-2 dark:border-indigo-400/30"
+                                    : "flex flex-col gap-1"
+                                }
+                              >
+                                <span className="text-xs font-semibold text-indigo-800 dark:text-indigo-200">
+                                  {entry.subjectName}
+                                </span>
+                                <span className="text-xs text-indigo-700/70 dark:text-indigo-300/70">
+                                  {entry.teacherName}
+                                </span>
+                                {isMulti && (
+                                  <Badge
+                                    variant="secondary"
+                                    className="w-fit border-transparent text-[10px] font-medium"
+                                  >
+                                    Class {entry.className}
+                                  </Badge>
+                                )}
+                                {entry.sectionName && (
+                                  <Badge
+                                    variant="secondary"
+                                    className="w-fit border-transparent text-[10px] font-medium"
+                                  >
+                                    Sec {entry.sectionName}
+                                  </Badge>
+                                )}
+                                {(canEdit || canDelete) && (
+                                  <span className="mt-1 flex items-center gap-1">
+                                    {canEdit && (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="size-6 text-indigo-700 dark:text-indigo-300"
+                                        onClick={() => onEdit(entry)}
+                                        aria-label={`Edit ${entry.subjectName}${context} on ${TIMETABLE_DAY_LABELS[day]}`}
+                                      >
+                                        <Pencil className="size-3.5" aria-hidden="true" />
+                                      </Button>
+                                    )}
+                                    {canDelete && (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="size-6 text-indigo-700/70 hover:text-red-600 dark:text-indigo-300/70"
+                                        onClick={() => onDelete(entry)}
+                                        aria-label={`Delete ${entry.subjectName}${context} on ${TIMETABLE_DAY_LABELS[day]}`}
+                                      >
+                                        <Trash2 className="size-3.5" aria-hidden="true" />
+                                      </Button>
+                                    )}
+                                  </span>
+                                )}
+                              </div>
+                            )
+                          })}
                         </div>
                       ) : (
                         <span className="block h-16" aria-hidden="true" />
