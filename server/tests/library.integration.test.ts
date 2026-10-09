@@ -494,7 +494,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Library API (integration)", () => {
       for (let i = 0; i < 5; i += 1) {
         const { copy } = await givenCopy()
         copies.push(copy)
-        const res = await adminAgent.post("/api/v1/library/loans").send(issuePayload(copy.id, { dueDate: "2026-09-20" }))
+        // Relative-safe: a hardcoded due date silently becomes invalid once the
+        // wall clock passes it and the API correctly rejects it.
+        const res = await adminAgent.post("/api/v1/library/loans").send(issuePayload(copy.id, { dueDate: LOAN_DUE_DAY }))
         expect(res.status).toBe(201)
       }
       const { copy: sixth } = await givenCopy()
