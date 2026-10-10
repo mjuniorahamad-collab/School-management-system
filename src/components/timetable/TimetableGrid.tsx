@@ -36,7 +36,7 @@ export function TimetableGrid({
   const entriesByDay = groupTimetableEntries(items)
 
   return (
-    <div className="hidden overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10 lg:block">
+    <div className="overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-left text-sm">
           <thead className="bg-muted/40 text-xs font-medium text-muted-foreground uppercase">

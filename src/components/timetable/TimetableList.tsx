@@ -29,7 +29,7 @@ export function TimetableList({
   if (isPending) return <ListSkeleton />
   if (isError)
     return (
-      <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed py-16 text-center lg:hidden">
+      <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed py-16 text-center">
         <p className="text-sm text-muted-foreground">Could not load the timetable.</p>
         <button
           type="button"
@@ -42,7 +42,7 @@ export function TimetableList({
     )
   if (items.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed py-16 text-center lg:hidden">
+      <div className="flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed py-16 text-center">
         <CalendarClock className="size-8 text-muted-foreground/60" aria-hidden="true" />
         <p className="text-sm font-medium text-foreground">No timetable entries</p>
       </div>
@@ -50,7 +50,7 @@ export function TimetableList({
   }
 
   return (
-    <div className="overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10 lg:hidden">
+    <div className="overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
       <ul className="divide-y">
         {items.map((entry) => (
           <li key={entry.id}>
@@ -119,7 +119,7 @@ export function TimetableList({
 
 function ListSkeleton() {
   return (
-    <div className="rounded-xl bg-card p-4 ring-1 ring-foreground/10 lg:hidden">
+    <div className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
       <div className="flex flex-col gap-4">
         {Array.from({ length: 4 }).map((_, index) => (
           <div key={index} className="flex items-center gap-3">

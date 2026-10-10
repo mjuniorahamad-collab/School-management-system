@@ -23,7 +23,14 @@ import type { TimetableEntryListItem } from "@/types/timetable"
 
 export function TimetablePage() {
   const { can } = useAuth()
-  const [viewMode, setViewMode] = useState<TimetableViewMode>("grid")
+  // Viewport-aware *initial* mode only: desktop opens on the grid, narrow
+  // widths on the list. No resize listener — once a user picks a mode the
+  // toolbar is the single source of truth, and both modes are selectable at
+  // every width.
+  const [viewMode, setViewMode] = useState<TimetableViewMode>(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return "grid"
+    return window.matchMedia("(min-width: 1024px)").matches ? "grid" : "list"
+  })
   const [academicSessionId, setAcademicSessionId] = useState("")
   const [classId, setClassId] = useState("all")
   const [sectionId, setSectionId] = useState("all")
