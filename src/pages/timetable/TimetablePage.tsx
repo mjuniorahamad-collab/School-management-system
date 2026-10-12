@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Copy } from "lucide-react"
+import { CalendarClock, Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PageContainer } from "@/components/layout/PageContainer"
 import { PageHeader } from "@/components/layout/PageHeader"
@@ -47,11 +47,15 @@ export function TimetablePage() {
   })
   const classSections = sections?.items ?? []
 
-  const { data, isPending, isError, refetch } = useTimetableEntries({
-    academicSessionId: academicSessionId || undefined,
-    classId: classId !== "all" ? classId : undefined,
-    sectionId: sectionId !== "all" ? sectionId : undefined,
-  })
+  const sessionSelected = academicSessionId !== ""
+  const { data, isPending, isError, refetch } = useTimetableEntries(
+    {
+      academicSessionId: academicSessionId || undefined,
+      classId: classId !== "all" ? classId : undefined,
+      sectionId: sectionId !== "all" ? sectionId : undefined,
+    },
+    { enabled: sessionSelected },
+  )
 
   const { data: periodSlots } = useQuery({
     queryKey: ["period-slots", "options"],
@@ -90,11 +94,15 @@ export function TimetablePage() {
   const klass = (classes?.items ?? []).find((item) => item.id === classId)
   const section = classSections.find((item) => item.id === sectionId)
   const printScope = {
-    academicSession: session?.name ?? (academicSessionId ? academicSessionId : "All sessions"),
+    academicSession: session?.name ?? academicSessionId ?? "Selected session",
     className: klass?.name ?? (classId === "all" ? "All classes" : "Selected class"),
     sectionName:
       sectionId === "all" ? "All sections" : (section?.name ?? entries[0]?.sectionName ?? "Selected section"),
   }
+  // The whole-school "All classes" scope prints as the detailed one-row-per-lesson
+  // table; a specific class/section keeps the period×weekday grid. An explicit
+  // choice, never inferred from the display string above.
+  const printLayout = classId === "all" ? "detailed" : "grid"
 
   const deleteMutation = useDeleteTimetableEntry()
 
@@ -115,8 +123,10 @@ export function TimetablePage() {
           actions={
             <>
               {/* Decision D5: wide artifacts print landscape. Decision D1: gated on
-                  the read permission of the printed artifact. */}
-              {can("timetable:view") && (
+                  the read permission of the printed artifact. Decision A: printing
+                  waits for a selected session so no all-session union is ever
+                  printed as if it were one week. */}
+              {can("timetable:view") && sessionSelected && (
                 <PrintButton
                   documentTitle={`Weekly Timetable ${printScope.className}`}
                   orientation="landscape"
@@ -152,7 +162,9 @@ export function TimetablePage() {
           }}
         />
         </div>
-        {viewMode === "grid" ? (
+        {!sessionSelected ? (
+          <SelectSessionPrompt />
+        ) : viewMode === "grid" ? (
           <div className="print:hidden">
           <TimetableGrid
             items={entries}
@@ -173,6 +185,7 @@ export function TimetablePage() {
           <div className="print:hidden">
           <TimetableList
             items={entries}
+            periodSlots={periodSlots?.items ?? []}
             isPending={isPending}
             isError={isError}
             canEdit={canEdit}
@@ -187,11 +200,14 @@ export function TimetablePage() {
           </div>
         )}
 
-        <TimetablePrintDocument
-          entries={entries}
-          periodSlots={periodSlots?.items ?? []}
-          scope={printScope}
-        />
+        {sessionSelected && (
+          <TimetablePrintDocument
+            entries={entries}
+            periodSlots={periodSlots?.items ?? []}
+            scope={printScope}
+            layout={printLayout}
+          />
+        )}
 
         <TimetableFormDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} />
         <CopyDayDialog
@@ -216,5 +232,24 @@ export function TimetablePage() {
         />
       </div>
     </PageContainer>
+  )
+}
+
+/**
+ * Shown until an academic session is chosen. The weekly timetable is meaningful
+ * for exactly one session, so there is no "all sessions" view, query or print —
+ * rendering a union of sessions as if it were one week would be misleading.
+ */
+function SelectSessionPrompt() {
+  return (
+    <div className="flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed py-16 text-center">
+      <CalendarClock className="size-8 text-muted-foreground/60" aria-hidden="true" />
+      <p className="text-sm font-medium text-foreground">
+        Select an academic session to view the timetable.
+      </p>
+      <p className="text-sm text-muted-foreground">
+        The weekly timetable is scoped to a single session.
+      </p>
+    </div>
   )
 }

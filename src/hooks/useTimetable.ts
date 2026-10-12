@@ -9,11 +9,18 @@ import type {
 
 const TIMETABLE_GROUP = ["timetable"] as const
 
-export function useTimetableEntries(query: TimetableEntryListQuery) {
+export function useTimetableEntries(
+  query: TimetableEntryListQuery,
+  options: { enabled?: boolean } = {},
+) {
   return useQuery({
     queryKey: ["timetable", query],
     queryFn: () => timetableService.list(query),
     placeholderData: (previous) => previous,
+    // A weekly timetable is only meaningful for one academic session. The page
+    // disables the query until a session is chosen so an unfiltered all-session
+    // union can never become the normal weekly view.
+    enabled: options.enabled ?? true,
   })
 }
 

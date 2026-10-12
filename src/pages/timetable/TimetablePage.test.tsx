@@ -15,9 +15,13 @@ import type { TimetableEntryListItem } from "@/types/timetable"
 // styles, so visibility is asserted as the class contract the bug violated:
 // the mounted view's root must carry no hidden-utility token.
 //
-// NOTE: the page also always renders TimetablePrintDocument, which itself
-// contains a <table>. Queries below are scoped to the on-screen view root so
-// the print copy never satisfies (or breaks) a screen assertion.
+// NOTE: once a session is selected the page also renders TimetablePrintDocument,
+// which itself contains a <table>. Queries below are scoped to the on-screen view
+// root so the print copy never satisfies (or breaks) a screen assertion.
+//
+// Decision A: the weekly timetable is meaningful for one session only. Until a
+// session is chosen the page renders a prompt, never runs the timetable query and
+// never mounts the print document.
 
 const {
   useTimetableEntriesMock,
@@ -251,9 +255,21 @@ function switchView(label: "Grid view" | "List view") {
   fireEvent.click(screen.getByRole("button", { name: label }))
 }
 
+/** Renders the page, then selects the only session so the timetable is in scope. */
+async function renderPageWithSession() {
+  const utils = renderPage()
+  await pick(sessionTrigger(), "Academic Year 2026")
+  return utils
+}
+
 function lastTimetableQuery(): Record<string, string | undefined> {
   const calls = useTimetableEntriesMock.mock.calls
   return calls[calls.length - 1][0] as Record<string, string | undefined>
+}
+
+function lastTimetableEnabled(): boolean | undefined {
+  const calls = useTimetableEntriesMock.mock.calls
+  return (calls[calls.length - 1][1] as { enabled?: boolean } | undefined)?.enabled
 }
 
 /** The on-screen grid table, never the always-mounted print document table. */
@@ -285,10 +301,45 @@ function expectAllSubjectsVisible(container: HTMLElement) {
   expect(within(scope).getByText("Science")).toBeTruthy()
 }
 
-describe("TimetablePage view modes", () => {
-  it("opens on the Grid at desktop widths and renders shared-cell lessons together", () => {
-    stubViewport(1280)
+describe("TimetablePage session gating", () => {
+  it("prompts for a session and neither runs the query nor mounts a view or print document", () => {
     const { container } = renderPage()
+
+    expect(screen.getByText("Select an academic session to view the timetable.")).toBeTruthy()
+    expect(container.querySelector("table")).toBeNull()
+    expect(container.querySelector("ul.divide-y")).toBeNull()
+    expect(lastTimetableEnabled()).toBe(false)
+    expect(lastTimetableQuery()).toEqual({
+      academicSessionId: undefined,
+      classId: undefined,
+      sectionId: undefined,
+    })
+  })
+
+  it("keeps the print action hidden until a session is selected", async () => {
+    renderPage()
+    expect(screen.queryByRole("button", { name: "Print timetable" })).toBeNull()
+
+    await pick(sessionTrigger(), "Academic Year 2026")
+    expect(screen.queryByRole("button", { name: "Print timetable" })).toBeTruthy()
+  })
+
+  it("scopes the timetable query to the selected session once chosen", async () => {
+    await renderPageWithSession()
+
+    expect(lastTimetableEnabled()).toBe(true)
+    expect(lastTimetableQuery()).toEqual({
+      academicSessionId: SESSION_ID,
+      classId: undefined,
+      sectionId: undefined,
+    })
+  })
+})
+
+describe("TimetablePage view modes", () => {
+  it("opens on the Grid at desktop widths and renders shared-cell lessons together", async () => {
+    stubViewport(1280)
+    const { container } = await renderPageWithSession()
 
     const table = screenTable(container)
     expect(table).toBeTruthy()
@@ -300,9 +351,9 @@ describe("TimetablePage view modes", () => {
     expect(visibilityHidingTokens(table?.closest("div.overflow-hidden") ?? null)).toEqual([])
   })
 
-  it("renders the same entries in List on desktop instead of a blank area", () => {
+  it("renders the same entries in List on desktop instead of a blank area", async () => {
     stubViewport(1280)
-    const { container } = renderPage()
+    const { container } = await renderPageWithSession()
 
     switchView("List view")
 
@@ -312,9 +363,9 @@ describe("TimetablePage view modes", () => {
     expect(visibilityHidingTokens(viewRoot(container))).toEqual([])
   })
 
-  it("keeps the same entries and query arguments across Grid → List → Grid → List", () => {
+  it("keeps the same entries and query arguments across Grid → List → Grid → List", async () => {
     stubViewport(1280)
-    const { container } = renderPage()
+    const { container } = await renderPageWithSession()
 
     expectAllSubjectsVisible(container)
 
@@ -330,15 +381,19 @@ describe("TimetablePage view modes", () => {
     expectAllSubjectsVisible(container)
     expect(container.querySelectorAll("ul.divide-y > li")).toHaveLength(3)
 
-    expect(useTimetableEntriesMock.mock.calls.length).toBeGreaterThan(1)
-    for (const [args] of useTimetableEntriesMock.mock.calls) {
+    // Every enabled fetch stays scoped to the chosen session; no all-session union.
+    const enabledCalls = useTimetableEntriesMock.mock.calls.filter(
+      (call) => (call[1] as { enabled?: boolean } | undefined)?.enabled === true,
+    )
+    expect(enabledCalls.length).toBeGreaterThan(1)
+    for (const [args] of enabledCalls) {
       expect(Object.keys(args as object).sort()).toEqual([
         "academicSessionId",
         "classId",
         "sectionId",
       ])
       expect(args).toEqual({
-        academicSessionId: undefined,
+        academicSessionId: SESSION_ID,
         classId: undefined,
         sectionId: undefined,
       })
@@ -388,10 +443,10 @@ describe("TimetablePage view modes", () => {
     expect(screen.queryByRole("combobox", { name: "Section" })).toBeNull()
   })
 
-  it("keeps the loading skeleton visible for the selected view", () => {
+  it("keeps the loading skeleton visible for the selected view", async () => {
     stubViewport(1280)
     mockTimetableQuery({ isPending: true })
-    const { container } = renderPage()
+    const { container } = await renderPageWithSession()
 
     expect(container.querySelector("[data-slot='skeleton']")).toBeTruthy()
 
@@ -399,10 +454,10 @@ describe("TimetablePage view modes", () => {
     expect(container.querySelector("[data-slot='skeleton']")).toBeTruthy()
   })
 
-  it("keeps the empty state visible for the selected view", () => {
+  it("keeps the empty state visible for the selected view", async () => {
     stubViewport(1280)
     mockTimetableQuery({ items: [] })
-    renderPage()
+    await renderPageWithSession()
 
     expect(screen.getByText("No timetable entries")).toBeTruthy()
 
@@ -410,10 +465,10 @@ describe("TimetablePage view modes", () => {
     expect(screen.getByText("No timetable entries")).toBeTruthy()
   })
 
-  it("keeps the error state visible, with a working retry, in the selected view", () => {
+  it("keeps the error state visible, with a working retry, in the selected view", async () => {
     stubViewport(1280)
     mockTimetableQuery({ isError: true })
-    renderPage()
+    await renderPageWithSession()
 
     expect(screen.getByText("Could not load the timetable.")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Try again" }))
@@ -425,21 +480,21 @@ describe("TimetablePage view modes", () => {
     expect(refetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it("starts on Grid at ≥1024px and on List below it", () => {
+  it("starts on Grid at ≥1024px and on List below it", async () => {
     stubViewport(1280)
-    const desktop = renderPage()
+    const desktop = await renderPageWithSession()
     expect(screenTable(desktop.container)).toBeTruthy()
     cleanup()
 
     stubViewport(360)
-    const mobile = renderPage()
+    const mobile = await renderPageWithSession()
     expect(screenTable(mobile.container)).toBeNull()
     expect(mobile.container.querySelectorAll("ul.divide-y > li")).toHaveLength(3)
   })
 
-  it("still renders the Grid on demand at mobile widths, without hiding classes", () => {
+  it("still renders the Grid on demand at mobile widths, without hiding classes", async () => {
     stubViewport(360)
-    const { container } = renderPage()
+    const { container } = await renderPageWithSession()
     expect(screenTable(container)).toBeNull()
 
     switchView("Grid view")
