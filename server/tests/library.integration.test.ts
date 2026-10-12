@@ -527,6 +527,76 @@ describe.skipIf(!TEST_DATABASE_URL)("Library API (integration)", () => {
       expect(byTitle.body.data.pagination.total).toBeGreaterThanOrEqual(1)
     })
 
+    // The three status filters must partition the loan table exactly the way
+    // deriveLoanStatus() classifies each row. Before the correction, "active"
+    // and "overdue" shared one clause, so the two pills returned identical sets
+    // while a past-due row still rendered an OVERDUE badge inside "On loan".
+    // Dates are relative so the suite cannot silently decay past a wall clock.
+    it("partitions loans into active, overdue and returned by due date", async () => {
+      const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
+
+      const onLoan = await givenCopy()
+      await adminAgent
+        .post("/api/v1/library/loans")
+        .send(issuePayload(onLoan.copy.id, { issueDate: day(-1), dueDate: day(30) }))
+
+      const overdue = await givenCopy()
+      await adminAgent
+        .post("/api/v1/library/loans")
+        .send(issuePayload(overdue.copy.id, { issueDate: day(-30), dueDate: day(-1) }))
+
+      const returned = await givenCopy()
+      const returnedIssue = await adminAgent
+        .post("/api/v1/library/loans")
+        .send(issuePayload(returned.copy.id, { issueDate: day(-2), dueDate: day(30) }))
+      await prisma.libraryLoan.update({
+        where: { id: returnedIssue.body.data.id },
+        data: { returnedAt: new Date(`${day(0)}T00:00:00.000Z`) },
+      })
+
+      const activeRes = await adminAgent.get("/api/v1/library/loans?status=active")
+      const overdueRes = await adminAgent.get("/api/v1/library/loans?status=overdue")
+      const returnedRes = await adminAgent.get("/api/v1/library/loans?status=returned")
+      const allRes = await adminAgent.get("/api/v1/library/loans")
+
+      expect(activeRes.body.data.pagination.total).toBe(1)
+      expect(overdueRes.body.data.pagination.total).toBe(1)
+      expect(returnedRes.body.data.pagination.total).toBe(1)
+      expect(allRes.body.data.pagination.total).toBe(3)
+
+      // Each filter returns only its own loan, identified by its copy code.
+      expect(activeRes.body.data.items[0].copyCode).toBe(onLoan.copy.copyCode)
+      expect(overdueRes.body.data.items[0].copyCode).toBe(overdue.copy.copyCode)
+      expect(returnedRes.body.data.items[0].copyCode).toBe(returned.copy.copyCode)
+
+      // The filter and the badge on the rows it returns must agree.
+      expect(activeRes.body.data.items[0].status).toBe("ON_LOAN")
+      expect(overdueRes.body.data.items[0].status).toBe("OVERDUE")
+      expect(returnedRes.body.data.items[0].status).toBe("RETURNED")
+
+      // active and overdue are disjoint sets, not two names for one query.
+      const activeIds = new Set(activeRes.body.data.items.map((i: { id: string }) => i.id))
+      const overdueIds = overdueRes.body.data.items.map((i: { id: string }) => i.id)
+      expect(overdueIds.every((id: string) => !activeIds.has(id))).toBe(true)
+    })
+
+    it("counts a loan due today as active, not overdue", async () => {
+      // The boundary matters: deriveLoanStatus is `dueAt < today` -> OVERDUE, so a
+      // loan due today is still on loan and must appear under the active filter.
+      const { copy } = await givenCopy()
+      const today = new Date().toISOString().slice(0, 10)
+      const res = await adminAgent
+        .post("/api/v1/library/loans")
+        .send(issuePayload(copy.id, { issueDate: today, dueDate: today }))
+      expect(res.status).toBe(201)
+      expect(res.body.data.status).toBe("ON_LOAN")
+
+      const active = await adminAgent.get("/api/v1/library/loans?status=active")
+      expect(active.body.data.pagination.total).toBe(1)
+      const overdue = await adminAgent.get("/api/v1/library/loans?status=overdue")
+      expect(overdue.body.data.pagination.total).toBe(0)
+    })
+
     it("returns a loan, re-availablizes the copy and audits the event", async () => {
       const { copy } = await givenCopy()
       const issued = await adminAgent.post("/api/v1/library/loans").send(issuePayload(copy.id))
