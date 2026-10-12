@@ -521,6 +521,33 @@
     break-inside: avoid;
   }
 
+  /* 6f-1. Individual-class weekly grid ---------------------------------------
+     The period×weekday grid for ONE class/section is the densest artifact in the
+     app: a normal week stacks several lines in every lesson cell. It keeps the
+     shared paginating table behaviour above (thead repeats, rows never split) but
+     prints at a compact, readable scale so a 6-8 period week fits a single
+     landscape A4 sheet. The scale is a fixed typographic choice, NOT a period-count
+     branch: a week with more periods than fit simply paginates, repeating the
+     header and carrying the remaining rows to the next page. Every lesson, and
+     every field of a lesson, still prints.
+
+     Scoped to the grid artifact's own hook classes so no other document and no
+     shared rule is affected. `table-layout: fixed` makes the table honour the
+     printable width instead of growing past it, so a long subject or teacher name
+     wraps inside its column rather than clipping the weekday columns. */
+  .print-document.print-timetable-grid .print-timetable-grid-table {
+    font-size: 8pt;
+    line-height: 1.15;
+    table-layout: fixed;
+  }
+
+  .print-document.print-timetable-grid .print-timetable-grid-table th,
+  .print-document.print-timetable-grid .print-timetable-grid-table td {
+    padding: 1pt 3pt;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
   /* 6g. Signatures and stamp ------------------------------------------------- */
 
   .print-document .print-document-signatures {

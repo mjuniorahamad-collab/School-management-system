@@ -97,6 +97,15 @@ The type scale, the rules and the density live in `src/index.css` under
   Schedule, Student Profile. Long flowing registers, the Timetable, the Result
   Sheet and Reports are unframed — a border around a multi-page document reads as
   a broken rectangle, not a frame. `frame` defaults to `false`.
+- **Artifact-scoped density.** Where one artifact's own content demands it, a
+  compact scale may be scoped to that artifact through dedicated hook classes —
+  never by editing the shared rules above. The individual-class timetable grid
+  uses `print-timetable-grid` on the document and `print-timetable-grid-table` on
+  the table so it can print at a denser, still-readable scale. The scale is a
+  fixed typographic choice, **not** a branch on how much content there is: a
+  normal 6-8 period week fits one landscape sheet, while a longer week simply
+  paginates. The repeated `thead` and `break-inside: avoid` rows are untouched,
+  so no school's period count is assumed and no lesson is ever shrunk away.
 - **Repeating footer, no page number.** `.print-document-footer` is
   `position: fixed`, which Chromium re-renders at the foot of *every* physical
   page, so a six-page register carries the document's identity throughout;

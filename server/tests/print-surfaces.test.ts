@@ -276,6 +276,56 @@ describe("Framing is reserved for short documents", () => {
 })
 
 /**
+ * Regression: the weekly grid was rendered inside the shared `PrintSection`, whose
+ * `print-document-section-block` wrapper carries `break-inside: avoid-page`. That
+ * forced the entire period×weekday grid to stay on one physical page, so a large
+ * timetable spilled off the sheet instead of paginating row by row. The grid heading
+ * and table must be independent children of the document body.
+ *
+ * JSDOM can render the tree but cannot evaluate the print stylesheet, so the
+ * load-bearing fact — the absence of the keep-together wrapper — is pinned here, and
+ * the rendered-tree position is pinned by the frontend
+ * `TimetablePrintDocument.test.tsx`.
+ */
+describe("Timetable print pagination structure", () => {
+  const doc = src("src/components/timetable/TimetablePrintDocument.tsx")
+
+  it("never wraps the grid in the keep-together section block", () => {
+    expect(doc).not.toContain("print-document-section-block")
+    expect(doc).not.toMatch(/<PrintSection\b/)
+  })
+
+  it("keeps the weekly grid heading as a plain section heading", () => {
+    expect(doc).toMatch(/<h2 className="print-document-section">Weekly grid<\/h2>/)
+  })
+
+  it("renders the All-classes detailed layout as a one-row-per-lesson table", () => {
+    for (const header of ["Day", "Period / Time", "Class / Section", "Subject", "Teacher"]) {
+      expect(doc).toContain(header)
+    }
+  })
+
+  it("scopes the compact scale to the grid's own hook classes", () => {
+    // Density is scoped to dedicated hooks, never to Tailwind utilities: the grid
+    // carries `print-timetable-grid` / `print-timetable-grid-table`, and the shared
+    // compact table class is not redefined for any other document.
+    expect(doc).toContain("print-timetable-grid")
+    expect(doc).toContain("print-timetable-grid-table")
+    expect(doc).toMatch(/layout === "grid" \? "print-timetable-grid" : undefined/)
+
+    const css = src("src/index.css")
+    expect(css).toContain(".print-document.print-timetable-grid .print-timetable-grid-table")
+    expect(css).toMatch(/\.print-document \.print-document-table-compact \{\s*font-size:\s*8\.5pt/)
+  })
+
+  it("adapts by pagination, not by a period-count branch", () => {
+    // A school may have 6, 8, 10, 12 or more periods; the only mechanism is the
+    // browser's own pagination of the unchanged paginating table.
+    expect(doc).not.toMatch(/data-periods|periodCount|periods\.length\s*===|periods\s*===\s*\d/)
+  })
+})
+
+/**
  * Regression: "Print receipt" on the payments list printed the whole Payments page
  * (heading, search, filters, every row, the pagination indicator) instead of the
  * single receipt. Two causes had to be fixed together: the page chrome carried no

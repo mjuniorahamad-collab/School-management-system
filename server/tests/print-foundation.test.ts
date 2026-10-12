@@ -233,6 +233,42 @@ describe("print table rules", () => {
   })
 })
 
+/**
+ * The individual-class weekly grid is the densest artifact: it prints at a compact
+ * scale scoped to its own hook classes, so a normal 6-8 period week fits one
+ * landscape sheet while a longer week paginates. The scale must stay a readable
+ * point size and must not touch the shared compact table rule.
+ */
+describe("print timetable grid scale", () => {
+  const scope = ".print-document.print-timetable-grid .print-timetable-grid-table"
+
+  it("is scoped to the grid's dedicated hook classes", () => {
+    expect(printBlock).toContain(scope)
+  })
+
+  it("stays inside the print media query", () => {
+    expect(printBlock.indexOf(scope)).toBeGreaterThan(-1)
+    expect(css.slice(0, css.indexOf("@media print"))).not.toContain("print-timetable-grid")
+  })
+
+  it("uses a readable point size, never below the 7.5pt floor", () => {
+    const size = Number(ruleAt(printBlock, `${scope} {`).match(/font-size:\s*([\d.]+)pt/)?.[1])
+    expect(size).toBeGreaterThanOrEqual(7.5)
+  })
+
+  it("uses pt, not px, so type tracks the page", () => {
+    const rule = ruleAt(printBlock, `${scope} {`)
+    expect(rule).toMatch(/font-size:\s*[\d.]+pt/)
+    expect(rule).not.toMatch(/font-size:\s*[\d.]+px/)
+  })
+
+  it("does not redefine the shared compact scale", () => {
+    expect(ruleAt(printBlock, ".print-document .print-document-table-compact {")).toContain(
+      "font-size: 8.5pt",
+    )
+  })
+})
+
 describe("print identity block", () => {
   it("renders a monogram box and rules the letterhead off from the page", () => {
     expect(printBlock).toMatch(/\.print-document \.print-document-monogram\s*\{/)

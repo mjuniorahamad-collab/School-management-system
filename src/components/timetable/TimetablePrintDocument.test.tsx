@@ -77,7 +77,7 @@ function makeEntry(overrides: Partial<TimetableEntryListItem> = {}): TimetableEn
 }
 
 function lessonCount(): string {
-  const label = screen.getByText("Lessons on this grid")
+  const label = screen.getByText("Lessons in this schedule")
   return label.parentElement?.querySelector("dd")?.textContent ?? ""
 }
 
@@ -162,5 +162,142 @@ describe("TimetablePrintDocument multi-entry cells", () => {
     )
 
     expect(screen.getByText("No period slots are configured.")).toBeTruthy()
+  })
+})
+
+describe("TimetablePrintDocument detailed layout", () => {
+  it("renders one row per lesson with the whole-school columns", () => {
+    const { container } = render(
+      <TimetablePrintDocument
+        entries={[makeEntry({ id: "entry-math" })]}
+        periodSlots={[slotOne]}
+        scope={scope}
+        layout="detailed"
+      />,
+    )
+
+    const table = container.querySelector("table.print-document-table")
+    if (!table) throw new Error("Detailed schedule table not found")
+
+    const headers = Array.from(table.querySelectorAll("thead th")).map((th) =>
+      (th.textContent ?? "").trim(),
+    )
+    expect(headers).toEqual(["Day", "Period / Time", "Class / Section", "Subject", "Teacher"])
+    expect(table.querySelectorAll("tbody tr")).toHaveLength(1)
+    expect(screen.getByText("Monday")).toBeTruthy()
+    expect(screen.getByText("6 · A")).toBeTruthy()
+    expect(screen.getByText("Mathematics")).toBeTruthy()
+    expect(screen.getByText("Tim Timetable")).toBeTruthy()
+  })
+
+  it("orders lessons by day, then the configured period sortOrder, then class/section", () => {
+    const earlySlot = makeEntry({
+      id: "entry-early",
+      dayOfWeek: "MONDAY",
+      periodSlotId: "slot-2",
+      periodSlotName: "Period 2",
+      periodSlotStartTime: "09:00",
+      classId: "class-9",
+      className: "9",
+      subjectName: "History",
+    })
+    const laterSlot = makeEntry({
+      id: "entry-later",
+      dayOfWeek: "MONDAY",
+      periodSlotId: "slot-1",
+      periodSlotName: "Period 1",
+      periodSlotStartTime: "08:00",
+      classId: "class-9",
+      className: "9",
+      subjectName: "Science",
+    })
+
+    // Input order is deliberately reversed and the slot start times are set so a
+    // start-time sort would disagree with the configured sortOrder.
+    const { container } = render(
+      <TimetablePrintDocument
+        entries={[laterSlot, earlySlot]}
+        periodSlots={[slotTwo, slotOne]}
+        scope={scope}
+        layout="detailed"
+      />,
+    )
+
+    const rows = Array.from(container.querySelectorAll("tbody tr")).map((tr) =>
+      (tr.textContent ?? "").trim(),
+    )
+    expect(rows[0]?.startsWith("MondayPeriod 1")).toBe(true)
+    expect(rows[1]?.startsWith("MondayPeriod 2")).toBe(true)
+  })
+
+  it("prints an empty-schedule message when there are no lessons", () => {
+    render(
+      <TimetablePrintDocument entries={[]} periodSlots={[slotOne]} scope={scope} layout="detailed" />,
+    )
+
+    expect(screen.getByText("No lessons recorded for this scope.")).toBeTruthy()
+  })
+
+  it("still defaults to the weekly grid when no layout is given", () => {
+    render(<TimetablePrintDocument entries={[makeEntry()]} periodSlots={[slotOne]} scope={scope} />)
+
+    expect(screen.getByRole("heading", { name: "Weekly grid", level: 2 })).toBeTruthy()
+    expect(screen.queryByText("Lesson schedule")).toBeNull()
+  })
+})
+
+describe("TimetablePrintDocument pagination structure", () => {
+  it("keeps the grid heading and table outside the section-block that forces page breaks", () => {
+    render(
+      <TimetablePrintDocument entries={[makeEntry()]} periodSlots={[slotOne]} scope={scope} />,
+    )
+
+    const heading = screen.getByRole("heading", { name: "Weekly grid", level: 2 })
+    const table = screen.getByRole("table")
+
+    expect(heading).toBeTruthy()
+    expect(table).toBeTruthy()
+
+    let current: HTMLElement | null = heading.parentElement
+    let foundSectionBlock = false
+    while (current) {
+      if (current.classList.contains("print-document-section-block")) {
+        foundSectionBlock = true
+        break
+      }
+      current = current.parentElement
+    }
+
+    expect(foundSectionBlock).toBe(false)
+  })
+})
+
+describe("TimetablePrintDocument density scoping", () => {
+  it("marks the individual-class grid with the dedicated print hooks", () => {
+    const { container } = render(
+      <TimetablePrintDocument
+        entries={[makeEntry()]}
+        periodSlots={[slotOne]}
+        scope={scope}
+        layout="grid"
+      />,
+    )
+
+    expect(container.querySelector(".print-document.print-timetable-grid")).not.toBeNull()
+    expect(container.querySelector(".print-timetable-grid-table")).not.toBeNull()
+  })
+
+  it("never marks the All-classes detailed table with the grid hooks", () => {
+    const { container } = render(
+      <TimetablePrintDocument
+        entries={[makeEntry()]}
+        periodSlots={[slotOne]}
+        scope={scope}
+        layout="detailed"
+      />,
+    )
+
+    expect(container.querySelector(".print-timetable-grid")).toBeNull()
+    expect(container.querySelector(".print-timetable-grid-table")).toBeNull()
   })
 })
