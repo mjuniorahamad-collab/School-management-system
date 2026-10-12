@@ -1,12 +1,17 @@
+import { useMemo } from "react"
 import { CalendarClock, Pencil, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
+import { sortTimetableEntriesForList } from "@/lib/timetableCells"
+import type { PeriodOrder } from "@/lib/timetableCells"
 import { TIMETABLE_DAY_LABELS } from "@/types/timetable"
 import type { TimetableEntryListItem } from "@/types/timetable"
 
 interface TimetableListProps {
   items: TimetableEntryListItem[]
+  /** Configured period order, so the flat list is ordered by the master data. */
+  periodSlots?: readonly PeriodOrder[]
   isPending: boolean
   isError: boolean
   canEdit: boolean
@@ -18,6 +23,7 @@ interface TimetableListProps {
 
 export function TimetableList({
   items,
+  periodSlots,
   isPending,
   isError,
   canEdit,
@@ -26,6 +32,14 @@ export function TimetableList({
   onEdit,
   onDelete,
 }: TimetableListProps) {
+  // The canonical order is applied here, not trusted from the caller: the API only
+  // guarantees day and period, so a flat List rendered in API row order is not
+  // deterministic within a shared day/period cell.
+  const ordered = useMemo(
+    () => sortTimetableEntriesForList(items, periodSlots),
+    [items, periodSlots],
+  )
+
   if (isPending) return <ListSkeleton />
   if (isError)
     return (
@@ -52,7 +66,7 @@ export function TimetableList({
   return (
     <div className="overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
       <ul className="divide-y">
-        {items.map((entry) => (
+        {ordered.map((entry) => (
           <li key={entry.id}>
             <div className="flex items-start gap-3 p-4">
               <div className="min-w-0 flex-1">
@@ -66,6 +80,12 @@ export function TimetableList({
                   <span className="truncate text-sm font-medium text-foreground">
                     {entry.subjectName}
                   </span>
+                  <Badge
+                    variant="secondary"
+                    className="border-transparent text-[10px] font-medium"
+                  >
+                    Class {entry.className}
+                  </Badge>
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
                   <span>{entry.periodSlotName}</span>
