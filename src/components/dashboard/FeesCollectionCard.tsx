@@ -100,10 +100,13 @@ export function FeesCollectionCard({ className }: FeesCollectionCardProps) {
               <span className="text-3xl font-semibold tracking-tight tabular-nums">
                 {formatINR(data.totalCollected)}
               </span>
-              <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-50 px-1.5 py-0.5 text-xs font-medium text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400">
-                <ArrowUpRight className="size-3.5" aria-hidden="true" />
-                +{data.trendPercent}%
-              </span>
+              {data.trendPercent !== null && (
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-50 px-1.5 py-0.5 text-xs font-medium text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400">
+                  <ArrowUpRight className="size-3.5" aria-hidden="true" />
+                  {data.trendPercent >= 0 ? "+" : ""}
+                  {data.trendPercent}%
+                </span>
+              )}
             </div>
             <p className="mt-0.5 text-xs text-muted-foreground">{data.comparison}</p>
           </div>
@@ -129,6 +132,7 @@ export function FeesCollectionCard({ className }: FeesCollectionCardProps) {
                   width={44}
                   tick={{ fontSize: 11, fill: colors.tickMuted }}
                   tickFormatter={(value: number) => formatINRCompact(value)}
+                  domain={[0, (dataMax: number) => (dataMax <= 0 ? 10 : Math.ceil(dataMax * 1.1))]}
                 />
                 <Tooltip
                   content={<ChartTooltip formatter={(value) => formatINR(value)} />}

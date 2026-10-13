@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { PrismaClient } from "@prisma/client"
 import request from "supertest"
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { createApp } from "../src/app.js"
 import { hashPassword } from "../src/auth/password.js"
 import { SUPER_ADMIN_ROLE } from "../src/permissions/permissions.js"
@@ -11,9 +11,22 @@ const app = createApp()
 
 const adminPassword = "dashboard-admin-secret-123"
 
+const TEST_ADMIN_A_EMAIL = "dashboard.admin@example.com"
+const TEST_ADMIN_A_PASS = adminPassword
+const TEST_ADMIN_B_EMAIL = "dashboard.admin.b@example.com"
+const TEST_ADMIN_B_PASS = "dashboard-admin-b-secret"
+const TEST_ADMIN_C_EMAIL = "dashboard.admin.c@example.com"
+const TEST_ADMIN_C_PASS = "dashboard-admin-c-secret"
+
+// Sessions created by per-test fee regression setups (never part of the shared
+// beforeAll fixtures) are tracked here and removed after every test, once the
+// fee tables that reference them have been truncated.
+const extraSessionIds: string[] = []
+
 interface Fixtures {
   schoolAId: string
   schoolBId: string
+  schoolCId: string
   activeSessionAId: string
   closedSessionAId: string
   activeSessionBId: string
@@ -35,6 +48,7 @@ interface Fixtures {
 const fixtures: Fixtures = {
   schoolAId: "",
   schoolBId: "",
+  schoolCId: "",
   activeSessionAId: "",
   closedSessionAId: "",
   activeSessionBId: "",
@@ -57,6 +71,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Dashboard API (integration)", () => {
   let prisma: PrismaClient
   const adminAgent = request.agent(app)
   const adminAgentB = request.agent(app)
+  const adminAgentC = request.agent(app)
   const viewerAgent = request.agent(app)
 
   beforeAll(async () => {
@@ -281,12 +296,30 @@ describe.skipIf(!TEST_DATABASE_URL)("Dashboard API (integration)", () => {
     })
     await prisma.tenantMembership.create({ data: { userId: viewerUser.id, schoolId: schoolA.id, roleId: viewerRole.id, status: "ACTIVE" } })
 
-    await login(adminAgent, "dashboard.admin@example.com", adminPassword)
-    await login(adminAgentB, "dashboard.admin.b@example.com", "dashboard-admin-b-secret")
+    // ── School C (empty-data control: a school with NO academic sessions) ───
+    const schoolC = await prisma.school.create({ data: { name: "Dashboard School C" } })
+    fixtures.schoolCId = schoolC.id
+
+    const adminCUser = await prisma.user.create({
+      data: {
+        schoolId: schoolC.id,
+        name: "Dashboard Admin C",
+        email: TEST_ADMIN_C_EMAIL,
+        passwordHash: hashPassword(TEST_ADMIN_C_PASS),
+        status: "ACTIVE",
+        roles: { create: [{ role: { connect: { name: SUPER_ADMIN_ROLE } } }] },
+      },
+    })
+    await prisma.tenantMembership.create({ data: { userId: adminCUser.id, schoolId: schoolC.id, roleId: superAdminRole.id, status: "ACTIVE" } })
+
+    await login(adminAgent, TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+    await login(adminAgentB, TEST_ADMIN_B_EMAIL, TEST_ADMIN_B_PASS)
+    await login(adminAgentC, TEST_ADMIN_C_EMAIL, TEST_ADMIN_C_PASS)
     await login(viewerAgent, "dashboard.viewer@example.com", "dashboard-viewer-secret")
   }, 120_000)
 
   afterEach(async () => {
+    vi.useRealTimers()
     await prisma.attendanceRecord.deleteMany()
     await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeReceipt" CASCADE')
     await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeePayment" CASCADE')
@@ -298,6 +331,8 @@ describe.skipIf(!TEST_DATABASE_URL)("Dashboard API (integration)", () => {
     await prisma.$executeRawUnsafe('TRUNCATE TABLE "Exam" CASCADE')
     await prisma.notice.deleteMany()
     await prisma.event.deleteMany()
+    await prisma.academicSession.deleteMany({ where: { id: { in: extraSessionIds } } })
+    extraSessionIds.length = 0
   }, 60_000)
 
   afterAll(async () => {
@@ -592,6 +627,492 @@ describe.skipIf(!TEST_DATABASE_URL)("Dashboard API (integration)", () => {
       const resA = await adminAgent.get("/api/v1/dashboard/stats")
       const byIdA = new Map(resA.body.data.stats.map((s: { id: string }) => [s.id, s]))
       expect(byIdA.get("total-students").value).toBe("6")
+    })
+  })
+
+  describe("fee analytics regression", () => {
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    let paymentSeq = 0
+    let invoiceSeq = 0
+
+    async function createInvoice(opts: {
+      schoolId: string
+      sessionId: string
+      studentId: string
+      enrollmentId: string
+      totalAmount: number
+    }) {
+      invoiceSeq += 1
+      return prisma.feeInvoice.create({
+        data: {
+          schoolId: opts.schoolId,
+          studentId: opts.studentId,
+          enrollmentId: opts.enrollmentId,
+          sessionId: opts.sessionId,
+          invoiceNumber: `INV-REGR-${invoiceSeq}-${opts.schoolId.slice(0, 4)}`,
+          className: "6",
+          sessionName: "2026-27",
+          grossAmount: opts.totalAmount,
+          totalAmount: opts.totalAmount,
+          items: [],
+        },
+      })
+    }
+
+    async function createPayment(schoolId: string, invoiceId: string, amount: number, dateISO: string) {
+      paymentSeq += 1
+      return prisma.feePayment.create({
+        data: {
+          schoolId,
+          invoiceId,
+          paymentNumber: `PAY-REGR-${paymentSeq}-${schoolId.slice(0, 4)}`,
+          amount,
+          method: "CASH",
+          paymentDate: new Date(dateISO),
+        },
+      })
+    }
+
+    async function createExtraSession(opts: {
+      schoolId: string
+      name: string
+      code: string
+      startDate: string
+      endDate: string
+      status: "ACTIVE" | "CLOSED"
+    }) {
+      const session = await prisma.academicSession.create({
+        data: {
+          schoolId: opts.schoolId,
+          name: opts.name,
+          code: opts.code,
+          startDate: new Date(opts.startDate),
+          endDate: new Date(opts.endDate),
+          status: opts.status,
+        },
+      })
+      extraSessionIds.push(session.id)
+      return session
+    }
+
+    // Freezes the system clock at `iso` and returns a freshly-authenticated
+    // agent whose session was created AT that frozen time. A dedicated agent
+    // per frozen test is required because requireAuth rejects any session whose
+    // accessExpiresAt is in the past relative to the (frozen) request time.
+    async function agentAt(iso: string, email: string, password: string) {
+      vi.useFakeTimers({ toFake: ["Date"] })
+      vi.setSystemTime(new Date(iso))
+      const agent = request.agent(app)
+      await login(agent, email, password)
+      return agent
+    }
+
+    const zeroMonths = (labels: string[]) => labels.map((label) => ({ label, collected: 0 }))
+
+    describe("session: exact total and bucket independence", () => {
+      it("A. returns exactly 71,500 for the active session regardless of the current calendar month", async () => {
+        const agent = await agentAt("2026-12-15T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+        const inv1 = await createInvoice({
+          schoolId: fixtures.schoolAId,
+          sessionId: fixtures.activeSessionAId,
+          studentId: fixtures.studentA1.id,
+          enrollmentId: fixtures.enrollmentA1Id,
+          totalAmount: 40000,
+        })
+        const inv2 = await createInvoice({
+          schoolId: fixtures.schoolAId,
+          sessionId: fixtures.activeSessionAId,
+          studentId: fixtures.studentA2.id,
+          enrollmentId: fixtures.enrollmentA2Id,
+          totalAmount: 40000,
+        })
+        // Nov (in window), Dec (current window month) and Aug (older). The Aug
+        // payment proves the session total is NOT limited to the current month.
+        await createPayment(fixtures.schoolAId, inv1.id, 30000, "2026-11-05T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv2.id, 30000, "2026-12-01T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv1.id, 11500, "2026-08-10T09:00:00.000Z")
+
+        const res = await agent.get("/api/v1/dashboard/fees?period=session")
+        expect(res.status).toBe(200)
+        expect(res.body.data.totalCollected).toBe(71500)
+
+        // The session-scoped fee summary reports the same full-session metric.
+        const statusRes = await agent.get("/api/v1/dashboard/fee-status")
+        expect(statusRes.status).toBe(200)
+        expect(statusRes.body.data.collected).toBe(71500)
+        expect(statusRes.body.data.total).toBe(80000)
+        expect(statusRes.body.data.pending).toBe(8500)
+      })
+
+      it("B. keeps the session total independent of the six-month display buckets", async () => {
+        const agent = await agentAt("2026-12-15T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+        const inv = await createInvoice({
+          schoolId: fixtures.schoolAId,
+          sessionId: fixtures.activeSessionAId,
+          studentId: fixtures.studentA1.id,
+          enrollmentId: fixtures.enrollmentA1Id,
+          totalAmount: 50000,
+        })
+        // Apr 2026 falls OUTSIDE the Jul–Dec 2026 display window.
+        await createPayment(fixtures.schoolAId, inv.id, 10000, "2026-04-10T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv.id, 5000, "2026-11-05T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv.id, 2000, "2026-12-01T09:00:00.000Z")
+
+        const res = await agent.get("/api/v1/dashboard/fees?period=session")
+        expect(res.status).toBe(200)
+        expect(res.body.data.totalCollected).toBe(17000)
+        expect(res.body.data.months).toEqual([
+          { label: "Jul", collected: 0 },
+          { label: "Aug", collected: 0 },
+          { label: "Sep", collected: 0 },
+          { label: "Oct", collected: 0 },
+          { label: "Nov", collected: 5000 },
+          { label: "Dec", collected: 2000 },
+        ])
+        const bucketSum = res.body.data.months.reduce((sum: number, m: { collected: number }) => sum + m.collected, 0)
+        expect(bucketSum).toBe(7000)
+        // The older payment contributes to the total but never renders a bar.
+        expect(bucketSum).not.toBe(res.body.data.totalCollected)
+      })
+
+      it("B. equals the bucket sum when every payment lies inside the display window", async () => {
+        const agent = await agentAt("2026-12-15T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+        const inv = await createInvoice({
+          schoolId: fixtures.schoolAId,
+          sessionId: fixtures.activeSessionAId,
+          studentId: fixtures.studentA1.id,
+          enrollmentId: fixtures.enrollmentA1Id,
+          totalAmount: 10000,
+        })
+        await createPayment(fixtures.schoolAId, inv.id, 1000, "2026-07-01T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv.id, 2000, "2026-09-01T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv.id, 3000, "2026-11-01T09:00:00.000Z")
+
+        const res = await agent.get("/api/v1/dashboard/fees?period=session")
+        expect(res.status).toBe(200)
+        expect(res.body.data.totalCollected).toBe(6000)
+        expect(res.body.data.months).toEqual([
+          { label: "Jul", collected: 1000 },
+          { label: "Aug", collected: 0 },
+          { label: "Sep", collected: 2000 },
+          { label: "Oct", collected: 0 },
+          { label: "Nov", collected: 3000 },
+          { label: "Dec", collected: 0 },
+        ])
+        const bucketSum = res.body.data.months.reduce((sum: number, m: { collected: number }) => sum + m.collected, 0)
+        expect(bucketSum).toBe(res.body.data.totalCollected)
+      })
+    })
+
+    describe("session: academic-session date boundaries", () => {
+      it("C. attributes totals by invoice membership and buckets by payment date", async () => {
+        // Frozen window is Jan–Jun 2027. The ACTIVE session A runs 2026-04-01
+        // through 2027-03-31.
+        const agent = await agentAt("2027-06-15T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+        const inv = await createInvoice({
+          schoolId: fixtures.schoolAId,
+          sessionId: fixtures.activeSessionAId,
+          studentId: fixtures.studentA1.id,
+          enrollmentId: fixtures.enrollmentA1Id,
+          totalAmount: 20000,
+        })
+        await createPayment(fixtures.schoolAId, inv.id, 1000, "2026-03-20T09:00:00.000Z") // before start
+        await createPayment(fixtures.schoolAId, inv.id, 2000, "2026-04-01T09:00:00.000Z") // exactly start
+        await createPayment(fixtures.schoolAId, inv.id, 4000, "2027-03-31T09:00:00.000Z") // exactly end
+        await createPayment(fixtures.schoolAId, inv.id, 8000, "2027-04-05T09:00:00.000Z") // after end
+
+        const res = await agent.get("/api/v1/dashboard/fees?period=session")
+        expect(res.status).toBe(200)
+        // All four payments are attributed to the session total: membership is
+        // decided by invoice.sessionId, never by a payment-date range.
+        expect(res.body.data.totalCollected).toBe(15000)
+        // Buckets are decided solely by each payment's own date: only the
+        // in-window Mar 2027 and Apr 2027 payments render bars.
+        expect(res.body.data.months).toEqual([
+          { label: "Jan", collected: 0 },
+          { label: "Feb", collected: 0 },
+          { label: "Mar", collected: 4000 },
+          { label: "Apr", collected: 8000 },
+          { label: "May", collected: 0 },
+          { label: "Jun", collected: 0 },
+        ])
+      })
+    })
+
+    describe("year: buckets and equivalent previous-year comparison", () => {
+      it("D. returns Jan–Dec buckets, exact placement, zeros, and correct YTD baseline", async () => {
+        const agent = await agentAt("2026-03-31T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+        const inv = await createInvoice({
+          schoolId: fixtures.schoolAId,
+          sessionId: fixtures.activeSessionAId,
+          studentId: fixtures.studentA1.id,
+          enrollmentId: fixtures.enrollmentA1Id,
+          totalAmount: 100000,
+        })
+        // Current year-to-date (Jan 1 → Mar 31 2026).
+        await createPayment(fixtures.schoolAId, inv.id, 2000, "2026-01-20T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv.id, 3000, "2026-03-31T09:00:00.000Z")
+        // Future within the year: excluded from the bars and the total.
+        await createPayment(fixtures.schoolAId, inv.id, 4000, "2026-06-01T09:00:00.000Z")
+        // Previous-year equivalent range is Jan 1 → Mar 31 2025.
+        await createPayment(fixtures.schoolAId, inv.id, 500, "2025-02-10T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv.id, 1000, "2025-03-15T09:00:00.000Z")
+        // Within 2025 but AFTER the equivalent date: must NOT feed the baseline.
+        await createPayment(fixtures.schoolAId, inv.id, 50000, "2025-11-01T09:00:00.000Z")
+        // Out of both years entirely.
+        await createPayment(fixtures.schoolAId, inv.id, 90000, "2027-01-01T09:00:00.000Z")
+
+        const res = await agent.get("/api/v1/dashboard/fees?period=year")
+        expect(res.status).toBe(200)
+        const months = res.body.data.months
+        expect(months).toHaveLength(12)
+        expect(months.map((m: { label: string }) => m.label)).toEqual(monthNames)
+        expect(months.map((m: { collected: number }) => m.collected)).toEqual([
+          2000, 0, 3000, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ])
+        expect(res.body.data.totalCollected).toBe(5000)
+        // Baseline 1500 (500 + 1000). The Nov 2025 payment must be excluded.
+        expect(res.body.data.trendPercent).toBe(233.3)
+        expect(res.body.data.comparison).toBe("vs same period last year")
+      })
+
+      it("D. clamps leap-day YTD baseline to the last valid February day", async () => {
+        // Frozen Feb 29 2028 (leap year) → current YTD Jan 1 → Feb 29 2028;
+        // equivalent prior range Jan 1 → Feb 28 2027 (Feb 29 does not exist).
+        const agent = await agentAt("2028-02-29T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+        const inv = await createInvoice({
+          schoolId: fixtures.schoolAId,
+          sessionId: fixtures.activeSessionAId,
+          studentId: fixtures.studentA1.id,
+          enrollmentId: fixtures.enrollmentA1Id,
+          totalAmount: 100000,
+        })
+        await createPayment(fixtures.schoolAId, inv.id, 1000, "2028-01-05T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv.id, 2000, "2028-02-28T09:00:00.000Z")
+        // Clamped edge: Feb 28 2027 counts…
+        await createPayment(fixtures.schoolAId, inv.id, 500, "2027-02-28T09:00:00.000Z")
+        // …Mar 1 2027 does not.
+        await createPayment(fixtures.schoolAId, inv.id, 80000, "2027-03-01T09:00:00.000Z")
+
+        const res = await agent.get("/api/v1/dashboard/fees?period=year")
+        expect(res.status).toBe(200)
+        const months = res.body.data.months
+        expect(months.map((m: { collected: number }) => m.collected)).toEqual([
+          1000, 2000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ])
+        expect(res.body.data.totalCollected).toBe(3000)
+        expect(res.body.data.trendPercent).toBe(500)
+        expect(res.body.data.comparison).toBe("vs same period last year")
+      })
+    })
+
+    describe("session: previous-session trend selection", () => {
+      it("E. treats an existing zero-collection previous session as 100% when current is positive", async () => {
+        const agent = await agentAt("2026-12-15T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+        // The shared CLOSED 2025-26 predecessor has no payments (zero baseline).
+        const inv = await createInvoice({
+          schoolId: fixtures.schoolAId,
+          sessionId: fixtures.activeSessionAId,
+          studentId: fixtures.studentA1.id,
+          enrollmentId: fixtures.enrollmentA1Id,
+          totalAmount: 20000,
+        })
+        await createPayment(fixtures.schoolAId, inv.id, 5000, "2026-12-01T09:00:00.000Z")
+
+        const res = await agent.get("/api/v1/dashboard/fees?period=session")
+        expect(res.status).toBe(200)
+        expect(res.body.data.totalCollected).toBe(5000)
+        expect(res.body.data.trendPercent).toBe(100)
+        expect(res.body.data.comparison).toBe("vs last session")
+      })
+
+      it("E. reports a null trend (not 0) when no previous session exists", async () => {
+        const agent = await agentAt("2026-12-15T09:00:00.000Z", TEST_ADMIN_B_EMAIL, TEST_ADMIN_B_PASS)
+        // School B has exactly one (ACTIVE) session: no predecessor at all.
+        const inv = await createInvoice({
+          schoolId: fixtures.schoolBId,
+          sessionId: fixtures.activeSessionBId,
+          studentId: fixtures.studentB1.id,
+          enrollmentId: (await prisma.studentEnrollment.findFirstOrThrow({
+            where: { studentId: fixtures.studentB1.id },
+          })).id,
+          totalAmount: 20000,
+        })
+        await createPayment(fixtures.schoolBId, inv.id, 7000, "2026-12-01T09:00:00.000Z")
+
+        const res = await agent.get("/api/v1/dashboard/fees?period=session")
+        expect(res.status).toBe(200)
+        expect(res.body.data.totalCollected).toBe(7000)
+        expect(res.body.data.trendPercent).toBeNull()
+        expect(res.body.data.comparison).toBe("No previous session")
+      })
+
+      it("E. selects the immediately preceding session ordered by startDate", async () => {
+        const agent = await agentAt("2026-12-15T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+        // Insert an older 2024-25 session with a LARGE collection. The active
+        // session's immediate predecessor is still the zero-collection 2025-26
+        // closed session, so the trend must be 100, not the negative value that
+        // an accidental 2024-25 baseline would produce.
+        const old = await createExtraSession({
+          schoolId: fixtures.schoolAId,
+          name: "2024-25",
+          code: "AY2024",
+          startDate: "2024-04-01T00:00:00.000Z",
+          endDate: "2025-03-31T00:00:00.000Z",
+          status: "CLOSED",
+        })
+        const oldInvoice = await createInvoice({
+          schoolId: fixtures.schoolAId,
+          sessionId: old.id,
+          studentId: fixtures.studentA1.id,
+          enrollmentId: fixtures.enrollmentA1Id,
+          totalAmount: 50000,
+        })
+        await createPayment(fixtures.schoolAId, oldInvoice.id, 50000, "2024-08-01T09:00:00.000Z")
+
+        const inv = await createInvoice({
+          schoolId: fixtures.schoolAId,
+          sessionId: fixtures.activeSessionAId,
+          studentId: fixtures.studentA1.id,
+          enrollmentId: fixtures.enrollmentA1Id,
+          totalAmount: 20000,
+        })
+        await createPayment(fixtures.schoolAId, inv.id, 5000, "2026-12-01T09:00:00.000Z")
+
+        const res = await agent.get("/api/v1/dashboard/fees?period=session")
+        expect(res.status).toBe(200)
+        expect(res.body.data.totalCollected).toBe(5000)
+        expect(res.body.data.trendPercent).toBe(100)
+        expect(res.body.data.comparison).toBe("vs last session")
+      })
+    })
+
+    describe("session: tenant isolation", () => {
+      it("F. never mixes another school's invoices, payments or baselines into the totals", async () => {
+        const agentA = await agentAt("2026-12-15T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+        const agentB = await agentAt("2026-12-15T09:00:00.000Z", TEST_ADMIN_B_EMAIL, TEST_ADMIN_B_PASS)
+        const invA = await createInvoice({
+          schoolId: fixtures.schoolAId,
+          sessionId: fixtures.activeSessionAId,
+          studentId: fixtures.studentA1.id,
+          enrollmentId: fixtures.enrollmentA1Id,
+          totalAmount: 60000,
+        })
+        await createPayment(fixtures.schoolAId, invA.id, 25000, "2026-11-01T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, invA.id, 25000, "2026-12-01T09:00:00.000Z")
+
+        const invB = await createInvoice({
+          schoolId: fixtures.schoolBId,
+          sessionId: fixtures.activeSessionBId,
+          studentId: fixtures.studentB1.id,
+          enrollmentId: (await prisma.studentEnrollment.findFirstOrThrow({
+            where: { studentId: fixtures.studentB1.id },
+          })).id,
+          totalAmount: 150000,
+        })
+        await createPayment(fixtures.schoolBId, invB.id, 99999, "2026-12-02T09:00:00.000Z")
+
+        const resA = await agentA.get("/api/v1/dashboard/fees?period=session")
+        expect(resA.status).toBe(200)
+        expect(resA.body.data.totalCollected).toBe(50000)
+        const decA = resA.body.data.months.find((m: { label: string }) => m.label === "Dec")
+        expect(decA.collected).toBe(25000)
+        expect(resA.body.data.trendPercent).toBe(100)
+        expect(resA.body.data.comparison).toBe("vs last session")
+
+        const resB = await agentB.get("/api/v1/dashboard/fees?period=session")
+        expect(resB.status).toBe(200)
+        expect(resB.body.data.totalCollected).toBe(99999)
+        const decB = resB.body.data.months.find((m: { label: string }) => m.label === "Dec")
+        expect(decB.collected).toBe(99999)
+        expect(resB.body.data.trendPercent).toBeNull()
+        expect(resB.body.data.comparison).toBe("No previous session")
+      })
+    })
+
+    describe("stats: fees collection KPI", () => {
+      it("G. reports a session-wide value with a month-to-month trend and 'vs last month' label", async () => {
+        const agent = await agentAt("2026-12-15T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+        const inv = await createInvoice({
+          schoolId: fixtures.schoolAId,
+          sessionId: fixtures.activeSessionAId,
+          studentId: fixtures.studentA1.id,
+          enrollmentId: fixtures.enrollmentA1Id,
+          totalAmount: 50000,
+        })
+        // Both are session-linked; the older one is outside the current month.
+        await createPayment(fixtures.schoolAId, inv.id, 1000, "2026-11-10T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv.id, 3000, "2026-12-05T09:00:00.000Z")
+
+        const res = await agent.get("/api/v1/dashboard/stats")
+        expect(res.status).toBe(200)
+        const byId = new Map(res.body.data.stats.map((s: { id: string }) => [s.id, s]))
+        const fees = byId.get("fees-collection")
+        expect(fees.value).toBe("₹4,000")
+        expect(fees.trendPercent).toBe(200)
+        expect(fees.comparison).toBe("vs last month")
+      })
+    })
+
+    describe("additional edge cases", () => {
+      it("H. returns six zero buckets and a null trend for a school with no sessions", async () => {
+        const agent = await agentAt("2026-12-15T09:00:00.000Z", TEST_ADMIN_C_EMAIL, TEST_ADMIN_C_PASS)
+        const res = await agent.get("/api/v1/dashboard/fees?period=session")
+        expect(res.status).toBe(200)
+        expect(res.body.data.totalCollected).toBe(0)
+        expect(res.body.data.trendPercent).toBeNull()
+        expect(res.body.data.comparison).toBe("No previous session")
+        expect(res.body.data.months.map((m: { label: string }) => m.label)).toEqual([
+          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ])
+        expect(res.body.data.months.every((m: { collected: number }) => m.collected === 0)).toBe(true)
+
+        const yearRes = await agent.get("/api/v1/dashboard/fees?period=year")
+        expect(yearRes.status).toBe(200)
+        expect(yearRes.body.data.totalCollected).toBe(0)
+        expect(yearRes.body.data.months.map((m: { label: string }) => m.label)).toEqual(monthNames)
+        expect(yearRes.body.data.months.every((m: { collected: number }) => m.collected === 0)).toBe(true)
+
+        const monthRes = await agent.get("/api/v1/dashboard/fees?period=month")
+        expect(monthRes.status).toBe(200)
+        expect(monthRes.body.data.totalCollected).toBe(0)
+        expect(monthRes.body.data.months.every((m: { collected: number }) => m.collected === 0)).toBe(true)
+
+        const statusRes = await agent.get("/api/v1/dashboard/fee-status")
+        expect(statusRes.status).toBe(200)
+        expect(statusRes.body.data).toEqual({ collected: 0, pending: 0, total: 0 })
+      })
+
+      it("H. zero-valued months remain 0 when the active session has a zero previous baseline", async () => {
+        const agent = await agentAt("2026-12-15T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+        // No payments at all: current 0, previous (2025-26) 0 → 0, not null.
+        const res = await agent.get("/api/v1/dashboard/fees?period=session")
+        expect(res.status).toBe(200)
+        expect(res.body.data.totalCollected).toBe(0)
+        expect(res.body.data.trendPercent).toBe(0)
+        expect(res.body.data.comparison).toBe("vs last session")
+        expect(zeroMonths(["Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])).toEqual(res.body.data.months)
+      })
+
+      it("H. treats missing previous-year history as a 100% trend instead of raw division failure", async () => {
+        const agent = await agentAt("2026-12-15T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+        const inv = await createInvoice({
+          schoolId: fixtures.schoolAId,
+          sessionId: fixtures.activeSessionAId,
+          studentId: fixtures.studentA1.id,
+          enrollmentId: fixtures.enrollmentA1Id,
+          totalAmount: 50000,
+        })
+        await createPayment(fixtures.schoolAId, inv.id, 5000, "2026-11-05T09:00:00.000Z")
+
+        const res = await agent.get("/api/v1/dashboard/fees?period=year")
+        expect(res.status).toBe(200)
+        expect(res.body.data.totalCollected).toBe(5000)
+        const nov = res.body.data.months.find((m: { label: string }) => m.label === "Nov")
+        expect(nov.collected).toBe(5000)
+        expect(res.body.data.trendPercent).toBe(100)
+        expect(res.body.data.comparison).toBe("vs same period last year")
+      })
     })
   })
 

@@ -8,6 +8,45 @@ export function trendPercent(current: number, prior: number): number {
   return Math.round(((current - prior) / prior) * 1000) / 10
 }
 
+const MONTH_LABELS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+] as const
+
+export interface MonthKey {
+  label: string
+  year: number
+}
+
+/**
+ * Calendar month of a stored PostgreSQL `@db.Date` value.
+ *
+ * Prisma materialises `@db.Date` as a `Date` at **UTC midnight**, so the UTC
+ * components are the stored calendar date. Local getters would shift a
+ * first-of-month date into the previous month on any negative-UTC-offset host.
+ * Always interpret date-only columns with UTC components.
+ */
+export function dateOnlyMonthKey(date: Date): MonthKey {
+  return { label: MONTH_LABELS[date.getUTCMonth()], year: date.getUTCFullYear() }
+}
+
+/**
+ * The last `count` calendar months ending at `now`'s **local** calendar month.
+ * This window is derived from the current moment (application-local "this
+ * month"), not from a stored date-only column, so local components are correct.
+ * Returns a real year per label so month+year matching is correct across a
+ * year boundary.
+ */
+export function recentMonthKeys(count: number, now: Date): MonthKey[] {
+  const keys: MonthKey[] = []
+  const base = now.getFullYear() * 12 + now.getMonth()
+  for (let i = count - 1; i >= 0; i--) {
+    const total = base - i
+    keys.push({ label: MONTH_LABELS[((total % 12) + 12) % 12], year: Math.floor(total / 12) })
+  }
+  return keys
+}
+
 export interface ExamContextRow {
   examTypeId: string
   academicSessionId: string

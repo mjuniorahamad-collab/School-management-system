@@ -1,5 +1,5 @@
 import path from "node:path"
-import { defineConfig } from "vitest/config"
+import { configDefaults, defineConfig } from "vitest/config"
 import { assertSafeTestDatabaseUrl } from "./server/tests/helpers/test-database-guard.ts"
 
 // Load .env early so TEST_DATABASE_URL is available before vitest's env injection.
@@ -43,6 +43,9 @@ export default defineConfig({
     // `.test.tsx` suites opt into a DOM per file with
     // `// @vitest-environment jsdom`; everything else runs in node.
     include: ["server/tests/**/*.test.ts", "src/**/*.test.ts", "src/**/*.test.tsx"],
+    // The timezone regression suite asserts a negative-UTC-offset host and only
+    // runs via `vitest.timezone.config.ts` (npm run test:tz).
+    exclude: [...configDefaults.exclude, "server/tests/dashboard.timezone.test.ts"],
     env: integrationEnv,
     // The audit-logs suite runs `prisma migrate deploy` on a cold test DB in
     // beforeAll, which can exceed the default 10s hook timeout.

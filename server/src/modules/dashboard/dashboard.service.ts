@@ -2,6 +2,8 @@ import { getPrisma } from "../../lib/database.js"
 import { toMoney } from "../../lib/money.js"
 import {
   computeClassRanking,
+  dateOnlyMonthKey,
+  recentMonthKeys,
   selectBestExamContext,
   trendPercent,
   type ClassPerformanceInput,
@@ -59,17 +61,20 @@ function periodDateRange(period: AttendancePeriod, now: Date): { from: Date; to:
   return { from: startOfMonth(now), to: endOfToday }
 }
 
-function feePeriodDateRange(period: FeePeriod, now: Date): { from: Date; to: Date } {
-  const endOfToday = new Date(now)
-  endOfToday.setHours(23, 59, 59, 999)
+// Fee windows are compared against the date-only `FeePayment.paymentDate`
+// (`@db.Date`). The window is derived from the application-local current date,
+// but the boundary instants are encoded as UTC date-only values so Prisma sends
+// a date-only parameter and the comparison is host-timezone-independent. Never
+// use local-midnight boundaries here: on a negative-UTC-offset host they land on
+// the previous UTC date and silently drop first-of-month rows.
+function feeDateOnlyRange(period: FeePeriod, now: Date): { from: Date; to: Date } {
+  const y = now.getFullYear()
+  const m = now.getMonth()
+  const d = now.getDate()
+  const endOfToday = new Date(Date.UTC(y, m, d, 23, 59, 59, 999))
 
-  if (period === "month") return { from: startOfMonth(now), to: endOfToday }
-  if (period === "year") {
-    const yearStart = new Date(now.getFullYear(), 0, 1)
-    yearStart.setHours(0, 0, 0, 0)
-    return { from: yearStart, to: endOfToday }
-  }
-  return { from: startOfMonth(now), to: endOfToday }
+  if (period === "year") return { from: new Date(Date.UTC(y, 0, 1)), to: endOfToday }
+  return { from: new Date(Date.UTC(y, m, 1)), to: endOfToday }
 }
 
 async function getActiveSessionId(prisma: PrismaClient, schoolId: string): Promise<string | null> {
@@ -87,6 +92,10 @@ export async function getStats(schoolId: string): Promise<DashboardStatsResult> 
   const now = new Date()
   const currentMonthStart = startOfMonth(now)
   const priorMonthStart = startOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1))
+  // Fee collections compare against date-only `paymentDate`; use UTC date-only
+  // month boundaries (the timestamp-based counts above keep local boundaries).
+  const feeCurrentMonthStart = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1))
+  const feePriorMonthStart = new Date(Date.UTC(now.getFullYear(), now.getMonth() - 1, 1))
   const sessionId = await getActiveSessionId(prisma, schoolId)
 
   const [
@@ -132,13 +141,13 @@ export async function getStats(schoolId: string): Promise<DashboardStatsResult> 
       where: { schoolId, createdAt: { gte: priorMonthStart, lt: currentMonthStart } },
     }),
     prisma.feePayment.aggregate({
-      where: { schoolId, paymentDate: { gte: currentMonthStart } },
+      where: { schoolId, paymentDate: { gte: feeCurrentMonthStart } },
       _sum: { amount: true },
     }),
     prisma.feePayment.aggregate({
       where: {
         schoolId,
-        paymentDate: { gte: priorMonthStart, lt: currentMonthStart },
+        paymentDate: { gte: feePriorMonthStart, lt: feeCurrentMonthStart },
       },
       _sum: { amount: true },
     }),
@@ -187,7 +196,7 @@ export async function getStats(schoolId: string): Promise<DashboardStatsResult> 
           toMoney(collectedThisMonth._sum.amount ?? 0),
           toMoney(collectedLastMonth._sum.amount ?? 0),
         ),
-        comparison: "vs last session",
+        comparison: "vs last month",
       },
     ],
   }
@@ -231,10 +240,11 @@ export async function getAttendance(
 function monthLabel(date: Date, period: FeePeriod): string {
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
   if (period === "month") {
-    const weekNum = Math.ceil(date.getDate() / 7)
+    // `paymentDate` is date-only (`@db.Date`, UTC midnight) — use UTC parts.
+    const weekNum = Math.ceil(date.getUTCDate() / 7)
     return `Wk ${weekNum}`
   }
-  return months[date.getMonth()]
+  return months[date.getUTCMonth()]
 }
 
 export async function getFeeAnalytics(
@@ -243,108 +253,117 @@ export async function getFeeAnalytics(
 ): Promise<DashboardFeeAnalyticsResult> {
   const prisma = await requirePrisma()
   const now = new Date()
-  const { from, to } = feePeriodDateRange(period, now)
 
-  const payments = await prisma.feePayment.findMany({
-    where: {
-      schoolId,
-      paymentDate: { gte: from, lte: to },
-    },
-    select: { amount: true, paymentDate: true },
-    orderBy: { paymentDate: "asc" },
-  })
-
-  const bucketMap = new Map<string, number>()
-  for (const p of payments) {
-    const key = monthLabel(p.paymentDate, period)
-    bucketMap.set(key, (bucketMap.get(key) ?? 0) + toMoney(p.amount))
-  }
-
-  let monthCount: number
-  if (period === "month") {
-    monthCount = 6
-  } else if (period === "year") {
-    monthCount = 12
-  } else {
-    monthCount = 6
-  }
-
-  const months: DashboardFeeAnalyticsResult["months"] = []
-  for (let i = 0; i < monthCount; i++) {
-    let label: string
-    if (period === "month") {
-      label = `Wk ${i + 1}`
-    } else if (period === "year") {
-      const m = new Date(now.getFullYear(), now.getMonth() - monthCount + 1 + i, 1)
-      const monthNames = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-      ]
-      label = monthNames[m.getMonth()]
-    } else {
-      const m = new Date(now.getFullYear(), now.getMonth() - monthCount + 1 + i, 1)
-      const monthNames = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-      ]
-      label = monthNames[m.getMonth()]
+  if (period === "session") {
+    const sessionId = await getActiveSessionId(prisma, schoolId)
+    if (!sessionId) {
+      const months: DashboardFeeAnalyticsResult["months"] = recentMonthKeys(6, now).map((k) => ({
+        label: k.label,
+        collected: 0,
+      }))
+      return { totalCollected: 0, trendPercent: null, comparison: "No previous session", months }
     }
-    months.push({ label, collected: bucketMap.get(label) ?? 0 })
+
+    const sessionPayments = await prisma.feePayment.findMany({
+      where: {
+        schoolId,
+        invoice: { sessionId },
+      },
+      select: { amount: true, paymentDate: true },
+      orderBy: { paymentDate: "asc" },
+    })
+
+    let totalCollected = 0
+    for (const p of sessionPayments) {
+      totalCollected += toMoney(p.amount)
+    }
+
+    const bucketKeys = recentMonthKeys(6, now)
+    const months: DashboardFeeAnalyticsResult["months"] = bucketKeys.map((k) => ({
+      label: k.label,
+      collected: 0,
+    }))
+    for (const p of sessionPayments) {
+      const key = dateOnlyMonthKey(p.paymentDate)
+      const idx = bucketKeys.findIndex((b) => b.label === key.label && b.year === key.year)
+      if (idx >= 0) {
+        months[idx].collected += toMoney(p.amount)
+      }
+    }
+
+    const sessions = await prisma.academicSession.findMany({
+      where: { schoolId },
+      orderBy: { startDate: "asc" },
+      select: { id: true, startDate: true },
+    })
+    const idx = sessions.findIndex((s) => s.id === sessionId)
+    if (idx > 0) {
+      const priorSessionId = sessions[idx - 1].id
+      const priorPayments = await prisma.feePayment.aggregate({
+        where: { schoolId, invoice: { sessionId: priorSessionId } },
+        _sum: { amount: true },
+      })
+      const priorTotal = toMoney(priorPayments._sum.amount ?? 0)
+      return { totalCollected, trendPercent: trendPercent(totalCollected, priorTotal), comparison: "vs last session", months }
+    }
+
+    return { totalCollected, trendPercent: null, comparison: "No previous session", months }
   }
 
-  const totalCollected = months.reduce((sum, m) => sum + m.collected, 0)
-
-  let trendPercentValue = 0
-  let comparison = "vs prior period"
-
   if (period === "month") {
-    const priorMonthStart = startOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1))
+    const { from, to } = feeDateOnlyRange("month", now)
+    const payments = await prisma.feePayment.findMany({
+      where: { schoolId, paymentDate: { gte: from, lte: to } },
+      select: { amount: true, paymentDate: true },
+      orderBy: { paymentDate: "asc" },
+    })
+    const bucketMap = new Map<string, number>()
+    for (const p of payments) {
+      const key = monthLabel(p.paymentDate, "month")
+      bucketMap.set(key, (bucketMap.get(key) ?? 0) + toMoney(p.amount))
+    }
+    const months: DashboardFeeAnalyticsResult["months"] = []
+    for (let i = 0; i < 6; i++) {
+      months.push({ label: `Wk ${i + 1}`, collected: bucketMap.get(`Wk ${i + 1}`) ?? 0 })
+    }
+    const totalCollected = payments.reduce((sum, p) => sum + toMoney(p.amount), 0)
+    const priorMonthStart = new Date(Date.UTC(now.getFullYear(), now.getMonth() - 1, 1))
     const priorPayments = await prisma.feePayment.aggregate({
       where: { schoolId, paymentDate: { gte: priorMonthStart, lt: from } },
       _sum: { amount: true },
     })
     const priorTotal = toMoney(priorPayments._sum.amount ?? 0)
-    trendPercentValue = trendPercent(totalCollected, priorTotal)
-    comparison = "vs last month"
-  } else if (period === "session") {
-    const sessionId = await getActiveSessionId(prisma, schoolId)
-    if (sessionId) {
-      const session = await prisma.academicSession.findUnique({
-        where: { id: sessionId },
-        select: { id: true },
-      })
-      if (session) {
-        const sessions = await prisma.academicSession.findMany({
-          where: { schoolId },
-          orderBy: { startDate: "asc" },
-          select: { id: true },
-        })
-        const idx = sessions.findIndex((s) => s.id === sessionId)
-        if (idx > 0) {
-          const priorSessionId = sessions[idx - 1].id
-          const priorPayments = await prisma.feePayment.aggregate({
-            where: { schoolId, invoice: { sessionId: priorSessionId } },
-            _sum: { amount: true },
-          })
-          const priorTotal = toMoney(priorPayments._sum.amount ?? 0)
-          trendPercentValue = trendPercent(totalCollected, priorTotal)
-          comparison = "vs last session"
-        }
-      }
-    }
-  } else {
-    const lastYearStart = new Date(now.getFullYear() - 1, 0, 1)
-    const lastYearEnd = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999)
-    const priorPayments = await prisma.feePayment.aggregate({
-      where: { schoolId, paymentDate: { gte: lastYearStart, lte: lastYearEnd } },
-      _sum: { amount: true },
-    })
-    const priorTotal = toMoney(priorPayments._sum.amount ?? 0)
-    trendPercentValue = trendPercent(totalCollected, priorTotal)
-    comparison = "vs last year"
+    return { totalCollected, trendPercent: trendPercent(totalCollected, priorTotal), comparison: "vs last month", months }
   }
 
-  return { totalCollected, trendPercent: trendPercentValue, comparison, months }
+  const { from, to } = feeDateOnlyRange("year", now)
+  const payments = await prisma.feePayment.findMany({
+    where: { schoolId, paymentDate: { gte: from, lte: to } },
+    select: { amount: true, paymentDate: true },
+    orderBy: { paymentDate: "asc" },
+  })
+  const bucketMap = new Map<string, number>()
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+  for (const p of payments) {
+    const key = dateOnlyMonthKey(p.paymentDate).label
+    bucketMap.set(key, (bucketMap.get(key) ?? 0) + toMoney(p.amount))
+  }
+  const months: DashboardFeeAnalyticsResult["months"] = []
+  for (let i = 0; i < 12; i++) {
+    months.push({ label: monthNames[i], collected: bucketMap.get(monthNames[i]) ?? 0 })
+  }
+  const totalCollected = payments.reduce((sum, p) => sum + toMoney(p.amount), 0)
+
+  const lastYearStart = new Date(Date.UTC(now.getFullYear() - 1, 0, 1))
+  const lastDayInMonth = new Date(Date.UTC(now.getFullYear() - 1, now.getMonth() + 1, 0)).getUTCDate()
+  const equivalentDay = Math.min(now.getDate(), lastDayInMonth)
+  const lastYearEnd = new Date(Date.UTC(now.getFullYear() - 1, now.getMonth(), equivalentDay, 23, 59, 59, 999))
+  const priorPayments = await prisma.feePayment.aggregate({
+    where: { schoolId, paymentDate: { gte: lastYearStart, lte: lastYearEnd } },
+    _sum: { amount: true },
+  })
+  const priorTotal = toMoney(priorPayments._sum.amount ?? 0)
+  return { totalCollected, trendPercent: trendPercent(totalCollected, priorTotal), comparison: "vs same period last year", months }
 }
 
 // ─── Fee Collection Status ─────────────────────────────────────────────────

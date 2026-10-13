@@ -30,7 +30,7 @@ export interface DashboardFeeMonthPoint {
 
 export interface DashboardFeeAnalytics {
   totalCollected: number
-  trendPercent: number
+  trendPercent: number | null
   comparison: string
   months: DashboardFeeMonthPoint[]
 }

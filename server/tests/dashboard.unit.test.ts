@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest"
 import {
   computeClassRanking,
+  dateOnlyMonthKey,
+  recentMonthKeys,
   selectBestExamContext,
   trendPercent,
   type ExamContextRow,
@@ -142,5 +144,56 @@ describe("computeClassRanking (database-free)", () => {
       { className: "A", percentage: 80 },
     ])
     expect(ranked.map((r) => r.name)).toEqual(["A", "B"])
+  })
+})
+
+describe("dateOnlyMonthKey (database-free)", () => {
+  it("reads a first-of-month @db.Date by UTC components, not local", () => {
+    // Prisma returns `@db.Date` at UTC midnight. On a negative-UTC-offset host
+    // local getters would report the previous month; UTC components must not.
+    const key = dateOnlyMonthKey(new Date("2026-12-01T00:00:00.000Z"))
+    expect(key).toEqual({ label: "Dec", year: 2026 })
+  })
+
+  it("keeps January first-of-month in January", () => {
+    expect(dateOnlyMonthKey(new Date("2027-01-01T00:00:00.000Z"))).toEqual({ label: "Jan", year: 2027 })
+  })
+
+  it("distinguishes the same month across different years", () => {
+    const a = dateOnlyMonthKey(new Date("2026-12-31T00:00:00.000Z"))
+    const b = dateOnlyMonthKey(new Date("2027-12-01T00:00:00.000Z"))
+    expect(a).toEqual({ label: "Dec", year: 2026 })
+    expect(b).toEqual({ label: "Dec", year: 2027 })
+    expect(a).not.toEqual(b)
+  })
+
+  it("does not shift a late-UTC-instant date into the next month", () => {
+    expect(dateOnlyMonthKey(new Date("2026-02-28T23:00:00.000Z"))).toEqual({ label: "Feb", year: 2026 })
+  })
+})
+
+describe("recentMonthKeys (database-free)", () => {
+  it("returns the last N months ending at the current month, oldest first", () => {
+    const keys = recentMonthKeys(6, new Date(2026, 5, 15, 12))
+    expect(keys).toEqual([
+      { label: "Jan", year: 2026 },
+      { label: "Feb", year: 2026 },
+      { label: "Mar", year: 2026 },
+      { label: "Apr", year: 2026 },
+      { label: "May", year: 2026 },
+      { label: "Jun", year: 2026 },
+    ])
+  })
+
+  it("rolls the year back correctly across a January boundary", () => {
+    const keys = recentMonthKeys(6, new Date(2027, 0, 15, 12))
+    expect(keys).toEqual([
+      { label: "Aug", year: 2026 },
+      { label: "Sep", year: 2026 },
+      { label: "Oct", year: 2026 },
+      { label: "Nov", year: 2026 },
+      { label: "Dec", year: 2026 },
+      { label: "Jan", year: 2027 },
+    ])
   })
 })

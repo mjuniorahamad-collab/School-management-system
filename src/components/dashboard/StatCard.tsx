@@ -53,16 +53,18 @@ export function StatCard({ stat, presentation }: StatCardProps) {
         )}
       </div>
       <div className="mt-3 flex items-center gap-2 text-xs">
-        <span
-          className={cn(
-            "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 font-medium",
-            trend.className,
-          )}
-        >
-          <TrendArrow className="size-3.5" aria-hidden="true" />
-          {trend.tone === "positive" ? "+" : ""}
-          {stat.trendPercent}%
-        </span>
+        {stat.trendPercent !== null && (
+          <span
+            className={cn(
+              "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 font-medium",
+              trend.className,
+            )}
+          >
+            <TrendArrow className="size-3.5" aria-hidden="true" />
+            {trend.tone === "positive" ? "+" : ""}
+            {stat.trendPercent}%
+          </span>
+        )}
         <span className="text-muted-foreground">{stat.comparison}</span>
       </div>
     </Card>

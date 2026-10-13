@@ -119,6 +119,29 @@ No additions. The service reads `Student`, `Teacher`, `Class`,
 `StudentEnrollment`, `AttendanceRecord`, `FeeInvoice`, `FeePayment`,
 `AcademicSession`, `Exam`, `ExamResult`, `Event`, `Notice`.
 
+### Date-only / timezone convention (fee analytics + Fees Collection KPI)
+
+`FeePayment.paymentDate` is a PostgreSQL `@db.Date` column. Prisma materialises
+it as a `Date` at **UTC midnight**, so the stored calendar date is the UTC
+component — never the host-local component. On a negative-UTC-offset host
+(e.g. `America/New_York`) local getters would shift a first-of-month payment
+into the previous month.
+
+Rules for the fee surface (all in `dashboard.service.ts` +
+`dashboard.rules.ts`):
+
+- Read stored date-only values with **UTC** getters (`dateOnlyMonthKey`).
+- Derive the reporting window from the **application-local** current date
+  (`recentMonthKeys`), preserving "this month" / "this year" intent.
+- Encode `@db.Date` range boundaries as UTC date-only instants
+  (`Date.UTC(local y, m, d, …)` in `feeDateOnlyRange`, YTD baselines), so Prisma
+  sends a date-only parameter and the comparison is host-timezone-independent.
+- Timestamp-based counts (`createdAt`) keep local boundaries.
+
+This is the same convention as the fee/library/students/reports modules. The
+`TZ=America/New_York` regression run (`npm run test:tz`) guards it; regular CI
+runs in UTC and cannot see the negative-offset failure.
+
 ## 6. Frontend
 
 - `src/types/dashboard.ts` — the wire contract mirroring the backend types
@@ -148,12 +171,18 @@ No additions. The service reads `Student`, `Teacher`, `Class`,
 - `server/tests/dashboard.unit.test.ts` — DB-free: `trendPercent` math;
   `selectBestExamContext` (most-classes win, newer-session tie-break, deterministic
   name tie-break, min window, <2 classes → null); `computeClassRanking` (grouping,
-  averages, tie-break, empty).
+  averages, tie-break, empty); `dateOnlyMonthKey` / `recentMonthKeys` (UTC
+  date-only first-of-month mapping, year rollover).
 - `server/tests/dashboard.integration.test.ts` — skipped unless
   `TEST_DATABASE_URL`; exercises 401/403 guards, stats values, attendance
-  aggregation + period defaults/validation, fee-status zero + totals, top-classes
-  ranking + context preference + insufficient state, events/notices filters, and
-  cross-school isolation both directions.
+  aggregation + period defaults/validation, fee-status zero + totals, fee
+  analytics (session/month/year), top-classes ranking + context preference +
+  insufficient state, events/notices filters, and cross-school isolation both
+  directions.
+- `server/tests/dashboard.timezone.test.ts` — excluded from the default run and
+  executed only by `npm run test:tz` (`vitest.timezone.config.ts`, `TZ=America/New_York`):
+  asserts the negative offset is applied and the first-of-month UTC fix holds,
+  then re-runs the fee integration suite under that offset.
 
 ## 8. Future considerations (out of scope)
 
