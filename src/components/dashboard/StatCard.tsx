@@ -1,7 +1,7 @@
 import { ArrowDownRight, ArrowUpRight, type LucideIcon } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
-import type { TrendTone } from "@/types"
+import { trendMeta } from "@/lib/trend"
 import type { DashboardStatItem, DashboardStatTone } from "@/types/dashboard"
 
 const toneStyles: Record<DashboardStatTone, string> = {
@@ -9,21 +9,6 @@ const toneStyles: Record<DashboardStatTone, string> = {
   emerald: "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300",
   amber: "bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300",
   sky: "bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-300",
-}
-
-function trendMeta(trend: number): { tone: TrendTone; arrow: typeof ArrowUpRight; className: string } {
-  if (trend >= 0) {
-    return {
-      tone: "positive",
-      arrow: ArrowUpRight,
-      className: "text-emerald-600 bg-emerald-50 dark:bg-emerald-500/15 dark:text-emerald-300",
-    }
-  }
-  return {
-    tone: "negative",
-    arrow: ArrowDownRight,
-    className: "text-red-600 bg-red-50 dark:bg-red-500/15 dark:text-red-300",
-  }
 }
 
 interface StatCardProps {
@@ -35,7 +20,7 @@ export function StatCard({ stat, presentation }: StatCardProps) {
   const Icon = presentation?.icon
   const tone = presentation?.tone ?? "primary"
   const trend = trendMeta(stat.trendPercent)
-  const TrendArrow = trend.arrow
+  const TrendArrow = trend.direction === "down" ? ArrowDownRight : ArrowUpRight
 
   return (
     <Card className="p-4">

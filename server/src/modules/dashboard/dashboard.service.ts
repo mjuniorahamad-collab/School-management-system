@@ -3,6 +3,8 @@ import { toMoney } from "../../lib/money.js"
 import {
   computeClassRanking,
   dateOnlyMonthKey,
+  feeMonthToDateRanges,
+  monthBucketCount,
   recentMonthKeys,
   selectBestExamContext,
   trendPercent,
@@ -92,10 +94,11 @@ export async function getStats(schoolId: string): Promise<DashboardStatsResult> 
   const now = new Date()
   const currentMonthStart = startOfMonth(now)
   const priorMonthStart = startOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1))
-  // Fee collections compare against date-only `paymentDate`; use UTC date-only
-  // month boundaries (the timestamp-based counts above keep local boundaries).
-  const feeCurrentMonthStart = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1))
-  const feePriorMonthStart = new Date(Date.UTC(now.getFullYear(), now.getMonth() - 1, 1))
+  // Fee collections compare against date-only `paymentDate`; use UTC date-only,
+  // month-to-date boundaries (the timestamp-based counts above keep local
+  // boundaries). The prior window is the equivalent elapsed part of the prior
+  // month, never the entire prior month.
+  const feeMonthToDate = feeMonthToDateRanges(now)
   const sessionId = await getActiveSessionId(prisma, schoolId)
 
   const [
@@ -141,13 +144,16 @@ export async function getStats(schoolId: string): Promise<DashboardStatsResult> 
       where: { schoolId, createdAt: { gte: priorMonthStart, lt: currentMonthStart } },
     }),
     prisma.feePayment.aggregate({
-      where: { schoolId, paymentDate: { gte: feeCurrentMonthStart } },
+      where: {
+        schoolId,
+        paymentDate: { gte: feeMonthToDate.current.from, lte: feeMonthToDate.current.to },
+      },
       _sum: { amount: true },
     }),
     prisma.feePayment.aggregate({
       where: {
         schoolId,
-        paymentDate: { gte: feePriorMonthStart, lt: feeCurrentMonthStart },
+        paymentDate: { gte: feeMonthToDate.prior.from, lte: feeMonthToDate.prior.to },
       },
       _sum: { amount: true },
     }),
@@ -311,9 +317,9 @@ export async function getFeeAnalytics(
   }
 
   if (period === "month") {
-    const { from, to } = feeDateOnlyRange("month", now)
+    const { current, prior } = feeMonthToDateRanges(now)
     const payments = await prisma.feePayment.findMany({
-      where: { schoolId, paymentDate: { gte: from, lte: to } },
+      where: { schoolId, paymentDate: { gte: current.from, lte: current.to } },
       select: { amount: true, paymentDate: true },
       orderBy: { paymentDate: "asc" },
     })
@@ -322,14 +328,14 @@ export async function getFeeAnalytics(
       const key = monthLabel(p.paymentDate, "month")
       bucketMap.set(key, (bucketMap.get(key) ?? 0) + toMoney(p.amount))
     }
+    const bucketCount = monthBucketCount(now.getFullYear(), now.getMonth())
     const months: DashboardFeeAnalyticsResult["months"] = []
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < bucketCount; i++) {
       months.push({ label: `Wk ${i + 1}`, collected: bucketMap.get(`Wk ${i + 1}`) ?? 0 })
     }
     const totalCollected = payments.reduce((sum, p) => sum + toMoney(p.amount), 0)
-    const priorMonthStart = new Date(Date.UTC(now.getFullYear(), now.getMonth() - 1, 1))
     const priorPayments = await prisma.feePayment.aggregate({
-      where: { schoolId, paymentDate: { gte: priorMonthStart, lt: from } },
+      where: { schoolId, paymentDate: { gte: prior.from, lte: prior.to } },
       _sum: { amount: true },
     })
     const priorTotal = toMoney(priorPayments._sum.amount ?? 0)

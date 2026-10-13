@@ -47,6 +47,55 @@ export function recentMonthKeys(count: number, now: Date): MonthKey[] {
   return keys
 }
 
+export interface DateOnlyRange {
+  from: Date
+  to: Date
+}
+
+/**
+ * Number of day-of-month weeks a month is divided into for the monthly fee
+ * chart: consecutive 7-day blocks (days 1–7, 8–14, 15–21, 22–28, 29–31). This
+ * is NOT a Monday–Sunday calendar-week scheme. A 28-day February yields four
+ * buckets and every other month yields five; the count is derived from the
+ * month so the chart can never render an unreachable sixth slot.
+ */
+export function monthBucketCount(year: number, monthIndex: number): number {
+  const daysInMonth = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate()
+  return Math.ceil(daysInMonth / 7)
+}
+
+/**
+ * Month-to-date date-only windows for the current calendar month and the
+ * equivalent elapsed window of the prior calendar month.
+ *
+ * `FeePayment.paymentDate` is `@db.Date` (materialised at UTC midnight), so the
+ * boundaries are built from the application-local calendar date but encoded as
+ * UTC date-only instants, keeping the comparison host-timezone-independent.
+ * The prior window is clamped to the prior month's last valid day, so a 31st
+ * can never overflow a shorter month and leap years clamp to Feb 28/29.
+ */
+export function feeMonthToDateRanges(now: Date): { current: DateOnlyRange; prior: DateOnlyRange } {
+  const y = now.getFullYear()
+  const m = now.getMonth()
+  const d = now.getDate()
+
+  const current: DateOnlyRange = {
+    from: new Date(Date.UTC(y, m, 1)),
+    to: new Date(Date.UTC(y, m, d, 23, 59, 59, 999)),
+  }
+
+  // Date.UTC normalises a January (-1) month index to December of the prior year.
+  const priorMonthIndex = m - 1
+  const priorLastDay = new Date(Date.UTC(y, m, 0)).getUTCDate()
+  const equivalentDay = Math.min(d, priorLastDay)
+  const prior: DateOnlyRange = {
+    from: new Date(Date.UTC(y, priorMonthIndex, 1)),
+    to: new Date(Date.UTC(y, priorMonthIndex, equivalentDay, 23, 59, 59, 999)),
+  }
+
+  return { current, prior }
+}
+
 export interface ExamContextRow {
   examTypeId: string
   academicSessionId: string

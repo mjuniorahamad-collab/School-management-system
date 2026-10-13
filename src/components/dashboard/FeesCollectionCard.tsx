@@ -8,7 +8,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { ArrowUpRight } from "lucide-react"
+import { ArrowDownRight, ArrowUpRight } from "lucide-react"
 import {
   Card,
   CardAction,
@@ -24,6 +24,8 @@ import { useFeeAnalytics } from "@/hooks/useDashboardData"
 import { useTheme } from "@/theme/useTheme"
 import { cn } from "@/lib/utils"
 import { formatINR, formatINRCompact } from "@/lib/format"
+import { niceAxisMax } from "@/lib/chartAxis"
+import { trendMeta } from "@/lib/trend"
 import type { FeePeriod } from "@/types/dashboard"
 
 const PERIODS: { value: FeePeriod; label: string }[] = [
@@ -31,6 +33,12 @@ const PERIODS: { value: FeePeriod; label: string }[] = [
   { value: "session", label: "This Session" },
   { value: "year", label: "This Year" },
 ]
+
+const EMPTY_MESSAGE: Record<FeePeriod, string> = {
+  session: "No collections in the last 6 months",
+  month: "No collections this month",
+  year: "No collections this year",
+}
 
 const BAR_COLOR = "#4f46e5"
 
@@ -58,6 +66,10 @@ export function FeesCollectionCard({ className }: FeesCollectionCardProps) {
   const { data, isPending, isError } = useFeeAnalytics(period)
   const { isDark } = useTheme()
   const colors = CHART_COLORS[isDark ? "dark" : "light"]
+
+  const trend = data != null && data.trendPercent !== null ? trendMeta(data.trendPercent) : null
+  const TrendArrow = trend?.direction === "down" ? ArrowDownRight : ArrowUpRight
+  const hasData = data != null && data.months.some((month) => month.collected > 0)
 
   return (
     <Card className={cn("flex h-full flex-col", className)}>
@@ -100,10 +112,15 @@ export function FeesCollectionCard({ className }: FeesCollectionCardProps) {
               <span className="text-3xl font-semibold tracking-tight tabular-nums">
                 {formatINR(data.totalCollected)}
               </span>
-              {data.trendPercent !== null && (
-                <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-50 px-1.5 py-0.5 text-xs font-medium text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400">
-                  <ArrowUpRight className="size-3.5" aria-hidden="true" />
-                  {data.trendPercent >= 0 ? "+" : ""}
+              {trend && (
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-medium",
+                    trend.className,
+                  )}
+                >
+                  <TrendArrow className="size-3.5" aria-hidden="true" />
+                  {trend.tone === "positive" ? "+" : ""}
                   {data.trendPercent}%
                 </span>
               )}
@@ -112,35 +129,41 @@ export function FeesCollectionCard({ className }: FeesCollectionCardProps) {
           </div>
 
           <div className="mt-4 h-48 w-full flex-1">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={data.months}
-                margin={{ top: 8, right: 4, bottom: 0, left: -8 }}
-                barCategoryGap="28%"
-              >
-                <CartesianGrid vertical={false} stroke={colors.grid} strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="label"
-                  tickLine={false}
-                  axisLine={false}
-                  tick={{ fontSize: 12, fill: colors.tick }}
-                  dy={6}
-                />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  width={44}
-                  tick={{ fontSize: 11, fill: colors.tickMuted }}
-                  tickFormatter={(value: number) => formatINRCompact(value)}
-                  domain={[0, (dataMax: number) => (dataMax <= 0 ? 10 : Math.ceil(dataMax * 1.1))]}
-                />
-                <Tooltip
-                  content={<ChartTooltip formatter={(value) => formatINR(value)} />}
-                  cursor={{ fill: colors.cursor }}
-                />
-                <Bar dataKey="collected" fill={BAR_COLOR} radius={[6, 6, 2, 2]} maxBarSize={44} />
-              </BarChart>
-            </ResponsiveContainer>
+            {hasData ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={data.months}
+                  margin={{ top: 8, right: 4, bottom: 0, left: -8 }}
+                  barCategoryGap="28%"
+                >
+                  <CartesianGrid vertical={false} stroke={colors.grid} strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="label"
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fontSize: 12, fill: colors.tick }}
+                    dy={6}
+                  />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    width={44}
+                    tick={{ fontSize: 11, fill: colors.tickMuted }}
+                    tickFormatter={(value: number) => formatINRCompact(value)}
+                    domain={[0, (dataMax: number) => niceAxisMax(dataMax)]}
+                  />
+                  <Tooltip
+                    content={<ChartTooltip formatter={(value) => formatINR(value)} />}
+                    cursor={{ fill: colors.cursor }}
+                  />
+                  <Bar dataKey="collected" fill={BAR_COLOR} radius={[6, 6, 2, 2]} maxBarSize={44} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-full w-full items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">
+                {EMPTY_MESSAGE[period]}
+              </div>
+            )}
           </div>
         </CardContent>
       )}

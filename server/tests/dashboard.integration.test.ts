@@ -906,6 +906,152 @@ describe.skipIf(!TEST_DATABASE_URL)("Dashboard API (integration)", () => {
       })
     })
 
+    describe("month: day-of-month buckets and equivalent month-to-date comparison", () => {
+      it("I. October 2026 renders exactly Wk 1–Wk 5 with day 29/30/31 in Wk 5", async () => {
+        const agent = await agentAt("2026-10-31T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+        const inv = await createInvoice({
+          schoolId: fixtures.schoolAId,
+          sessionId: fixtures.activeSessionAId,
+          studentId: fixtures.studentA1.id,
+          enrollmentId: fixtures.enrollmentA1Id,
+          totalAmount: 100000,
+        })
+        await createPayment(fixtures.schoolAId, inv.id, 100, "2026-10-01T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv.id, 200, "2026-10-08T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv.id, 300, "2026-10-15T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv.id, 400, "2026-10-22T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv.id, 500, "2026-10-29T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv.id, 600, "2026-10-30T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv.id, 700, "2026-10-31T09:00:00.000Z")
+
+        const res = await agent.get("/api/v1/dashboard/fees?period=month")
+        expect(res.status).toBe(200)
+        expect(res.body.data.months).toEqual([
+          { label: "Wk 1", collected: 100 },
+          { label: "Wk 2", collected: 200 },
+          { label: "Wk 3", collected: 300 },
+          { label: "Wk 4", collected: 400 },
+          { label: "Wk 5", collected: 1800 },
+        ])
+        expect(res.body.data.totalCollected).toBe(2800)
+        expect(res.body.data.comparison).toBe("vs last month")
+      })
+
+      it("I. a 28-day February renders four buckets; a leap February renders five", async () => {
+        const feb2027 = await agentAt("2027-02-28T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+        const res28 = await feb2027.get("/api/v1/dashboard/fees?period=month")
+        expect(res28.status).toBe(200)
+        expect(res28.body.data.months.map((m: { label: string }) => m.label)).toEqual([
+          "Wk 1", "Wk 2", "Wk 3", "Wk 4",
+        ])
+
+        const feb2028 = await agentAt("2028-02-29T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+        const res29 = await feb2028.get("/api/v1/dashboard/fees?period=month")
+        expect(res29.status).toBe(200)
+        expect(res29.body.data.months.map((m: { label: string }) => m.label)).toEqual([
+          "Wk 1", "Wk 2", "Wk 3", "Wk 4", "Wk 5",
+        ])
+      })
+
+      it("I. month-to-date excludes future payment dates", async () => {
+        const agent = await agentAt("2027-02-15T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+        const inv = await createInvoice({
+          schoolId: fixtures.schoolAId,
+          sessionId: fixtures.activeSessionAId,
+          studentId: fixtures.studentA1.id,
+          enrollmentId: fixtures.enrollmentA1Id,
+          totalAmount: 100000,
+        })
+        await createPayment(fixtures.schoolAId, inv.id, 1000, "2027-02-10T09:00:00.000Z")
+        // Future within the month: must not be counted.
+        await createPayment(fixtures.schoolAId, inv.id, 9999, "2027-02-20T09:00:00.000Z")
+
+        const res = await agent.get("/api/v1/dashboard/fees?period=month")
+        expect(res.status).toBe(200)
+        expect(res.body.data.totalCollected).toBe(1000)
+        // Feb 10 is in the days 8–14 block (Wk 2), not Wk 1.
+        const w2 = res.body.data.months.find((m: { label: string }) => m.label === "Wk 2")
+        expect(w2.collected).toBe(1000)
+        expect(res.body.data.months.map((m: { label: string }) => m.label)).toEqual([
+          "Wk 1", "Wk 2", "Wk 3", "Wk 4",
+        ])
+      })
+
+      it("I. October 1–13 compares with September 1–13, not all of September", async () => {
+        const agent = await agentAt("2026-10-13T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+        const inv = await createInvoice({
+          schoolId: fixtures.schoolAId,
+          sessionId: fixtures.activeSessionAId,
+          studentId: fixtures.studentA1.id,
+          enrollmentId: fixtures.enrollmentA1Id,
+          totalAmount: 200000,
+        })
+        await createPayment(fixtures.schoolAId, inv.id, 1000, "2026-10-05T09:00:00.000Z")
+        // Inside the equivalent prior window (Sep 1–13).
+        await createPayment(fixtures.schoolAId, inv.id, 400, "2026-09-10T09:00:00.000Z")
+        // Outside the equivalent prior window but within September: must NOT feed the baseline.
+        await createPayment(fixtures.schoolAId, inv.id, 100000, "2026-09-20T09:00:00.000Z")
+
+        const res = await agent.get("/api/v1/dashboard/fees?period=month")
+        expect(res.status).toBe(200)
+        expect(res.body.data.totalCollected).toBe(1000)
+        // (1000 - 400) / 400 = 150%. The full-prior-month bug would read ≈ -99.2%.
+        expect(res.body.data.trendPercent).toBe(150)
+
+        // The Fees Collection KPI uses the same comparison window.
+        const statsRes = await agent.get("/api/v1/dashboard/stats")
+        expect(statsRes.status).toBe(200)
+        const fees = new Map(statsRes.body.data.stats.map((s: { id: string }) => [s.id, s])).get("fees-collection")
+        // Headline value stays the full active-session total (1000 + 400 + 100000).
+        expect(fees.value).toBe("₹1,01,400")
+        expect(fees.trendPercent).toBe(150)
+        expect(fees.comparison).toBe("vs last month")
+      })
+
+      it("I. clamps the prior window at a short month end (no overflow into March)", async () => {
+        const agent = await agentAt("2026-03-31T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+        const inv = await createInvoice({
+          schoolId: fixtures.schoolAId,
+          sessionId: fixtures.activeSessionAId,
+          studentId: fixtures.studentA1.id,
+          enrollmentId: fixtures.enrollmentA1Id,
+          totalAmount: 200000,
+        })
+        // Current March total = 6000; a clamp bug would fold Mar 1–3 into the baseline.
+        await createPayment(fixtures.schoolAId, inv.id, 5000, "2026-03-01T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv.id, 1000, "2026-03-15T09:00:00.000Z")
+        // Prior February (28 days) total = 700.
+        await createPayment(fixtures.schoolAId, inv.id, 500, "2026-02-28T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv.id, 200, "2026-02-25T09:00:00.000Z")
+
+        const res = await agent.get("/api/v1/dashboard/fees?period=month")
+        expect(res.status).toBe(200)
+        expect(res.body.data.totalCollected).toBe(6000)
+        // (6000 - 700) / 700 = 757.1%. An unclamped Feb 31 → Mar 3 window would read ≈ 5.3%.
+        expect(res.body.data.trendPercent).toBe(757.1)
+      })
+
+      it("I. includes Feb 29 in a leap-year prior-month window", async () => {
+        const agent = await agentAt("2028-03-31T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
+        const inv = await createInvoice({
+          schoolId: fixtures.schoolAId,
+          sessionId: fixtures.activeSessionAId,
+          studentId: fixtures.studentA1.id,
+          enrollmentId: fixtures.enrollmentA1Id,
+          totalAmount: 200000,
+        })
+        await createPayment(fixtures.schoolAId, inv.id, 9000, "2028-03-01T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv.id, 1000, "2028-03-31T09:00:00.000Z")
+        await createPayment(fixtures.schoolAId, inv.id, 800, "2028-02-29T09:00:00.000Z")
+
+        const res = await agent.get("/api/v1/dashboard/fees?period=month")
+        expect(res.status).toBe(200)
+        expect(res.body.data.totalCollected).toBe(10000)
+        // (10000 - 800) / 800 = 1150%. A non-leap clamp (Feb 28) would drop the 800 → 100%.
+        expect(res.body.data.trendPercent).toBe(1150)
+      })
+    })
+
     describe("session: previous-session trend selection", () => {
       it("E. treats an existing zero-collection previous session as 100% when current is positive", async () => {
         const agent = await agentAt("2026-12-15T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)

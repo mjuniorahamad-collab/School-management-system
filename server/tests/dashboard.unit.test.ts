@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import {
   computeClassRanking,
   dateOnlyMonthKey,
+  feeMonthToDateRanges,
+  monthBucketCount,
   recentMonthKeys,
   selectBestExamContext,
   trendPercent,
@@ -144,6 +146,52 @@ describe("computeClassRanking (database-free)", () => {
       { className: "A", percentage: 80 },
     ])
     expect(ranked.map((r) => r.name)).toEqual(["A", "B"])
+  })
+})
+
+describe("monthBucketCount (database-free)", () => {
+  it("splits a 31-day month into five day-of-month blocks", () => {
+    expect(monthBucketCount(2026, 9)).toBe(5) // October
+    expect(monthBucketCount(2026, 0)).toBe(5) // January
+  })
+
+  it("splits an exactly-four-week February into four blocks", () => {
+    expect(monthBucketCount(2027, 1)).toBe(4) // February 2027 has 28 days
+  })
+
+  it("splits leap and 30-day months into five blocks", () => {
+    expect(monthBucketCount(2028, 1)).toBe(5) // February 2028 has 29 days
+    expect(monthBucketCount(2026, 3)).toBe(5) // April has 30 days
+  })
+})
+
+describe("feeMonthToDateRanges (database-free)", () => {
+  it("builds UTC date-only current and equivalent prior windows", () => {
+    // Local calendar date is 2026-10-13 regardless of host timezone.
+    const { current, prior } = feeMonthToDateRanges(new Date(2026, 9, 13, 12))
+    expect(current.from.toISOString()).toBe("2026-10-01T00:00:00.000Z")
+    expect(current.to.toISOString()).toBe("2026-10-13T23:59:59.999Z")
+    expect(prior.from.toISOString()).toBe("2026-09-01T00:00:00.000Z")
+    expect(prior.to.toISOString()).toBe("2026-09-13T23:59:59.999Z")
+  })
+
+  it("clamps a 31st to the prior month's last day", () => {
+    const { current, prior } = feeMonthToDateRanges(new Date(2026, 2, 31, 12)) // 31 Mar 2026
+    expect(current.to.toISOString()).toBe("2026-03-31T23:59:59.999Z")
+    expect(prior.from.toISOString()).toBe("2026-02-01T00:00:00.000Z")
+    expect(prior.to.toISOString()).toBe("2026-02-28T23:59:59.999Z") // Feb 2026 has 28 days
+  })
+
+  it("clamps a leap-year prior February to Feb 29", () => {
+    const { prior } = feeMonthToDateRanges(new Date(2028, 2, 31, 12)) // 31 Mar 2028
+    expect(prior.to.toISOString()).toBe("2028-02-29T23:59:59.999Z")
+  })
+
+  it("rolls the prior window back across a January boundary", () => {
+    const { current, prior } = feeMonthToDateRanges(new Date(2027, 0, 5, 12)) // 5 Jan 2027
+    expect(current.from.toISOString()).toBe("2027-01-01T00:00:00.000Z")
+    expect(prior.from.toISOString()).toBe("2026-12-01T00:00:00.000Z")
+    expect(prior.to.toISOString()).toBe("2026-12-05T23:59:59.999Z")
   })
 })
 

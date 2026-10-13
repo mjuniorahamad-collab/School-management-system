@@ -56,8 +56,9 @@ to `session`. Unknown values → 400 `BAD_REQUEST`.
   all classes; `fees-collection` sums `FeePayment` against the ACTIVE session's
   invoices (formatted `₹NNN`, en-IN).
 - `trendPercent` is creation-based: new-entities-this-month vs last month for the
-  three count cards, and current-month vs last-month collections for the fees
-  card (`comparison` labels accordingly). `0` with `"vs last month"` is shown when
+  three count cards, and current month-to-date vs the equivalent prior-month-to-date
+  collections for the fees card (`comparison` labels accordingly; the prior window
+  is clamped to the prior month's last valid day). `0` with `"vs last month"` is shown when
   there is no prior data. Trend math lives in `dashboard.rules.ts` (`trendPercent`):
   0 prior + positive current = 100, else 0; otherwise percentage change rounded to
   1 decimal. Icons/tones stay on the frontend (`STAT_PRESENTATION` in
@@ -67,8 +68,14 @@ to `session`. Unknown values → 400 `BAD_REQUEST`.
 
 ### Fee semantics
 
-- `month`: calendar-month buckets (4 weeks × label `Wk N`), trend vs the prior
-  calendar month.
+- `month`: month-to-date collection split into **day-of-month daily blocks**
+  (`Wk 1` = days 1–7, `Wk 2` = 8–14, `Wk 3` = 15–21, `Wk 4` = 22–28,
+  `Wk 5` = 29–31). These are **not Monday–Sunday calendar weeks**. The bucket
+  count is `ceil(daysInMonth / 7)` (4 for a 28-day February, 5 otherwise), so an
+  unreachable `Wk 6` can never render; future blocks in the month stay empty.
+  The trend compares current month-to-date against the **equivalent elapsed
+  window** of the prior calendar month (prior month's day 1 → the equivalent day,
+  clamped to the prior month's last valid day), never the whole prior month.
 - `session`: buckets over the ACTIVE session's 6 most recent calendar months, the
   active session's collected total, trend vs the immediately previous session
   (found by ordering `AcademicSession.startDate`).
