@@ -113,7 +113,12 @@ Implemented policy decisions worth keeping (details in the module docs):
   production builds, vitest + supertest for tests. Node's built-in `crypto`
   (scrypt, randomBytes, timingSafeEqual) for password/session primitives.
 - Optional dev database: `docker-compose.yml` (postgres:16-alpine) OR the
-  user-space PostgreSQL workflow documented in README (`npm run db:local:start`).
+  user-space PostgreSQL workflow documented in README (`npm run db:local:start`,
+  binaries/data under `C:\sms-pg`). The local install and its data directory MUST
+  stay off cloud-synced storage (e.g. OneDrive): Files-On-Demand dehydration
+  crashes backends with `0xC0000142` (`STATUS_DLL_INIT_FAILED`). Paths live in
+  `scripts/pg-local-paths.ts`; the old `.data/postgres` cluster is a rollback copy
+  only and must not be run.
 
 ## 4. Frontend architecture
 
@@ -269,7 +274,7 @@ Never claim success without actually running the checks.
 Fresh-clone setup:
 1. `npm install`
 2. Prepare a local database (one of): Docker (`docker compose up -d`) or
-   user-space PostgreSQL (`npm run db:local:start`) — see README.
+   user-space PostgreSQL (`npm run db:local:start`, installs at `C:\sms-pg`) — see README.
 3. `cp .env.example .env` and set `DATABASE_URL`, `SEED_ADMIN_EMAIL`,
    `SEED_ADMIN_PASSWORD`.
 4. `npm run generate:prisma` (Prisma must be generated before server

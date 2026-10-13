@@ -15,17 +15,11 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { PG_CTL, PG_DATA, PG_ISREADY, PG_LOG, PG_PORT } from "./pg-local-paths.js"
 
 // ── Paths ───────────────────────────────────────────────────────────────────
 
 const ROOT = resolve(import.meta.dirname, "..")
-const PG_DIR = resolve(ROOT, ".data", "postgres")
-const PG_BIN = resolve(PG_DIR, "pgsql", "bin")
-const PG_CTL = resolve(PG_BIN, "pg_ctl.exe")
-const PG_ISREADY = resolve(PG_BIN, "pg_isready.exe")
-const PG_DATA = resolve(PG_DIR, "data")
-const PG_LOG = resolve(PG_DIR, "pg.log")
-const PG_PORT = 5433
 const PG_READY_TIMEOUT_MS = 30_000
 
 // ── Prefix colours (ANSI) ──────────────────────────────────────────────────

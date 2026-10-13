@@ -7,7 +7,7 @@
 # Usage:  docker compose up -d
 #         DATABASE_URL="postgresql://school:school@localhost:5432/school_management"
 #
-# The matching choice replaces the user-space `.data/postgres` workflow;
+# The matching choice replaces the user-space `C:\sms-pg` workflow (see README);
 # pick ONE of the two local database options, never both on the same port.
 
 services:

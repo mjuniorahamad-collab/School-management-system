@@ -33,7 +33,7 @@ The manual workflow needs a **separate, disposable** database named exactly
 **not** create it — create it once yourself, e.g. with the bundled binaries:
 
 ```powershell
-& ".data\postgres\pgsql\bin\psql.exe" -h 127.0.0.1 -p 5433 -U postgres -c "CREATE DATABASE school_management_scale_test;"
+& "C:\sms-pg\pgsql\bin\psql.exe" -h 127.0.0.1 -p 5433 -U postgres -c "CREATE DATABASE school_management_scale_test;"
 ```
 
 ### Configure the scale login (shell-provided only)

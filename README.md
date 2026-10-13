@@ -129,11 +129,19 @@ until `DATABASE_URL` is set.
 `DATABASE_URL="postgresql://school:school@localhost:5432/school_management"`.
 
 **Option B — user-space PostgreSQL (no Docker, no admin):** the EDB Windows
-binaries are unpacked under `.data/postgres` (gitignored, machine-local):
-`npm run db:local:start`, then
+binaries and data live under `C:\sms-pg` (outside the synced repo — see the
+warning below): `npm run db:local:start`, then
 `DATABASE_URL="postgresql://school@127.0.0.1:5433/school_management"`.
-Stop it with `npm run db:local:stop`. Data lives in `.data/postgres/data`.
+Stop it with `npm run db:local:stop`. Data lives in `C:\sms-pg\data`.
 With the user-space database, `npm run dev` handles PostgreSQL start/stop for you.
+
+> **Keep the PostgreSQL install off cloud-synced storage.** Never place the
+> binaries or data directory under OneDrive (or any synced/network folder).
+> Files On-Demand can dehydrate them mid-run and crash every backend process
+> with `0xC0000142` (`STATUS_DLL_INIT_FAILED`), taking the whole cluster down.
+> The local, non-synced root is `C:\sms-pg` (paths in `scripts/pg-local-paths.ts`).
+> The old `.data/postgres` cluster is retained **only as a rollback copy** — do
+> not run it.
 
 After either option:
 1. `npm run generate:prisma`
@@ -156,14 +164,14 @@ After either option:
 | `npm run generate:prisma`    | Generate Prisma Client (needed after install)    |
 | `npm run db:migrate`         | Apply Prisma migrations                          |
 | `npm run db:seed`            | Idempotent seed (catalog, roles, super admin, students)|
-| `npm run db:local:start`     | Start user-space PostgreSQL (`.data/postgres`)   |
+| `npm run db:local:start`     | Start user-space PostgreSQL (`C:\sms-pg`)        |
 | `npm run db:local:stop`      | Stop user-space PostgreSQL                       |
 
 ### One-command development (`npm run dev`)
 
 Run **`npm run dev` once** and the whole local stack comes up:
 
-1. **PostgreSQL** (`.data/postgres`, port 5433) — started only if not already
+1. **PostgreSQL** (`C:\sms-pg`, port 5433) — started only if not already
    running; an already-running instance is detected and reused.
 2. **API server** (`tsx watch`, port 4000) — skipped if port 4000 is already in
    use (i.e. a backend is already running).
