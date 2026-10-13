@@ -60,12 +60,24 @@ export function deriveInstallmentStatus(info: InstallmentDueInfo, todayISO: stri
  * governs (OVERDUE > PARTIAL > UNPAID).
  */
 export function deriveInvoiceStatus(installments: readonly InstallmentDueInfo[], todayISO: string): InvoiceStatus {
+  // An invoice with no scheduled installments has no plan and no settled
+  // obligation, so it is never PAID. (A non-empty plan whose every installment
+  // has a zero balance IS paid — see the all-settled case below.)
+  if (installments.length === 0) return "UNPAID"
+
   const pending = installments.filter((installment) => installment.balance > 0)
   if (pending.length === 0) return "PAID"
 
-  const earliest = pending.reduce((a, b) => (a.dueDateISO <= b.dueDateISO ? a : b))
-  if (isInstallmentOverdue(earliest, todayISO)) return "OVERDUE"
-  return earliest.amountPaid > 0 ? "PARTIAL" : "UNPAID"
+  // The earliest outstanding due date governs. When several pending installments
+  // share it, take the MOST SEVERE status among them (OVERDUE > PARTIAL >
+  // UNPAID) so the result never depends on the caller's array order.
+  let earliestDueDate = pending[0].dueDateISO
+  for (const installment of pending) {
+    if (installment.dueDateISO < earliestDueDate) earliestDueDate = installment.dueDateISO
+  }
+  const governing = pending.filter((installment) => installment.dueDateISO === earliestDueDate)
+  if (governing.some((installment) => isInstallmentOverdue(installment, todayISO))) return "OVERDUE"
+  return governing.some((installment) => installment.amountPaid > 0) ? "PARTIAL" : "UNPAID"
 }
 
 export function sumInstallmentInputAmounts(installments: readonly { amount: number }[]): number {

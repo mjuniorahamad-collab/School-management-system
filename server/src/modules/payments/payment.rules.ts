@@ -21,7 +21,17 @@ export interface AllocationLine {
 }
 
 export function totalOutstandingBalance(installments: readonly { balance: number }[]): number {
-  return roundMoney(installments.reduce((sum, installment) => sum + installment.balance, 0))
+  // A balance is non-negative by construction (amount − paid). Reject a negative
+  // or non-finite balance explicitly instead of letting one silently offset the
+  // real outstanding total (which would weaken the overpayment guard).
+  let sum = 0
+  for (const installment of installments) {
+    if (!Number.isFinite(installment.balance) || installment.balance < 0) {
+      throw new RangeError("installment balance must be a finite non-negative number")
+    }
+    sum += installment.balance
+  }
+  return roundMoney(sum)
 }
 
 /** Returns true when `amount` would leave an invoice balance (overpayment). */
@@ -72,7 +82,12 @@ export function applyAllocation(
   allocation: readonly AllocationLine[],
 ): Map<string, { amountPaid: number; balance: number }> {
   const result = new Map<string, { amountPaid: number; balance: number }>()
+  const seen = new Set<string>()
   for (const line of allocation) {
+    if (seen.has(line.installmentId)) {
+      throw new RangeError(`duplicate allocation line for installment "${line.installmentId}"`)
+    }
+    seen.add(line.installmentId)
     const installment = installments.find((candidate) => candidate.id === line.installmentId)
     if (!installment) continue
     result.set(installment.id, {

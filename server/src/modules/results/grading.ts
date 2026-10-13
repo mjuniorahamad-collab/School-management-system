@@ -125,10 +125,15 @@ export function roundScore(value: number, places = 2): number {
   return Math.round((value + Number.EPSILON) * factor) / factor
 }
 
-/** Percentage of a score, rounded to 2dp. Throws when `max` is not positive. */
+/**
+ * Percentage of a score, rounded to 2dp. Throws when either input is non-finite,
+ * when `obtained` is negative, or when `max` is not positive.
+ */
 export function scorePercentage(obtained: number, max: number): number {
-  if (!Number.isFinite(obtained) || !Number.isFinite(max) || max <= 0) {
-    throw new RangeError("maxMarks and obtainedMarks must be finite positive numbers")
+  if (!Number.isFinite(obtained) || !Number.isFinite(max) || obtained < 0 || max <= 0) {
+    throw new RangeError(
+      "obtainedMarks must be a finite non-negative number and maxMarks must be a finite positive number",
+    )
   }
   return roundScore((obtained / max) * 100)
 }

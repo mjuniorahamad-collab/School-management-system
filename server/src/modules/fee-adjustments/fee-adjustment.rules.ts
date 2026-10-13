@@ -140,7 +140,14 @@ export function canAdjust(grossAmount: number, amountPaid: number, requestedTota
 export function computeNetObligation(input: NetObligationInput): NetObligationResult {
   const gross = assertValidMoney(input.grossAmount, "Gross amount")
   const paid = assertNonNegativeMoney(input.amountPaid, "Paid amount")
-  const adjustmentTotal = sumAdjustmentAmounts(input.activeAdjustmentAmounts)
+  // Every active concession is a positive money amount by construction. Reject a
+  // negative (or non-finite) one explicitly instead of letting it inflate the net
+  // obligation above the frozen gross — the cap check below only bounds the sum
+  // upwards, so a negative total would slip through and return net > gross.
+  const activeAmounts = input.activeAdjustmentAmounts.map((amount) =>
+    assertNonNegativeMoney(amount, "Active adjustment amount"),
+  )
+  const adjustmentTotal = sumAdjustmentAmounts(activeAmounts)
 
   const capacity = roundMoney(gross - paid)
   if (adjustmentTotal > capacity) {

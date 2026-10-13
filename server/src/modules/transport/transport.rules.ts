@@ -15,15 +15,26 @@ export function joinName(firstName: string, middleName: string | null, lastName:
   return [firstName, middleName, lastName].filter((part) => part !== null && part !== "").join(" ")
 }
 
+function assertCapacityInputs(activeCount: number, capacity: number): void {
+  if (!Number.isFinite(activeCount) || !Number.isFinite(capacity)) {
+    throw new RangeError("activeCount and capacity must be finite numbers")
+  }
+  if (activeCount < 0 || capacity < 0) {
+    throw new RangeError("activeCount and capacity must be non-negative")
+  }
+}
+
 /**
  * Capacity is a HARD ceiling. A route is at capacity once its ACTIVE
  * assignment count (for the session) is at or above the vehicle capacity.
  */
 export function isAtCapacity(activeCount: number, capacity: number): boolean {
+  assertCapacityInputs(activeCount, capacity)
   return activeCount >= capacity
 }
 
 export function remainingSeats(activeCount: number, capacity: number): number {
+  assertCapacityInputs(activeCount, capacity)
   return Math.max(0, capacity - activeCount)
 }
 

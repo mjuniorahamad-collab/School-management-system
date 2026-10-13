@@ -9,6 +9,7 @@ import type {
   UpdateGradingBandInput,
 } from "./grading-band.schema.js"
 import { toGradingBandDetail, toGradingBandListItem } from "./grading-band.mapper.js"
+import { assertBandRange } from "./grading-band.rules.js"
 import type { GradingBandDetail, GradingBandListResult } from "./grading-band.types.js"
 
 type PrismaClient = NonNullable<Awaited<ReturnType<typeof getPrisma>>>
@@ -115,6 +116,17 @@ export async function updateGradingBand(
 
   try {
     const updated = await prisma.$transaction(async (tx) => {
+      // Validate the MERGED range against the row as it exists inside this
+      // transaction. A partial update supplies only one bound; the schema refine
+      // cannot see the persisted counterpart, and reading it before the
+      // transaction would leave a stale-check window. Re-read under the tx.
+      const current = await tx.gradingBand.findFirst({
+        where: { id, schoolId },
+        select: { minPercent: true, maxPercent: true },
+      })
+      if (!current) throw notFoundError("Grading band not found")
+      assertBandRange(input.minPercent ?? current.minPercent, input.maxPercent ?? current.maxPercent)
+
       const row = await tx.gradingBand.update({ where: { id }, data })
 
       const diffFields: { field: string; before?: unknown; after?: unknown }[] = []
