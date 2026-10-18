@@ -207,17 +207,35 @@ rows they created. There is no transaction and no rollback, so treat the target
 as disposable and never point it at a database you care about.
 
 Because of that, `npm test` refuses to start the integration suites unless
-`TEST_DATABASE_URL` is both:
+`TEST_DATABASE_URL` satisfies one of two contracts:
 
-- a **loopback** target — `127.0.0.0/8`, `localhost`, `::1`, or a Unix socket, and
-- a database whose **name contains `test`**.
+- **Loopback** target — `127.0.0.0/8`, `localhost`, `::1`, or a Unix socket —
+  whose database **name contains `test`**; or
+- **Remote** target, proven by exact endpoint identity rather than by name (a
+  remote provider may use a database name that carries no `test` marker, e.g.
+  Neon's default `neondb`). This requires all five of
+  `ALLOW_REMOTE_TEST_DATABASE=1`, `EXPECTED_TEST_DATABASE_HOST`,
+  `PRODUCTION_DATABASE_HOST`, `EXPECTED_TEST_DATABASE_NAME`, and
+  `EXPECTED_TEST_DATABASE_USER`. The target host must equal
+  `EXPECTED_TEST_DATABASE_HOST` and must differ from `PRODUCTION_DATABASE_HOST`,
+  and the identity the connected database reports (`current_database()` and
+  `current_user`) must match the two expected identity values; any missing or
+  mismatched value — including the two hosts being identical — fails closed.
 
 A mistyped value fails the run with an explanation instead of quietly deleting
 data. The check lives in `server/tests/helpers/test-database-guard.ts` and runs at
-vitest config load, before any worker can be given a `DATABASE_URL`. A deliberate
-throwaway *remote* test database (CI service container, Neon test branch) is
-possible via `ALLOW_REMOTE_TEST_DATABASE=1`, which relaxes the loopback rule but
-still requires the `test` database name.
+vitest config load, before any worker can be given a `DATABASE_URL`. It reads
+these variables from the process environment (they are not forwarded to workers).
+
+On top of that static check, a read-only global setup
+(`server/tests/helpers/test-database-identity.global-setup.ts`, registered in both
+`vitest.config.ts` and `vitest.timezone.config.ts`) connects with the exact
+`TEST_DATABASE_URL` and verifies the server-reported `current_database()` and
+`current_user` against the declared identity before any migration or other write.
+A worker setup file (`server/tests/helpers/verify-worker-db-url.setup.ts`) also
+fails the run if the `DATABASE_URL` injected into a worker does not equal
+`TEST_DATABASE_URL`. Both are no-ops when `TEST_DATABASE_URL` is unset, so the
+loopback/CI default is unchanged.
 
 If a test database is unavailable, leave `TEST_DATABASE_URL` unset — the unit
 tests still cover the rules.

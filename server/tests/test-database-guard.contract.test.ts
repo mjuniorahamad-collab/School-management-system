@@ -98,3 +98,40 @@ describe("integration suite self-gating", () => {
     expect(suite?.isGated).toBe(true)
   })
 })
+
+describe("vitest config safeguards", () => {
+  function readConfig(relative: string): string {
+    const full = path.resolve(process.cwd(), relative)
+    return readFileSync(full, "utf8")
+  }
+
+  it("registers globalSetup and setupFiles in vitest.config.ts", () => {
+    const src = readConfig("vitest.config.ts")
+    expect(src).toContain("test-database-identity.global-setup.ts")
+    expect(src).toContain("verify-worker-db-url.setup.ts")
+    expect(src).toMatch(/globalSetup:\s*\[/)
+    expect(src).toMatch(/setupFiles:\s*\[/)
+  })
+
+  it("registers globalSetup and setupFiles in vitest.timezone.config.ts", () => {
+    const src = readConfig("vitest.timezone.config.ts")
+    expect(src).toContain("test-database-identity.global-setup.ts")
+    expect(src).toContain("verify-worker-db-url.setup.ts")
+    expect(src).toMatch(/globalSetup:\s*\[/)
+    expect(src).toMatch(/setupFiles:\s*\[/)
+  })
+
+  // The original bug this guards against: the worker check was written as an
+  // `export default function`, and Vitest `setupFiles` ignores exports — so the
+  // assertion never ran. Registering the filename is not enough; the check has
+  // to execute as a module-level side effect when Vitest imports the file.
+  it("runs the worker URL check as an import-time side effect, not an export", () => {
+    const src = readConfig("server/tests/helpers/verify-worker-db-url.setup.ts")
+    expect(src, "setupFiles ignore default exports; do not use one").not.toMatch(
+      /export\s+default/,
+    )
+    expect(src, "the assertion must be invoked at module scope").toMatch(
+      /assertWorkerDatabaseUrl\(\s*process\.env\s*\)/,
+    )
+  })
+})

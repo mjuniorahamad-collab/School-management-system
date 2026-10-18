@@ -110,18 +110,83 @@ describe("assertSafeTestDatabaseUrl", () => {
     ).toThrow(/disposable test database/i)
   })
 
-  it("refuses a remote database with a production name even when opted in", () => {
+  it("does not trust a remote database name — identity variables are mandatory", () => {
+    // The remote path never trusts the name (Neon's default db is `neondb`); a
+    // remote target without the identity variables fails closed regardless of
+    // what it is called.
     expect(() =>
       assertSafeTestDatabaseUrl("postgresql://u:p@ep-sweet-boat.neon.tech/neondb", {
         ALLOW_REMOTE_TEST_DATABASE: "1",
       }),
-    ).toThrow(/disposable test database/i)
+    ).toThrow(/EXPECTED_TEST_DATABASE_HOST/)
   })
 
-  it("allows a remote test database once explicitly opted in", () => {
+  it("requires EXPECTED_TEST_DATABASE_HOST for a remote target", () => {
     expect(() =>
-      assertSafeTestDatabaseUrl("postgresql://u:p@db:5432/school_management_test", {
+      assertSafeTestDatabaseUrl("postgresql://u:p@ep-quiet-lab.neon.tech/neondb", {
         ALLOW_REMOTE_TEST_DATABASE: "1",
+        PRODUCTION_DATABASE_HOST: "ep-prod-neon.neon.tech",
+      }),
+    ).toThrow(/EXPECTED_TEST_DATABASE_HOST/)
+  })
+
+  it("requires PRODUCTION_DATABASE_HOST for a remote target", () => {
+    expect(() =>
+      assertSafeTestDatabaseUrl("postgresql://u:p@ep-quiet-lab.neon.tech/neondb", {
+        ALLOW_REMOTE_TEST_DATABASE: "1",
+        EXPECTED_TEST_DATABASE_HOST: "ep-quiet-lab.neon.tech",
+      }),
+    ).toThrow(/PRODUCTION_DATABASE_HOST/)
+  })
+
+  it("refuses a remote target that is the production host", () => {
+    expect(() =>
+      assertSafeTestDatabaseUrl("postgresql://u:p@ep-prod-neon.neon.tech/neondb", {
+        ALLOW_REMOTE_TEST_DATABASE: "1",
+        EXPECTED_TEST_DATABASE_HOST: "ep-quiet-lab.neon.tech",
+        PRODUCTION_DATABASE_HOST: "ep-prod-neon.neon.tech",
+      }),
+    ).toThrow(/production host/i)
+  })
+
+  it("refuses when the declared test and production hosts are identical", () => {
+    expect(() =>
+      assertSafeTestDatabaseUrl("postgresql://u:p@ep-quiet-lab.neon.tech/neondb", {
+        ALLOW_REMOTE_TEST_DATABASE: "1",
+        EXPECTED_TEST_DATABASE_HOST: "ep-prod-neon.neon.tech",
+        PRODUCTION_DATABASE_HOST: "ep-prod-neon.neon.tech",
+      }),
+    ).toThrow(/identical/i)
+  })
+
+  it("refuses a remote target that does not match the declared test host", () => {
+    expect(() =>
+      assertSafeTestDatabaseUrl("postgresql://u:p@ep-other-lab.neon.tech/neondb", {
+        ALLOW_REMOTE_TEST_DATABASE: "1",
+        EXPECTED_TEST_DATABASE_HOST: "ep-quiet-lab.neon.tech",
+        PRODUCTION_DATABASE_HOST: "ep-prod-neon.neon.tech",
+      }),
+    ).toThrow(/does not match EXPECTED_TEST_DATABASE_HOST/i)
+  })
+
+  it("allows the independent remote test target once identity is proven", () => {
+    // The Neon case: default database name `neondb`, proven disposable by exact
+    // endpoint identity rather than by its name.
+    expect(() =>
+      assertSafeTestDatabaseUrl("postgresql://u:p@ep-quiet-lab.neon.tech/neondb", {
+        ALLOW_REMOTE_TEST_DATABASE: "1",
+        EXPECTED_TEST_DATABASE_HOST: "ep-quiet-lab.neon.tech",
+        PRODUCTION_DATABASE_HOST: "ep-prod-neon.neon.tech",
+      }),
+    ).not.toThrow()
+  })
+
+  it("compares remote host identity case-insensitively", () => {
+    expect(() =>
+      assertSafeTestDatabaseUrl("postgresql://u:p@EP-Quiet-Lab.Neon.Tech/neondb", {
+        ALLOW_REMOTE_TEST_DATABASE: "1",
+        EXPECTED_TEST_DATABASE_HOST: "ep-quiet-lab.neon.tech",
+        PRODUCTION_DATABASE_HOST: "ep-prod-neon.neon.tech",
       }),
     ).not.toThrow()
   })
@@ -142,6 +207,8 @@ describe("assertSafeTestDatabaseUrl", () => {
       expect(() =>
         assertSafeTestDatabaseUrl("postgresql://u:p@db:5432/school_management_test", {
           ALLOW_REMOTE_TEST_DATABASE: value,
+          EXPECTED_TEST_DATABASE_HOST: "db",
+          PRODUCTION_DATABASE_HOST: "prod.example",
         }),
       ).not.toThrow()
     }

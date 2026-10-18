@@ -10,11 +10,16 @@ try {
   // .env not found — rely on shell-injected env vars.
 }
 
-// Refuse to hand the integration suites anything but a disposable local test
-// database. Their teardown deletes every row in the target, so this must run
-// BEFORE `integrationEnv` is built — a worker must never be able to receive an
+// Refuse to hand the integration suites anything but a disposable test database.
+// Their teardown deletes every row in the target, so this must run BEFORE
+// `integrationEnv` is built — a worker must never be able to receive an
 // unvalidated DATABASE_URL. A misconfiguration fails the whole run loudly rather
 // than silently skipping coverage.
+//
+// A loopback target is validated by its "test" database name. A remote target
+// (e.g. a throwaway Neon project) additionally requires ALLOW_REMOTE_TEST_DATABASE=1,
+// EXPECTED_TEST_DATABASE_HOST and PRODUCTION_DATABASE_HOST. These are read from the
+// process env here; being main-process only, they are not forwarded to workers.
 assertSafeTestDatabaseUrl(process.env.TEST_DATABASE_URL)
 
 // When a test database is configured (TEST_DATABASE_URL), the integration
@@ -54,5 +59,7 @@ export default defineConfig({
     // reset the tables in beforeAll; run files serially to avoid cross-file
     // races on the shared schema.
     fileParallelism: false,
+    globalSetup: ["./server/tests/helpers/test-database-identity.global-setup.ts"],
+    setupFiles: ["./server/tests/helpers/verify-worker-db-url.setup.ts"],
   },
 })

@@ -13,7 +13,9 @@ try {
   // .env not found — rely on shell-injected env vars.
 }
 
-// Same disposable-test-database safety gate as the default config.
+// Same disposable-test-database safety gate as the default config: a loopback
+// target by its "test" name, or a remote target by exact identity via
+// ALLOW_REMOTE_TEST_DATABASE=1 + EXPECTED_TEST_DATABASE_HOST + PRODUCTION_DATABASE_HOST.
 assertSafeTestDatabaseUrl(process.env.TEST_DATABASE_URL)
 
 const integrationEnv: Record<string, string> = { TZ: "America/New_York" }
@@ -40,5 +42,7 @@ export default defineConfig({
     env: integrationEnv,
     hookTimeout: 120_000,
     fileParallelism: false,
+    globalSetup: ["./server/tests/helpers/test-database-identity.global-setup.ts"],
+    setupFiles: ["./server/tests/helpers/verify-worker-db-url.setup.ts"],
   },
 })
