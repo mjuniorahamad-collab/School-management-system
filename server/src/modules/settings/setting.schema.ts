@@ -1,5 +1,8 @@
 import { z } from "zod"
-import { CONCESSION_SELF_APPROVAL_VALUES } from "../../lib/school-settings.js"
+import {
+  CONCESSION_SELF_APPROVAL_VALUES,
+  MAX_REPORT_CARD_SIGNATORIES,
+} from "../../lib/school-settings.js"
 
 const requiredText = (label: string, max: number) =>
   z.string().trim().min(1, `${label} is required`).max(max)
@@ -53,6 +56,25 @@ export const schoolSettingsSchema = z.object({
   // lib/school-settings.ts so the settings module and the fee-adjustment
   // service can never disagree about them.
   feeConcessionSelfApproval: z.enum(CONCESSION_SELF_APPROVAL_VALUES).optional(),
+  // Whether a report card must have an archived, human-confirmed PDF before it
+  // may be ISSUED (docs/report-card.md §9, §9a). Default true. Owned by
+  // lib/school-settings.ts so the settings UI and the issuance service resolve
+  // it identically; a missing or corrupt stored value fails safe to `true`.
+  requireReportCardPdfArchive: flag,
+  // Report card signatory names, frozen into every newly generated card
+  // (docs/report-card.md §8a). At least one is required and the list is bounded:
+  // a report card prints only a few signatures. Stored as a JSON string in the
+  // key/value store and validated by `parseReportCardSignatories` on read.
+  reportCardSignatories: z
+    .array(
+      z.object({
+        role: requiredText("Signatory role", 60),
+        name: requiredText("Signatory name", 120),
+      }),
+    )
+    .min(1, "Add at least one signatory")
+    .max(MAX_REPORT_CARD_SIGNATORIES)
+    .optional(),
 })
 
 export const updateSettingsSchema = schoolSettingsSchema.partial().strict()

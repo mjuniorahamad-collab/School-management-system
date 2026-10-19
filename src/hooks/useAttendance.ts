@@ -36,6 +36,12 @@ export function useBulkMarkAttendance() {
     mutationFn: (payload: AttendanceBulkMarkPayload) => attendanceService.bulkMark(payload),
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ATTENDANCE_GROUP })
+      if (result.skipped > 0) {
+        toast.warning(`Marked attendance for ${result.marked} students`, {
+          description: `${result.skipped} of ${result.requested} could not be marked`,
+        })
+        return
+      }
       toast.success(`Marked attendance for ${result.marked} students`)
     },
     onError: (e: Error) => toast.error("Could not mark attendance", { description: e.message }),

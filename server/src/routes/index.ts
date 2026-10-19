@@ -21,6 +21,8 @@ import { eventsRouter } from "../modules/events/event.route.js"
 import { admissionsRouter } from "../modules/admissions/admission.route.js"
 import { timetableRouter } from "../modules/timetable/timetable.route.js"
 import { attendanceRouter } from "../modules/attendance/attendance.route.js"
+import { academicCalendarRouter } from "../modules/academic-calendar/academic-calendar.route.js"
+import { enrollmentHistoryRouter } from "../modules/enrollment-history/enrollment-history.route.js"
 import { homeworkRouter } from "../modules/homework/homework.route.js"
 import { assignmentRouter } from "../modules/assignments/assignment.route.js"
 import { examRouter } from "../modules/exams/exam.route.js"
@@ -39,6 +41,8 @@ import { transportRouter } from "../modules/transport/transport.route.js"
 import { reportsRouter } from "../modules/reports/report.route.js"
 import { portalLinksRouter, portalMeRouter } from "../modules/portal/portal.route.js"
 import { portalAccountRouter, portalActivationRouter } from "../modules/portal/portal-provisioning.route.js"
+import { reportCardsRouter } from "../modules/report-cards/report-card.route.js"
+import { reportCardSchemesRouter } from "../modules/report-card-schemes/report-card-scheme.route.js"
 
 // Feature modules register their routers here (e.g. apiRouter.use(studentsRouter)).
 export const apiRouter: Router = Router()
@@ -65,6 +69,8 @@ apiRouter.use("/events", eventsRouter)
 apiRouter.use("/admissions", admissionsRouter)
 apiRouter.use("/timetable", timetableRouter)
 apiRouter.use("/attendance", attendanceRouter)
+apiRouter.use("/academic-calendar", academicCalendarRouter)
+apiRouter.use("/enrollment-history", enrollmentHistoryRouter)
 apiRouter.use("/homework", homeworkRouter)
 apiRouter.use("/assignments", assignmentRouter)
 apiRouter.use("/exams", examRouter)
@@ -85,3 +91,5 @@ apiRouter.use("/me", portalMeRouter)
 apiRouter.use("/portal/links", portalLinksRouter)
 apiRouter.use("/portal/accounts", portalAccountRouter)
 apiRouter.use("/portal/activate", portalActivationRouter)
+apiRouter.use("/report-cards", reportCardsRouter)
+apiRouter.use("/report-card-schemes", reportCardSchemesRouter)

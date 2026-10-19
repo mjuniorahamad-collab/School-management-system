@@ -129,6 +129,24 @@ export const PERMISSION_CODES = [
   // school-targeted notifications to roles.
   "notifications:view",
   "notifications:create",
+  // Report Card foundation (docs/academic-calendar.md §12). `calendar:manage`
+  // authors the academic calendar + holidays; `enrollment:history:manage` is the
+  // dedicated boundary for rewriting historical StudentEnrollmentPeriod placement
+  // — broad `students:update` must never be the sole authorization for it. These
+  // are the only new codes; register verification reuses the attendance codes.
+  "calendar:manage",
+  "enrollment:history:manage",
+  // Report Card (docs/report-card.md §12). Active V1 codes for annual report
+  // cards: view, generate, publish, archive. Printing is reading only.
+  "report-cards:view",
+  "report-cards:generate",
+  "report-cards:publish",
+  "report-cards:archive",
+  // Report Card scheme configuration (docs/report-card.md §2, §12). Authoring
+  // the annual aggregation policy is deliberately SEPARATE from generating a
+  // card: `report-cards:generate` must never imply the ability to change the
+  // calculation rules a card is generated under.
+  "report-cards:manage-schemes",
 ] as const
 
 export type PermissionCode = (typeof PERMISSION_CODES)[number]
@@ -205,6 +223,13 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
     ...codes("admissions", [VIEW, CREATE, UPDATE]),
     "attendance:view",
     ...codes("academic-sessions", [VIEW, CREATE, UPDATE]),
+    "calendar:manage",
+    "enrollment:history:manage",
+    "report-cards:view",
+    "report-cards:generate",
+    "report-cards:publish",
+    "report-cards:archive",
+    "report-cards:manage-schemes",
     ...codes("classes", [VIEW, CREATE, UPDATE]),
     ...codes("sections", [VIEW, CREATE, UPDATE]),
     ...codes("subjects", [VIEW, CREATE, UPDATE]),
@@ -246,6 +271,7 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
     ...codes("assignments", [VIEW, CREATE, UPDATE, DELETE]),
     ...codes("exams", [VIEW, CREATE, UPDATE, DELETE]),
     ...codes("results", [VIEW, CREATE, UPDATE, EXPORT]),
+    "report-cards:view",
     "library:view",
     "notices:view",
     "events:view",
@@ -318,9 +344,27 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
   ],
 }
 
-/** Human description for a permission code, e.g. `students:view` → `View students`. */
+/**
+ * Splits a permission code into its resource prefix and final action segment.
+ *
+ * Most codes are two-part `resource:action`, but the Report Card foundation adds
+ * the three-part `enrollment:history:manage`. Taking the action from the LAST
+ * segment keeps that code intact (`resource = "enrollment:history"`,
+ * `action = "manage"`) instead of silently truncating it to `resource:action` =
+ * `enrollment:history`.
+ */
+export function parsePermissionCode(code: string): { resource: string; action: string } {
+  const index = code.lastIndexOf(":")
+  if (index === -1) return { resource: code, action: "" }
+  return { resource: code.slice(0, index), action: code.slice(index + 1) }
+}
+
+/**
+ * Human description for a permission code, e.g. `students:view` → `View students`
+ * and `enrollment:history:manage` → `Manage enrollment history`.
+ */
 export function describePermission(code: string): string {
-  const [resource, action] = code.split(":")
+  const { resource, action } = parsePermissionCode(code)
   const actionLabel = action ? `${action.charAt(0).toUpperCase()}${action.slice(1)}` : "Access"
-  return `${actionLabel} ${resource}`
+  return `${actionLabel} ${resource.replace(/:/g, " ")}`
 }

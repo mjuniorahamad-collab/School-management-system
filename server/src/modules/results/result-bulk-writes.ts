@@ -33,11 +33,14 @@ import { Prisma } from "@prisma/client"
 
 type TransactionClient = Prisma.TransactionClient
 
+export type MarkStatus = "SCORED" | "ABSENT" | "NOT_APPLICABLE" | "PENDING"
+
 export interface ExamMarkBulkRow {
   examResultId: string
   examSubjectId: string
   obtainedMarks: Prisma.Decimal | null
   isAbsent: boolean
+  status: MarkStatus
   percentage: Prisma.Decimal | null
   grade: string | null
   isPass: boolean | null
@@ -82,13 +85,13 @@ export async function bulkUpsertExamMarks(
       (row) =>
         Prisma.sql`(${randomUUID()}, ${params.schoolId}, ${row.examResultId}, ${
           row.examSubjectId
-        }, ${row.obtainedMarks}, ${row.isAbsent}, ${row.percentage}, ${row.grade}, ${
+        }, ${row.obtainedMarks}, ${row.isAbsent}, ${row.status}, ${row.percentage}, ${row.grade}, ${
           row.isPass
         }, ${row.remarks}, ${params.enteredBy}, ${now}, ${params.enteredBy}, ${now})`,
     ),
   )
   return tx.$executeRaw(
-    Prisma.sql`INSERT INTO "ExamMark" ("id", "schoolId", "examResultId", "examSubjectId", "obtainedMarks", "isAbsent", "percentage", "grade", "isPass", "remarks", "enteredBy", "enteredAt", "updatedBy", "updatedAt") VALUES ${values} ON CONFLICT ("examResultId", "examSubjectId") DO UPDATE SET "obtainedMarks" = EXCLUDED."obtainedMarks", "isAbsent" = EXCLUDED."isAbsent", "percentage" = EXCLUDED."percentage", "grade" = EXCLUDED."grade", "isPass" = EXCLUDED."isPass", "remarks" = EXCLUDED."remarks", "updatedBy" = EXCLUDED."updatedBy", "updatedAt" = EXCLUDED."updatedAt"`,
+    Prisma.sql`INSERT INTO "ExamMark" ("id", "schoolId", "examResultId", "examSubjectId", "obtainedMarks", "isAbsent", "status", "percentage", "grade", "isPass", "remarks", "enteredBy", "enteredAt", "updatedBy", "updatedAt") VALUES ${values} ON CONFLICT ("examResultId", "examSubjectId") DO UPDATE SET "obtainedMarks" = EXCLUDED."obtainedMarks", "isAbsent" = EXCLUDED."isAbsent", "status" = EXCLUDED."status", "percentage" = EXCLUDED."percentage", "grade" = EXCLUDED."grade", "isPass" = EXCLUDED."isPass", "remarks" = EXCLUDED."remarks", "updatedBy" = EXCLUDED."updatedBy", "updatedAt" = EXCLUDED."updatedAt"`,
   )
 }
 

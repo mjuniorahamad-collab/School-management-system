@@ -730,6 +730,7 @@ describe("Page-hosted print surfaces", () => {
     ["src/pages/attendance/AttendancePage.tsx", "AttendanceRegisterPrintDocument"],
     ["src/pages/timetable/TimetablePage.tsx", "TimetablePrintDocument"],
     ["src/pages/students/StudentDetailPage.tsx", "StudentProfilePrintDocument"],
+    ["src/pages/reportCards/ReportCardDetailPage.tsx", "ReportCardPrintDocument"],
     ["src/pages/results/ResultsPage.tsx", "ResultSheetPrintDocument"],
     ["src/components/library/LoansTab.tsx", "CirculationPrintDocument"],
     ["src/components/transport/AssignmentsTab.tsx", "RoutePassengerListPrintDocument"],
@@ -772,6 +773,7 @@ describe("Every print surface is covered by a contract", () => {
     "components/reports/ReportResult.tsx",
     "components/transport/AssignmentsTab.tsx",
     "pages/attendance/AttendancePage.tsx",
+    "pages/reportCards/ReportCardDetailPage.tsx",
     "pages/results/ResultsPage.tsx",
     "pages/students/StudentDetailPage.tsx",
     "pages/timetable/TimetablePage.tsx",
@@ -807,6 +809,7 @@ describe("Every print surface is covered by a contract", () => {
       "src/pages/timetable/TimetablePage.tsx",
       "src/pages/students/StudentDetailPage.tsx",
       "src/pages/results/ResultsPage.tsx",
+      "src/pages/reportCards/ReportCardDetailPage.tsx",
       "src/components/library/LoansTab.tsx",
       "src/components/transport/AssignmentsTab.tsx",
     ]) {

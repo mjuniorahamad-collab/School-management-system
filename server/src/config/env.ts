@@ -34,6 +34,11 @@ const envSchema = z.object({
   // Profile photos are rate limited per-client on the upload/replace routes.
   UPLOAD_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1000).default(10),
   UPLOAD_RATE_LIMIT_WINDOW_MINUTES: z.coerce.number().int().min(1).max(60).default(1),
+  // Maximum accepted report-card PDF archive upload size in megabytes. Enforced
+  // by the multipart parser WHILE the body streams in (never only after the
+  // whole file is buffered), and re-checked as a defence-in-depth bound inside
+  // the archive service (docs/report-card.md §9 "size bounds").
+  UPLOAD_PDF_MAX_SIZE_MB: z.coerce.number().int().min(1).max(100).default(10),
   // Supabase native Storage connection settings. Required when
   // STORAGE_PROVIDER=supabase. The service-role key is a server-side secret and
   // must never be exposed to the frontend.
@@ -93,6 +98,7 @@ export const env = {
   },
   upload: {
     maxSizeBytes: parsed.data.UPLOAD_MAX_SIZE_MB * 1024 * 1024,
+    pdfMaxSizeBytes: parsed.data.UPLOAD_PDF_MAX_SIZE_MB * 1024 * 1024,
     rateLimit: {
       max: parsed.data.UPLOAD_RATE_LIMIT_MAX,
       windowMs: parsed.data.UPLOAD_RATE_LIMIT_WINDOW_MINUTES * 60_000,

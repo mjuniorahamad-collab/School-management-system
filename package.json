@@ -27,6 +27,7 @@
     "db:local:start": "tsx scripts/pg-local.ts start",
     "db:local:stop": "tsx scripts/pg-local.ts stop",
     "test": "vitest run",
+    "test:report-card": "vitest run -c vitest.report-card.config.ts",
     "test:tz": "vitest run -c vitest.timezone.config.ts",
     "test:watch": "vitest"
   },

@@ -8,6 +8,7 @@
 
 import { PrismaClient } from "@prisma/client"
 import { hashPassword } from "../src/auth/password.js"
+import { createInitialPeriod } from "../src/modules/enrollment-history/enrollment-history.service.js"
 import { buildAdmissionNumber } from "../src/modules/students/admission-number.js"
 import {
   PERMISSION_CODES,
@@ -15,6 +16,7 @@ import {
   ROLE_NAMES,
   ROLE_PERMISSIONS,
   describePermission,
+  parsePermissionCode,
   type RoleName,
 } from "../src/permissions/permissions.js"
 
@@ -176,7 +178,7 @@ async function seedAcademicSessions(schoolId: string) {
 
 async function seedPermissions() {
   for (const code of PERMISSION_CODES) {
-    const [resource, action] = code.split(":")
+    const { resource, action } = parsePermissionCode(code)
     await prisma.permission.upsert({
       where: { code },
       update: { resource, action, description: describePermission(code) },
@@ -411,7 +413,7 @@ async function seedStudents(
       },
     })
 
-    await prisma.studentEnrollment.upsert({
+    const enrollment = await prisma.studentEnrollment.upsert({
       where: {
         studentId_academicSessionId: { studentId: student.id, academicSessionId: session.id },
       },
@@ -422,6 +424,19 @@ async function seedStudents(
         classId: cls.id,
         sectionId: section.id,
       },
+    })
+
+    // Backfill one open SEEDED placement period per enrollment (docs §13). This
+    // is a no-op when a period already exists, so re-seeding is safe.
+    await createInitialPeriod(prisma, {
+      schoolId,
+      studentId: student.id,
+      academicSessionId: session.id,
+      enrollmentId: enrollment.id,
+      classId: cls.id,
+      sectionId: section.id,
+      effectiveFrom: session.startDate,
+      source: "SEEDED",
     })
 
     const primaryName = GUARDIAN_SEEDS[seed.primaryGuardian].name

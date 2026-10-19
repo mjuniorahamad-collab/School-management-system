@@ -13,6 +13,7 @@ import {
   ClipboardList,
   CreditCard,
   ExternalLink,
+  FileText,
   LayoutDashboard,
   Library,
   Megaphone,
@@ -61,6 +62,8 @@ export const navigationSections: NavSection[] = [
       { path: "/assignments", label: "Assignments", icon: ClipboardList, requiredPermission: "assignments:view" },
       { path: "/examinations", label: "Examinations", icon: ClipboardCheck, requiredPermission: "exams:view" },
       { path: "/results", label: "Results", icon: Award, requiredPermission: "results:view" },
+      { path: "/report-cards", label: "Report Cards", icon: FileText, requiredPermission: "report-cards:view" },
+      { path: "/report-card-schemes", label: "Report Card Schemes", icon: ScrollText, requiredPermission: "report-cards:view" },
     ],
   },
   {

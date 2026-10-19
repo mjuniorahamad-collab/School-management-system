@@ -191,6 +191,14 @@ export const api = {
       { timeoutMs: UPLOAD_TIMEOUT_MS, ...options },
     )
   },
+  /** Sends a multipart payload over POST (e.g. a report-card PDF archive). */
+  postForm<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T> {
+    return request<T>(
+      path,
+      { method: "POST", body: formData },
+      { timeoutMs: UPLOAD_TIMEOUT_MS, ...options },
+    )
+  },
   patch<T>(path: string, body: unknown, options?: RequestOptions): Promise<T> {
     return request<T>(path, { method: "PATCH", body: JSON.stringify(body) }, options)
   },

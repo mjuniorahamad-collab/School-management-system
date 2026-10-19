@@ -7,6 +7,8 @@ import {
   canFinalizeExam,
   canReopenExam,
 } from "../exams/exam.rules.js"
+import { assertMarkStatusEntryAllowed } from "../report-cards/report-card.schema.js"
+import type { MarkStatus } from "../report-cards/report-card.types.js"
 import { requireActingTeacher } from "../tasks/task-validation.js"
 import { toResultSheetExamMeta, toResultMarkCell, toResultSheetSubject } from "./result.mapper.js"
 import {
@@ -77,6 +79,64 @@ function subjectConfigMaps(rows: SubjectConfig[]): {
 
 function decimalOrNull(value: number | null): Prisma.Decimal | null {
   return value === null ? null : new Prisma.Decimal(value)
+}
+
+/**
+ * Resolves the effective `ExamMark.status` for one entry row (D1).
+ *
+ * An explicit `status` from the request is honoured as-is. When omitted, the
+ * status is derived so the legacy `isAbsent`/`obtainedMarks` contract is
+ * preserved and missing marks are never treated as zero or ABSENT
+ * (docs/report-card.md §4):
+ *
+ *  - `isAbsent: true`                -> `ABSENT`   (absence policy unchanged);
+ *  - `obtainedMarks` present         -> `SCORED`;
+ *  - cleared cell (no marks, absent) -> `PENDING`  (missing data, not zero).
+ */
+function resolveMarkStatus(row: {
+  status?: MarkStatus | null
+  isAbsent?: boolean
+  obtainedMarks?: number | null
+}): MarkStatus {
+  if (row.status) return row.status
+  if (row.isAbsent) return "ABSENT"
+  return row.obtainedMarks === null || row.obtainedMarks === undefined ? "PENDING" : "SCORED"
+}
+
+/**
+ * Resolves the report-card scheme's core-subject ids for a concrete exam
+ * placement (D1). The scheme is scoped `(schoolId, academicSessionId, classId,
+ * sectionId?)`; a section-specific scheme takes precedence over the class-level
+ * one (docs/report-card.md §2). Used only to reject `NOT_APPLICABLE` on a core
+ * subject at entry (docs/report-card.md §4). Returns an empty set when no
+ * scheme is configured for the placement, so entry is not blocked.
+ */
+async function loadCoreSubjectIds(
+  db: BandDb & Pick<TransactionClient, "reportCardScheme">,
+  placement: { schoolId: string; academicSessionId: string; classId: string; sectionId: string | null },
+): Promise<ReadonlySet<string>> {
+  if (placement.sectionId) {
+    const sectionScheme = await db.reportCardScheme.findFirst({
+      where: {
+        schoolId: placement.schoolId,
+        academicSessionId: placement.academicSessionId,
+        classId: placement.classId,
+        sectionId: placement.sectionId,
+      },
+      select: { coreSubjectIds: true },
+    })
+    if (sectionScheme) return new Set(sectionScheme.coreSubjectIds)
+  }
+  const classScheme = await db.reportCardScheme.findFirst({
+    where: {
+      schoolId: placement.schoolId,
+      academicSessionId: placement.academicSessionId,
+      classId: placement.classId,
+      sectionId: null,
+    },
+    select: { coreSubjectIds: true },
+  })
+  return new Set(classScheme?.coreSubjectIds ?? [])
 }
 
 export async function getResultSheet(
@@ -243,6 +303,17 @@ export async function putSubjectMarks(
   const { maxBy, passBy } = subjectConfigMaps(subjects)
   const bands = await loadGradingBands(prisma, actor.schoolId)
 
+  // D1: core-subject set for the exam's placement, used to reject
+  // NOT_APPLICABLE on a core subject at entry (docs/report-card.md §4). An
+  // empty set (no scheme configured) does not block entry.
+  const coreSubjectIds = await loadCoreSubjectIds(prisma, {
+    schoolId: actor.schoolId,
+    academicSessionId: exam.academicSessionId,
+    classId: exam.classId,
+    sectionId: exam.sectionId,
+  })
+  const isCoreSubject = coreSubjectIds.has(examSubject.subjectId)
+
   const subjectMaxMarks = maxBy.get(examSubjectId) ?? 0
   for (const row of input.rows) {
     if (row.obtainedMarks !== null && row.obtainedMarks !== undefined && row.obtainedMarks > subjectMaxMarks) {
@@ -298,9 +369,16 @@ export async function putSubjectMarks(
         }
 
         const obtained = row.obtainedMarks ?? null
+        // D1: resolve the effective status, keeping isAbsent consistent with it.
+        // ABSENT forces isAbsent=true; every other status forces isAbsent=false so
+        // a NOT_APPLICABLE/PENDING/SCORED cell is never accidentally treated as an
+        // absence by the aggregate. Missing marks stay null (never zero).
+        const status = resolveMarkStatus({ ...row, obtainedMarks: obtained })
+        const isAbsent = status === "ABSENT"
+        assertMarkStatusEntryAllowed({ isCoreSubject, status })
         const derivation = deriveSubjectMark({
           obtainedMarks: obtained,
-          isAbsent: row.isAbsent,
+          isAbsent,
           maxMarks: maxBy.get(examSubjectId) ?? 0,
           passMarks: passBy.get(examSubjectId) ?? 0,
           bands,
@@ -309,7 +387,8 @@ export async function putSubjectMarks(
           examResultId: resultId,
           examSubjectId,
           obtainedMarks: obtained === null ? null : new Prisma.Decimal(obtained),
-          isAbsent: row.isAbsent,
+          isAbsent,
+          status,
           percentage: decimalOrNull(derivation.percentage),
           grade: derivation.grade,
           isPass: derivation.isPass,

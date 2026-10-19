@@ -28,6 +28,7 @@ import {
   ROLE_NAMES,
   ROLE_PERMISSIONS,
   describePermission,
+  parsePermissionCode,
   type RoleName,
 } from "../src/permissions/permissions.js"
 
@@ -176,7 +177,7 @@ async function bootstrap(): Promise<void> {
     })
 
     for (const code of PERMISSION_CODES) {
-      const [resource, action] = code.split(":")
+      const { resource, action } = parsePermissionCode(code)
       const description = describePermission(code)
       await tx.permission.upsert({
         where: { code },

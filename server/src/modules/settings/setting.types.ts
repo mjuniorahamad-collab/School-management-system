@@ -1,3 +1,4 @@
+import type { SchoolBranding } from "../../lib/school-settings.js"
 import type { SchoolSettings } from "./setting.schema.js"
 
 export interface SettingsResponse {
@@ -22,17 +23,8 @@ export interface SettingsResponse {
  * Every optional field is `string | null` rather than `string | undefined`: the
  * key/value store persists an unset key as `""`, so the service normalises every
  * blank to `null` and clients can distinguish "not set" without string sniffing.
+ *
+ * Alias of `SchoolBranding`: the report-card snapshot freezes the exact same
+ * projection through `readBranding`, so the two must never drift.
  */
-export interface BrandingResponse {
-  schoolName: string
-  tagline: string | null
-  schoolShortName: string | null
-  contactPhone: string | null
-  contactEmail: string | null
-  addressLine1: string | null
-  addressLine2: string | null
-  city: string | null
-  state: string | null
-  postalCode: string | null
-  country: string | null
-}
+export type BrandingResponse = SchoolBranding

@@ -59,6 +59,19 @@ const ExaminationsPage = lazy(() =>
   import("@/pages/examinations").then((m) => ({ default: m.ExaminationsPage })),
 )
 const ResultsPage = lazy(() => import("@/pages/results").then((m) => ({ default: m.ResultsPage })))
+const ReportCardSchemesPage = lazy(() =>
+  import("@/pages/reportCardSchemes/ReportCardSchemesPage").then((m) => ({
+    default: m.ReportCardSchemesPage,
+  })),
+)
+const ReportCardsPage = lazy(() =>
+  import("@/pages/reportCards/ReportCardsPage").then((m) => ({ default: m.ReportCardsPage })),
+)
+const ReportCardDetailPage = lazy(() =>
+  import("@/pages/reportCards/ReportCardDetailPage").then((m) => ({
+    default: m.ReportCardDetailPage,
+  })),
+)
 const LibraryPage = lazy(() =>
   import("@/pages/library/LibraryPage").then((m) => ({ default: m.LibraryPage })),
 )
@@ -155,6 +168,9 @@ export const router = createBrowserRouter([
           { path: "/assignments", element: <AssignmentsPage /> },
           { path: "/examinations", element: <ExaminationsPage /> },
           { path: "/results", element: <ResultsPage /> },
+          { path: "/report-cards", element: <ReportCardsPage /> },
+          { path: "/report-cards/:id", element: <ReportCardDetailPage /> },
+          { path: "/report-card-schemes", element: <ReportCardSchemesPage /> },
           { path: "/library", element: <LibraryPage /> },
           { path: "/fees", element: <FeesPage /> },
           { path: "/payments", element: <PaymentsPage /> },

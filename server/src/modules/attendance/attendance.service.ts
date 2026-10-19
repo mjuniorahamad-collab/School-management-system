@@ -5,8 +5,10 @@ import {
   notFoundError,
 } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import { lockSessionForUpdate } from "../../lib/db-locks.js"
 import type { AuthUser } from "../../types/auth.js"
 import { recordAudit, recordAuditAfterCommit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
+import { assertRegistersMutableForRecordScope } from "./attendance-register.service.js"
 import { computeAttendancePercent } from "./attendance.rules.js"
 import type {
   AttendanceSummaryQueryInput,
@@ -21,6 +23,7 @@ import type {
   AttendanceRecordListResult,
   AttendanceSummaryItem,
   AttendanceSummaryResult,
+  BulkMarkAttendanceResult,
 } from "./attendance.types.js"
 
 type PrismaClient = NonNullable<Awaited<ReturnType<typeof getPrisma>>>
@@ -103,6 +106,15 @@ export async function markAttendance(
 
   try {
     const record = await prisma.$transaction(async (tx) => {
+      await lockSessionForUpdate(tx, { schoolId, academicSessionId: input.academicSessionId })
+      await assertRegistersMutableForRecordScope(tx, {
+        schoolId,
+        academicSessionId: input.academicSessionId,
+        classId: enrollment.classId,
+        sectionId: enrollment.sectionId,
+        date,
+      })
+
       const existing = await tx.attendanceRecord.findFirst({
         where: { schoolId, enrollmentId: enrollment.id, date },
         select: { id: true },
@@ -156,7 +168,7 @@ export async function bulkMarkAttendance(
   input: BulkMarkAttendanceInput,
   schoolId: string,
   actor: AuthUser,
-): Promise<{ marked: number }> {
+): Promise<BulkMarkAttendanceResult> {
   const prisma = await requirePrisma()
   const date = new Date(`${input.date}T00:00:00.000Z`)
   const auditActor = await resolveAuditActor(prisma, schoolId, actor)
@@ -181,48 +193,66 @@ export async function bulkMarkAttendance(
       .map((e) => [e.studentId, e]),
   )
 
-  const matchedEnrollmentIds = [...enrollmentMap.values()].map((e) => e.id)
-  const existing = await prisma.attendanceRecord.findFirst({
-    where: {
+  const result = await prisma.$transaction(async (tx) => {
+    await lockSessionForUpdate(tx, { schoolId, academicSessionId: input.academicSessionId })
+    await assertRegistersMutableForRecordScope(tx, {
       schoolId,
+      academicSessionId: input.academicSessionId,
+      classId: input.classId,
+      sectionId: input.sectionId ?? null,
       date,
-      enrollmentId: { in: matchedEnrollmentIds },
-    },
-    select: { id: true },
-  })
-  if (existing) {
-    throw attendanceExistsError(
-      "Attendance is already marked for one or more students on this date",
-    )
-  }
+    })
 
-  let marked = 0
-
-  for (const record of input.records) {
-    const enrollment = enrollmentMap.get(record.studentId)
-    if (!enrollment) continue
-
-    try {
-      await prisma.attendanceRecord.create({
-        data: {
-          schoolId,
-          academicSessionId: input.academicSessionId,
-          classId: enrollment.classId,
-          sectionId: enrollment.sectionId,
-          date,
-          studentId: record.studentId,
-          enrollmentId: enrollment.id,
-          status: record.status,
-          note: record.note ?? null,
-          markedBy: actor.id,
-        },
-      })
-      marked++
-    } catch {
-      // Skip failed records silently in bulk mode.
-      continue
+    const matchedEnrollmentIds = [...enrollmentMap.values()].map((e) => e.id)
+    const existing = await tx.attendanceRecord.findFirst({
+      where: {
+        schoolId,
+        date,
+        enrollmentId: { in: matchedEnrollmentIds },
+      },
+      select: { id: true },
+    })
+    if (existing) {
+      throw attendanceExistsError(
+        "Attendance is already marked for one or more students on this date",
+      )
     }
-  }
+
+    // Pre-partition the batch: unmatched students and duplicate student ids in
+    // one request are counted as `skipped`, the remainder is a single insert.
+    // Under the session lock no concurrent writer can race the duplicate guard,
+    // so the insert is all-or-nothing.
+    const seen = new Set<string>()
+    const rows: Prisma.AttendanceRecordCreateManyInput[] = []
+    let skipped = 0
+    for (const record of input.records) {
+      const enrollment = enrollmentMap.get(record.studentId)
+      if (!enrollment || seen.has(enrollment.id)) {
+        // Not enrolled in this class/section/session, or repeated in this batch.
+        skipped++
+        continue
+      }
+      seen.add(enrollment.id)
+      rows.push({
+        schoolId,
+        academicSessionId: input.academicSessionId,
+        classId: enrollment.classId,
+        sectionId: enrollment.sectionId,
+        date,
+        studentId: record.studentId,
+        enrollmentId: enrollment.id,
+        status: record.status,
+        note: record.note ?? null,
+        markedBy: actor.id,
+      })
+    }
+
+    if (rows.length > 0) {
+      await tx.attendanceRecord.createMany({ data: rows })
+    }
+
+    return { marked: rows.length, requested: input.records.length, skipped }
+  })
 
   await recordAuditAfterCommit({
     schoolId,
@@ -233,10 +263,11 @@ export async function bulkMarkAttendance(
     action: "UPDATE",
     entityType: "ATTENDANCE_RECORD",
     entityId: null,
-    summary: `Bulk-marked attendance for ${marked} student(s)`,
+    summary: `Bulk-marked attendance for ${result.marked} student(s)`,
     metadata: {
-      marked,
-      requested: input.records.length,
+      marked: result.marked,
+      skipped: result.skipped,
+      requested: result.requested,
       academicSessionId: input.academicSessionId,
       classId: input.classId,
       sectionId: input.sectionId ?? null,
@@ -244,7 +275,7 @@ export async function bulkMarkAttendance(
     },
   })
 
-  return { marked }
+  return result
 }
 
 export async function updateAttendanceRecord(
@@ -257,7 +288,15 @@ export async function updateAttendanceRecord(
   const auditActor = await resolveAuditActor(prisma, schoolId, actor)
   const existing = await prisma.attendanceRecord.findFirst({
     where: { id, schoolId },
-    select: { id: true, status: true, note: true },
+    select: {
+      id: true,
+      status: true,
+      note: true,
+      academicSessionId: true,
+      classId: true,
+      sectionId: true,
+      date: true,
+    },
   })
   if (!existing) throw notFoundError("Attendance record not found")
 
@@ -270,6 +309,17 @@ export async function updateAttendanceRecord(
   }
 
   const updated = await prisma.$transaction(async (tx) => {
+    await lockSessionForUpdate(tx, { schoolId, academicSessionId: existing.academicSessionId })
+    const locked = await tx.attendanceRecord.findFirst({ where: { id, schoolId }, select: { id: true } })
+    if (!locked) throw notFoundError("Attendance record not found")
+    await assertRegistersMutableForRecordScope(tx, {
+      schoolId,
+      academicSessionId: existing.academicSessionId,
+      classId: existing.classId,
+      sectionId: existing.sectionId,
+      date: existing.date,
+    })
+
     const row = await tx.attendanceRecord.update({
       where: { id },
       data,
@@ -312,10 +362,26 @@ export async function deleteAttendanceRecord(
   const auditActor = await resolveAuditActor(prisma, schoolId, actor)
   const existing = await prisma.attendanceRecord.findFirst({
     where: { id, schoolId },
-    select: { id: true, date: true },
+    select: {
+      id: true,
+      date: true,
+      academicSessionId: true,
+      classId: true,
+      sectionId: true,
+    },
   })
   if (!existing) throw notFoundError("Attendance record not found")
   await prisma.$transaction(async (tx) => {
+    await lockSessionForUpdate(tx, { schoolId, academicSessionId: existing.academicSessionId })
+    const locked = await tx.attendanceRecord.findFirst({ where: { id, schoolId }, select: { id: true } })
+    if (!locked) throw notFoundError("Attendance record not found")
+    await assertRegistersMutableForRecordScope(tx, {
+      schoolId,
+      academicSessionId: existing.academicSessionId,
+      classId: existing.classId,
+      sectionId: existing.sectionId,
+      date: existing.date,
+    })
     await tx.attendanceRecord.delete({ where: { id } })
     await recordAudit(tx, {
       schoolId,

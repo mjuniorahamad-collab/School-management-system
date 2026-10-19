@@ -23,6 +23,8 @@ export class LocalStorageProvider implements StorageProvider {
     return path.join(this.rootDir, ...key.split("/"))
   }
 
+  // The file system stores raw bytes, so the content type that other providers
+  // persist alongside the object is intentionally not part of this signature.
   async put(key: string, buffer: Buffer): Promise<void> {
     assertSafeKey(key)
     const absPath = this.objectPath(key)

@@ -1,7 +1,7 @@
 import { useAuth } from "@/auth/useAuth"
 import { PageContainer } from "@/components/layout/PageContainer"
 import { PageHeader } from "@/components/layout/PageHeader"
-import { SectionForm, type SectionField } from "@/components/settings/SettingsSectionForm"
+import { SectionForm, SignatoriesForm, type SectionField } from "@/components/settings/SettingsSectionForm"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ExamTypesPanel } from "@/components/settings/masterData/ExamTypesPanel"
@@ -128,6 +128,7 @@ export function SettingsPage() {
               <TabsTrigger value="timetable">Timetable</TabsTrigger>
               <TabsTrigger value="grading">Grading</TabsTrigger>
               <TabsTrigger value="fees">Fees</TabsTrigger>
+              <TabsTrigger value="reports">Report Cards</TabsTrigger>
               <TabsTrigger value="master">Master Data</TabsTrigger>
             </TabsList>
 
@@ -216,6 +217,20 @@ export function SettingsPage() {
                     values={values}
                     isSaving={updateMutation.isPending}
                     onSave={(payload) => updateMutation.mutate(payload)}
+                  />
+                ) : (
+                  <ReadOnlyMessage />
+                )}
+              </TabsContent>
+
+              <TabsContent value="reports" className="focus:outline-none">
+                {canUpdateSettings ? (
+                  <SignatoriesForm
+                    signatories={data.settings.reportCardSignatories ?? []}
+                    isSaving={updateMutation.isPending}
+                    onSave={(signatories) =>
+                      updateMutation.mutate({ reportCardSignatories: signatories })
+                    }
                   />
                 ) : (
                   <ReadOnlyMessage />

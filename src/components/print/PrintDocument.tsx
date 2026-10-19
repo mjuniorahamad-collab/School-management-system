@@ -2,6 +2,18 @@ import type { ReactNode } from "react"
 import { branding } from "@/config/branding"
 import { useBranding } from "@/hooks/useBranding"
 import { PRINT_DOCUMENT_CLASS, PRINT_ONLY } from "@/lib/print"
+import type { BrandingResponse } from "@/types/settings"
+
+/**
+ * A frozen school identity a document may render instead of live tenant branding.
+ *
+ * A historical artifact (e.g. an issued report card) must print the school
+ * identity that was true when it was frozen, not the tenant's current name and
+ * contact details. This is the same shape the live `/branding` projection returns,
+ * so a frozen snapshot can supply it directly. It is opt-in and per-document: with
+ * no override, the shell keeps resolving the live tenant branding exactly as before.
+ */
+export type PrintLetterheadIdentity = BrandingResponse
 
 /**
  * The shell every printable surface renders.
@@ -93,6 +105,13 @@ export interface PrintDocumentProps {
   frame?: boolean
   /** Marks the document so the print stylesheet can lay it out. */
   className?: string
+  /**
+   * A FROZEN school identity to print instead of live tenant branding. Opt-in: an
+   * absent value keeps the default live-branding letterhead and footer. A historical
+   * artifact (e.g. an issued report card) passes its frozen `snapshot.school` so the
+   * letterhead/footer never read the tenant's current, mutable name.
+   */
+  identity?: PrintLetterheadIdentity
   children: ReactNode
 }
 
@@ -104,13 +123,14 @@ export function PrintDocument({
   note,
   frame = false,
   className,
+  identity,
   children,
 }: PrintDocumentProps) {
   return (
     <div
       className={`${PRINT_ONLY} ${PRINT_DOCUMENT_CLASS} ${frame === true ? "print-document-frame" : ""} ${className ?? ""}`.trim()}
     >
-      <PrintLetterhead />
+      <PrintLetterhead identity={identity} />
       <div className="mt-4">
         <PrintTitleBlock title={title} eyebrow={eyebrow} subtitle={subtitle} />
       </div>
@@ -119,7 +139,7 @@ export function PrintDocument({
       {note !== undefined && note !== "" && (
         <p className="print-document-note mt-4 text-justify">{note}</p>
       )}
-      <PrintFooter documentTitle={title} />
+      <PrintFooter documentTitle={title} schoolName={identity?.schoolName} />
     </div>
   )
 }
@@ -134,12 +154,15 @@ export function PrintDocument({
  * explicit `null`, because that config belongs to the default school and would
  * print another school's identity on this tenant's document.
  */
-export function PrintLetterhead() {
+export function PrintLetterhead({ identity }: { identity?: PrintLetterheadIdentity } = {}) {
   const { data } = useBranding()
-  const loaded = data !== undefined
-  const schoolName = (loaded ? data.schoolName : branding.schoolName) || branding.schoolName
-  const tagline = loaded ? data.tagline : branding.schoolTagline
-  const monogram = deriveMonogram(loaded ? data.schoolShortName : null, schoolName)
+  // A provided identity is a FROZEN snapshot value and wins over live branding. The
+  // hook is still called unconditionally so the component's hook order is stable.
+  const source = identity ?? data
+  const loaded = source !== undefined
+  const schoolName = (loaded ? source.schoolName : branding.schoolName) || branding.schoolName
+  const tagline = loaded ? source.tagline : branding.schoolTagline
+  const monogram = deriveMonogram(loaded ? source.schoolShortName : null, schoolName)
 
   // Guards null AND undefined: a printed legal document must degrade to a shorter
   // letterhead rather than throw and lose the whole page if a field is ever absent.
@@ -150,13 +173,13 @@ export function PrintLetterhead() {
       .join(", ")
 
   const contact = loaded
-    ? [present([data.addressLine1, data.addressLine2]), present([data.city, data.state, data.postalCode]), present([data.country])]
+    ? [present([source.addressLine1, source.addressLine2]), present([source.city, source.state, source.postalCode]), present([source.country])]
         .filter((line) => line !== "")
         .map((line) => line.trim())
     : []
 
-  const phone = loaded ? data.contactPhone : null
-  const email = loaded ? data.contactEmail : null
+  const phone = loaded ? source.contactPhone : null
+  const email = loaded ? source.contactEmail : null
   const hasContactLine = phone !== null || email !== null
 
   return (
@@ -218,9 +241,20 @@ export function PrintTitleBlock({ title, eyebrow, subtitle }: PrintTitleBlockPro
  * a legal document is worse than omitting it. Documents that report a real scope
  * ("showing 20 of 60") state that in their own note instead.
  */
-export function PrintFooter({ documentTitle }: { documentTitle?: string }) {
+export function PrintFooter({
+  documentTitle,
+  schoolName: schoolNameOverride,
+}: {
+  documentTitle?: string
+  /**
+   * A FROZEN identity's school name, used in place of live tenant branding. The
+   * footer carries the same identity as the letterhead so a historical document is
+   * internally consistent.
+   */
+  schoolName?: string
+}) {
   const { data } = useBranding()
-  const schoolName = data?.schoolName || branding.schoolName
+  const schoolName = schoolNameOverride ?? (data?.schoolName || branding.schoolName)
 
   return (
     <div className="print-document-footer">

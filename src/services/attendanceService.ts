@@ -7,6 +7,7 @@ import type {
   AttendanceRecordListQuery,
   AttendanceSummaryQuery,
   AttendanceSummaryResult,
+  BulkMarkAttendanceResult,
 } from "@/types/attendance"
 
 function attendanceParams(query: AttendanceRecordListQuery): string {
@@ -40,8 +41,8 @@ export const attendanceService = {
   mark(payload: AttendanceMarkPayload): Promise<AttendanceRecordDetail> {
     return api.post<AttendanceRecordDetail>("/attendance", payload)
   },
-  bulkMark(payload: AttendanceBulkMarkPayload): Promise<{ marked: number }> {
-    return api.post<{ marked: number }>("/attendance/bulk", payload)
+  bulkMark(payload: AttendanceBulkMarkPayload): Promise<BulkMarkAttendanceResult> {
+    return api.post<BulkMarkAttendanceResult>("/attendance/bulk", payload)
   },
   update(id: string, payload: Partial<AttendanceMarkPayload>): Promise<AttendanceRecordDetail> {
     return api.patch<AttendanceRecordDetail>(`/attendance/${id}`, payload)

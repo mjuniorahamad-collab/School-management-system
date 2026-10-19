@@ -2,9 +2,14 @@ import { Prisma } from "@prisma/client"
 import type { Guardian } from "@prisma/client"
 import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import { lockSessionForUpdate } from "../../lib/db-locks.js"
 import { rowsToCsv } from "../../lib/csv.js"
 import type { AuthUser } from "../../types/auth.js"
 import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
+import {
+  createInitialPeriod,
+  recordPlacementChange,
+} from "../enrollment-history/enrollment-history.service.js"
 import { buildAdmissionNumber } from "./admission-number.js"
 import { normalizeGuardianPrimaries, resolveActiveSession, resolveClassAndSection } from "./student-rules.js"
 import type { CreateStudentInput, GuardianInput, ListStudentsQuery, UpdateStudentInput } from "./student.schema.js"
@@ -93,6 +98,9 @@ export async function createStudent(
 
   try {
     const created = await prisma.$transaction(async (tx) => {
+      // Lock the session before any roster-affecting write so a concurrent
+      // verify/calendar/placement writer serializes after this admission.
+      await lockSessionForUpdate(tx, { schoolId, academicSessionId: session.id })
       const school = await tx.school.update({
         where: { id: schoolId },
         data: { admissionCounter: { increment: 1 } },
@@ -128,13 +136,27 @@ export async function createStudent(
         },
       })
 
-      await tx.studentEnrollment.create({
+      const enrollment = await tx.studentEnrollment.create({
         data: {
           studentId: student.id,
           academicSessionId: session.id,
           classId,
           ...(sectionId ? { sectionId } : {}),
         },
+      })
+
+      // First placement period, effective from the admission date (docs §7).
+      await createInitialPeriod(tx, {
+        schoolId,
+        studentId: student.id,
+        academicSessionId: session.id,
+        enrollmentId: enrollment.id,
+        classId,
+        sectionId,
+        effectiveFrom: admissionDate,
+        source: "AUTHORED",
+        actorId: actor.id,
+        auditActor,
       })
 
       const guardianRows: Guardian[] = []
@@ -204,7 +226,8 @@ export async function updateStudent(
     if (wantsPlacementChange) {
       const session = await resolveActiveSession(prisma, schoolId)
       const resolved = await resolveClassAndSection(prisma, schoolId, classId!, sectionId)
-      await tx.studentEnrollment.upsert({
+      await lockSessionForUpdate(tx, { schoolId, academicSessionId: session.id })
+      const enrollment = await tx.studentEnrollment.upsert({
         where: { studentId_academicSessionId: { studentId: id, academicSessionId: session.id } },
         update: { classId: resolved.classId, sectionId: resolved.sectionId },
         create: {
@@ -214,6 +237,28 @@ export async function updateStudent(
           ...(resolved.sectionId ? { sectionId: resolved.sectionId } : {}),
         },
       })
+
+      // Placement change is a close/open of the authoritative period history
+      // (docs §7), never an in-place overwrite of the current period.
+      const studentRow = await tx.student.findUnique({
+        where: { id },
+        select: { admissionDate: true },
+      })
+      await recordPlacementChange(
+        tx,
+        {
+          schoolId,
+          studentId: id,
+          academicSessionId: session.id,
+          enrollmentId: enrollment.id,
+          classId: resolved.classId,
+          sectionId: resolved.sectionId,
+          changeDate: startOfTodayUtc(),
+          fallbackEffectiveFrom: studentRow?.admissionDate ?? startOfTodayUtc(),
+          source: "AUTHORED",
+        },
+        auditActor,
+      )
     }
 
     const data: Prisma.StudentUncheckedUpdateInput = { updatedBy: actor.id }

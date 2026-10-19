@@ -27,6 +27,17 @@ export interface AttendanceRecordListResult {
   total: number
 }
 
+/**
+ * Result of a bulk mark. `marked` is the historical contract (kept unchanged);
+ * `requested` and `skipped` are additive so partial failures are surfaced to the
+ * caller instead of being silently swallowed.
+ */
+export interface BulkMarkAttendanceResult {
+  marked: number
+  requested: number
+  skipped: number
+}
+
 export interface AttendanceRecordListQuery {
   academicSessionId?: string
   classId?: string

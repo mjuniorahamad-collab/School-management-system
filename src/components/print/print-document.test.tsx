@@ -217,6 +217,70 @@ describe("PrintLetterhead branding resolution", () => {
   })
 })
 
+describe("PrintDocument frozen identity override", () => {
+  const frozen: BrandingResponse = {
+    schoolName: "Frozen High School",
+    tagline: "Frozen tagline",
+    schoolShortName: "FHS",
+    contactPhone: "+1 555 0100",
+    contactEmail: "office@frozen.example",
+    addressLine1: "1 Frozen Street",
+    addressLine2: null,
+    city: "Frozentown",
+    state: "FS",
+    postalCode: "0001",
+    country: "Frozenland",
+  }
+
+  it("uses the frozen identity for the letterhead and footer when one is provided", () => {
+    // The default path still resolves live branding; the override must win so a
+    // historical document never prints the tenant's current name.
+    brandingMock.data = loadedBranding()
+    const { container } = render(
+      <PrintDocument title="Annual Report Card" identity={frozen}>
+        <p>Body</p>
+      </PrintDocument>,
+    )
+
+    expect(container.querySelector(".print-document-school-name")?.textContent).toBe(
+      "Frozen High School",
+    )
+    expect(container.querySelector(".print-document-footer")?.textContent).toContain(
+      "Frozen High School",
+    )
+    expect(container.textContent).not.toContain("Bright Future International School")
+    expect(container.textContent).toContain("Frozen tagline")
+    expect(container.textContent).toContain("1 Frozen Street")
+  })
+
+  it("derives the monogram from the frozen short identity", () => {
+    brandingMock.data = loadedBranding({ schoolShortName: "BFIS" })
+    const { container } = render(
+      <PrintDocument title="Annual Report Card" identity={frozen}>
+        <p>Body</p>
+      </PrintDocument>,
+    )
+
+    expect(container.querySelector(".print-document-monogram")?.textContent).toBe("FHS")
+  })
+
+  it("leaves existing default rendering unchanged when no identity is supplied", () => {
+    brandingMock.data = loadedBranding()
+    const { container } = render(
+      <PrintDocument title="Annual Report Card">
+        <p>Body</p>
+      </PrintDocument>,
+    )
+
+    expect(container.querySelector(".print-document-school-name")?.textContent).toBe(
+      "Bright Future International School",
+    )
+    expect(container.querySelector(".print-document-footer")?.textContent).toContain(
+      "Bright Future International School",
+    )
+  })
+})
+
 describe("PrintTitleBlock", () => {
   it("renders title and subtitle", () => {
     const { container } = render(<PrintTitleBlock title="Fee Invoice" subtitle="INV-1" />)

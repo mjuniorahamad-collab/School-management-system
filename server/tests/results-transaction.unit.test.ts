@@ -37,6 +37,7 @@ const EXAM_ID = "00000000-0000-4000-8000-0000000000bb"
 const SESSION_ID = "00000000-0000-4000-8000-0000000000cc"
 const CLASS_ID = "00000000-0000-4000-8000-0000000000dd"
 const EXAM_SUBJECT_ID = "00000000-0000-4000-8000-0000000000ee"
+const SUBJECT_ID = "00000000-0000-4000-8000-0000000000ee"
 const ACTOR_ID = "00000000-0000-4000-8000-0000000000ff"
 
 const MAX_MARKS = 100
@@ -159,6 +160,7 @@ function makeHarness(studentCount: number, options: { existingResults?: boolean 
         record("root", "examSubject.findFirst")
         return {
           id: EXAM_SUBJECT_ID,
+          subjectId: SUBJECT_ID,
           teacherId: null,
           subject: { code: "MAT", name: "Mathematics" },
         }
@@ -168,6 +170,14 @@ function makeHarness(studentCount: number, options: { existingResults?: boolean 
         return [
           { id: EXAM_SUBJECT_ID, maxMarks: dec(MAX_MARKS), passMarks: dec(PASS_MARKS) },
         ]
+      }),
+    },
+    // D1: core-subject lookup for NOT_APPLICABLE validation. Empty scheme set
+    // (no report-card scheme) keeps every subject non-core.
+    reportCardScheme: {
+      findFirst: vi.fn(async () => {
+        record("root", "reportCardScheme.findFirst")
+        return null
       }),
     },
     studentEnrollment: {
@@ -209,8 +219,8 @@ function makeHarness(studentCount: number, options: { existingResults?: boolean 
     const text = sql.text
     const bindings = sql.values
     if (text.includes('INSERT INTO "ExamMark"')) {
-      // 14 bound columns per row.
-      recorder.upsertedMarks.push({ bindings, rows: Math.floor(bindings.length / 14) })
+      // 15 bound columns per row (status added by D1).
+      recorder.upsertedMarks.push({ bindings, rows: Math.floor(bindings.length / 15) })
     } else if (text.includes('UPDATE "ExamResult"') && text.includes("totalObtained")) {
       // 8 bound columns per row.
       recorder.aggregatedResults.push({ bindings, rows: Math.floor(bindings.length / 8) })

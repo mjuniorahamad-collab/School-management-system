@@ -58,6 +58,12 @@ export interface AttendanceBulkMarkPayload {
   }>
 }
 
+export interface BulkMarkAttendanceResult {
+  marked: number
+  requested: number
+  skipped: number
+}
+
 export interface AttendanceSummaryQuery {
   academicSessionId: string
   classId: string

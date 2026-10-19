@@ -1,9 +1,11 @@
 import { Prisma } from "@prisma/client"
 import { badRequestError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import { lockSessionForUpdate } from "../../lib/db-locks.js"
 import { buildAdmissionApplicationNumber } from "../../lib/id-generators.js"
 import type { AuthUser } from "../../types/auth.js"
 import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
+import { createInitialPeriod } from "../enrollment-history/enrollment-history.service.js"
 import { buildAdmissionNumber } from "../students/admission-number.js"
 import {
   resolveActiveSession,
@@ -358,6 +360,8 @@ export async function convertAdmission(
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      // Serialize with attendance/placement/calendar writers for this session.
+      await lockSessionForUpdate(tx, { schoolId, academicSessionId: session.id })
       const school = await tx.school.update({
         where: { id: schoolId },
         data: { admissionCounter: { increment: 1 } },
@@ -396,13 +400,30 @@ export async function convertAdmission(
         },
       })
 
-      await tx.studentEnrollment.create({
+      const enrollment = await tx.studentEnrollment.create({
         data: {
           studentId: student.id,
           academicSessionId: session.id,
           classId,
           ...(sectionId ? { sectionId } : {}),
         },
+      })
+
+      // First placement period, effective from the admission date (docs §7).
+      const admittedAt = new Date(student.admissionDate)
+      await createInitialPeriod(tx, {
+        schoolId,
+        studentId: student.id,
+        academicSessionId: session.id,
+        enrollmentId: enrollment.id,
+        classId,
+        sectionId,
+        effectiveFrom: new Date(
+          Date.UTC(admittedAt.getUTCFullYear(), admittedAt.getUTCMonth(), admittedAt.getUTCDate()),
+        ),
+        source: "AUTHORED",
+        actorId: actor.id,
+        auditActor,
       })
 
       const existingGuardian = await tx.guardian.findFirst({

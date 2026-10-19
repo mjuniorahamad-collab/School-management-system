@@ -305,6 +305,7 @@ describe("print documents use the scale instead of hand-written units", () => {
     "src/components/transport/RoutePassengerListPrintDocument.tsx",
     "src/components/timetable/TimetablePrintDocument.tsx",
     "src/components/examinations/ExamSchedulePrintDocument.tsx",
+    "src/components/reportCards/ReportCardPrintDocument.tsx",
     "src/components/results/ResultSheetPrintDocument.tsx",
     "src/components/students/StudentProfilePrintDocument.tsx",
   ]

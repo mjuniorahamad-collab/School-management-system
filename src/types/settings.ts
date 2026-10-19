@@ -82,7 +82,25 @@ export interface SchoolSettings {
   feeDefaultDueDay?: number
   feeEnableOnlinePayments?: boolean
   feeConcessionSelfApproval?: ConcessionSelfApprovalPolicy
+  requireReportCardPdfArchive?: boolean
+  reportCardSignatories?: ReportCardSignatory[]
 }
+
+/**
+ * One configured report-card signatory. Mirrors `ReportCardSignatory` in
+ * server/src/lib/school-settings.ts. Both fields are school-authored free text;
+ * at least one signatory is required before a report card can be generated.
+ */
+export interface ReportCardSignatory {
+  role: string
+  name: string
+}
+
+/** `SchoolSetting.key` that stores the JSON-encoded signatory list. */
+export const REPORT_CARD_SIGNATORIES_SETTING_KEY = "reportCardSignatories"
+
+/** Upper bound on configured signatories. Mirrors the server constant. */
+export const MAX_REPORT_CARD_SIGNATORIES = 4
 
 export interface SettingsResponse {
   school: { id: string; name: string; code: string | null }

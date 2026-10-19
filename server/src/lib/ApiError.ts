@@ -9,6 +9,17 @@ export const INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
 export const ACCOUNT_DISABLED = "ACCOUNT_DISABLED"
 export const STORAGE_ERROR = "STORAGE_ERROR"
 export const ATTENDANCE_EXISTS = "ATTENDANCE_EXISTS"
+export const ATTENDANCE_REGISTER_LOCKED = "ATTENDANCE_REGISTER_LOCKED"
+export const REPORT_CARD_DRAFT_EXISTS = "REPORT_CARD_DRAFT_EXISTS"
+export const REPORT_CARD_INVALID_STATE = "REPORT_CARD_INVALID_STATE"
+export const REPORT_CARD_NOT_PUBLISHABLE = "REPORT_CARD_NOT_PUBLISHABLE"
+export const REPORT_CARD_REISSUE_REASON_REQUIRED = "REPORT_CARD_REISSUE_REASON_REQUIRED"
+export const REPORT_CARD_ARCHIVE_REQUIRED = "REPORT_CARD_ARCHIVE_REQUIRED"
+export const REPORT_CARD_ARCHIVE_MISMATCH = "REPORT_CARD_ARCHIVE_MISMATCH"
+export const REPORT_CARD_ARCHIVE_EXISTS = "REPORT_CARD_ARCHIVE_EXISTS"
+export const REPORT_CARD_INVALID_PDF = "REPORT_CARD_INVALID_PDF"
+export const REPORT_CARD_SIGNATORIES_REQUIRED = "REPORT_CARD_SIGNATORIES_REQUIRED"
+export const REPORT_CARD_SIGNATORIES_INVALID = "REPORT_CARD_SIGNATORIES_INVALID"
 
 /**
  * Error thrown by services/controllers for expected, client-relevant failures.
@@ -76,4 +87,16 @@ export function attendanceExistsError(
   message = "Attendance already marked for this student on this date",
 ): ApiError {
   return new ApiError(409, ATTENDANCE_EXISTS, message)
+}
+
+/**
+ * A SUBMITTED or VERIFIED register is immutable: its records may only change
+ * after the register is reopened by the audited calendar/placement correction
+ * workflow (docs/academic-calendar.md §8). Rejecting the write keeps a verified
+ * register consistent with the reported attendance.
+ */
+export function attendanceRegisterLockedError(
+  message = "This attendance register is submitted or verified; reopen it to make changes",
+): ApiError {
+  return new ApiError(409, ATTENDANCE_REGISTER_LOCKED, message)
 }

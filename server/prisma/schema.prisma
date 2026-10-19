@@ -11,7 +11,9 @@
 //   ExamMark, FeeStructure, FeeStructureItem, FeeInvoice, FeeInstallment,
 //   Conversation, ConversationParticipant, Message, LibraryBook,
 //   LibraryCopy, LibraryLoan, TransportVehicle, TransportRoute,
-//   TransportStop, TransportDriver, TransportAssignment.
+//   TransportStop, TransportDriver, TransportAssignment,
+//   AcademicCalendar, CalendarDay, StudentEnrollmentPeriod,
+//   AttendanceRegister.
 //
 // Decisions:
 //   - `User` is a pure authentication identity (email + password hash). Domain
@@ -146,51 +148,59 @@ model School {
   createdAt                   DateTime     @default(now())
   updatedAt                   DateTime     @updatedAt
 
-  users                 User[]
-  memberships           TenantMembership[]
-  academicSessions      AcademicSession[]
-  classes               Class[]
-  subjects              Subject[]
-  students              Student[]
-  guardians             Guardian[]
-  teachers              Teacher[]
-  staff                 Staff[]
-  periodSlots           PeriodSlot[]
-  feeHeads              FeeHead[]
-  feeStructures         FeeStructure[]
-  feeInvoices           FeeInvoice[]
-  feeInstallments       FeeInstallment[]
-  feePayments           FeePayment[]
-  feeReceipts           FeeReceipt[]
-  feeAdjustments        FeeAdjustment[]
-  examTypes             ExamType[]
-  gradingBands          GradingBand[]
-  schoolSettings        SchoolSetting[]
-  notices               Notice[]
-  events                Event[]
-  admissionApplications AdmissionApplication[]
-  timetableEntries      TimetableEntry[]
-  attendanceRecords     AttendanceRecord[]
-  homeworks             Homework[]
-  assignments           Assignment[]
-  homeworkSubmissions   HomeworkSubmission[]
-  assignmentSubmissions AssignmentSubmission[]
-  exams                 Exam[]
-  examResults           ExamResult[]
-  examMarks             ExamMark[]
-  auditLogs             AuditLog[]
-  conversations         Conversation[]
-  messages              Message[]
-  notifications         Notification[]
-  libraryBooks          LibraryBook[]
-  libraryCopies         LibraryCopy[]
-  libraryLoans          LibraryLoan[]
-  transportVehicles     TransportVehicle[]
-  transportRoutes       TransportRoute[]
-  transportStops        TransportStop[]
-  transportDrivers      TransportDriver[]
-  transportAssignments  TransportAssignment[]
+  users                  User[]
+  memberships            TenantMembership[]
+  academicSessions       AcademicSession[]
+  classes                Class[]
+  subjects               Subject[]
+  students               Student[]
+  guardians              Guardian[]
+  teachers               Teacher[]
+  staff                  Staff[]
+  periodSlots            PeriodSlot[]
+  feeHeads               FeeHead[]
+  feeStructures          FeeStructure[]
+  feeInvoices            FeeInvoice[]
+  feeInstallments        FeeInstallment[]
+  feePayments            FeePayment[]
+  feeReceipts            FeeReceipt[]
+  feeAdjustments         FeeAdjustment[]
+  examTypes              ExamType[]
+  gradingBands           GradingBand[]
+  schoolSettings         SchoolSetting[]
+  notices                Notice[]
+  events                 Event[]
+  admissionApplications  AdmissionApplication[]
+  timetableEntries       TimetableEntry[]
+  attendanceRecords      AttendanceRecord[]
+  homeworks              Homework[]
+  assignments            Assignment[]
+  homeworkSubmissions    HomeworkSubmission[]
+  assignmentSubmissions  AssignmentSubmission[]
+  exams                  Exam[]
+  examResults            ExamResult[]
+  examMarks              ExamMark[]
+  auditLogs              AuditLog[]
+  conversations          Conversation[]
+  messages               Message[]
+  notifications          Notification[]
+  libraryBooks           LibraryBook[]
+  libraryCopies          LibraryCopy[]
+  libraryLoans           LibraryLoan[]
+  transportVehicles      TransportVehicle[]
+  transportRoutes        TransportRoute[]
+  transportStops         TransportStop[]
+  transportDrivers       TransportDriver[]
+  transportAssignments   TransportAssignment[]
   portalActivationTokens PortalActivationToken[]
+
+  academicCalendars        AcademicCalendar[]
+  calendarDays             CalendarDay[]
+  enrollmentPeriods        StudentEnrollmentPeriod[]
+  attendanceRegisters      AttendanceRegister[]
+  reportCardSchemes        ReportCardScheme[]
+  reportCards              ReportCard[]
+  reportCardArtifacts      ReportCardArtifact[]
 }
 
 model AcademicSession {
@@ -218,6 +228,13 @@ model AcademicSession {
   exams                 Exam[]
 
   transportAssignments TransportAssignment[]
+
+  calendars             AcademicCalendar[]
+  calendarDays          CalendarDay[]
+  enrollmentPeriods     StudentEnrollmentPeriod[]
+  attendanceRegisters   AttendanceRegister[]
+  reportCardSchemes     ReportCardScheme[]
+  reportCards           ReportCard[]
 
   @@unique([schoolId, code])
   @@index([schoolId, status])
@@ -250,13 +267,13 @@ model User {
   studentProfile  Student?  @relation("StudentUser")
   guardianProfile Guardian? @relation("GuardianUser")
 
-  createdNotices     Notice[]     @relation("NoticeCreatedBy")
-  updatedNotices     Notice[]     @relation("NoticeUpdatedBy")
-  createdEvents      Event[]      @relation("EventCreatedBy")
-  updatedEvents      Event[]      @relation("EventUpdatedBy")
-  createdFeeInvoices FeeInvoice[] @relation("FeeInvoiceCreatedBy")
-  recordedPayments   FeePayment[] @relation("PaymentRecordedBy")
-  issuedReceipts     FeeReceipt[] @relation("ReceiptIssuedBy")
+  createdNotices        Notice[]        @relation("NoticeCreatedBy")
+  updatedNotices        Notice[]        @relation("NoticeUpdatedBy")
+  createdEvents         Event[]         @relation("EventCreatedBy")
+  updatedEvents         Event[]         @relation("EventUpdatedBy")
+  createdFeeInvoices    FeeInvoice[]    @relation("FeeInvoiceCreatedBy")
+  recordedPayments      FeePayment[]    @relation("PaymentRecordedBy")
+  issuedReceipts        FeeReceipt[]    @relation("ReceiptIssuedBy")
   requestedAdjustments  FeeAdjustment[] @relation("FeeAdjustmentRequestedBy")
   approvedAdjustments   FeeAdjustment[] @relation("FeeAdjustmentApprovedBy")
   reversedAdjustments   FeeAdjustment[] @relation("FeeAdjustmentReversedBy")
@@ -293,6 +310,22 @@ model User {
   transportDrivers TransportDriver[]
 
   portalActivationTokens PortalActivationToken[]
+
+  confirmedEnrollmentPeriods   StudentEnrollmentPeriod[] @relation("EnrollmentPeriodConfirmedBy")
+  createdEnrollmentPeriods     StudentEnrollmentPeriod[] @relation("EnrollmentPeriodCreatedBy")
+  updatedEnrollmentPeriods     StudentEnrollmentPeriod[] @relation("EnrollmentPeriodUpdatedBy")
+  confirmedAcademicCalendars   AcademicCalendar[]        @relation("AcademicCalendarConfirmedBy")
+  confirmedCalendarDays        CalendarDay[]             @relation("CalendarDayConfirmedBy")
+  createdCalendarDays          CalendarDay[]             @relation("CalendarDayCreatedBy")
+  submittedAttendanceRegisters AttendanceRegister[]      @relation("AttendanceRegisterSubmittedBy")
+  verifiedAttendanceRegisters  AttendanceRegister[]      @relation("AttendanceRegisterVerifiedBy")
+
+  createdReportCardSchemes     ReportCardScheme[]     @relation("ReportCardSchemeCreatedBy")
+  updatedReportCardSchemes     ReportCardScheme[]     @relation("ReportCardSchemeUpdatedBy")
+  createdReportCards           ReportCard[]           @relation("ReportCardCreatedBy")
+  publishedReportCards         ReportCard[]           @relation("ReportCardPublishedBy")
+  uploadedReportCardArtifacts  ReportCardArtifact[]    @relation("ReportCardArtifactUploadedBy")
+  confirmedReportCardArtifacts ReportCardArtifact[]    @relation("ReportCardArtifactConfirmedBy")
 
   @@index([schoolId])
   @@index([email])
@@ -430,6 +463,11 @@ model Class {
 
   exams Exam[]
 
+  enrollmentPeriods   StudentEnrollmentPeriod[]
+  attendanceRegisters AttendanceRegister[]
+  reportCardSchemes   ReportCardScheme[]
+  reportCards         ReportCard[]
+
   @@unique([schoolId, name])
   @@index([schoolId])
 }
@@ -452,6 +490,11 @@ model Section {
 
   exams Exam[]
 
+  enrollmentPeriods   StudentEnrollmentPeriod[]
+  attendanceRegisters AttendanceRegister[]
+  reportCardSchemes   ReportCardScheme[]
+  reportCards         ReportCard[]
+
   @@unique([classId, name])
   @@index([classId])
 }
@@ -473,6 +516,7 @@ model Subject {
   assignments      Assignment[]
 
   examSubjects ExamSubject[]
+  reportCardSubjects ReportCardSubject[]
 
   @@unique([schoolId, code])
   @@index([schoolId])
@@ -535,15 +579,15 @@ model StudentGuardian {
 //     portal account revokes its outstanding tokens in the same transaction.
 // ────────────────────────────────────────────────────────────────────────────
 model PortalActivationToken {
-  id        String   @id @default(uuid())
-  tokenHash String   @unique
+  id        String    @id @default(uuid())
+  tokenHash String    @unique
   schoolId  String
   userId    String
-  purpose   String   @default("PARENT")
+  purpose   String    @default("PARENT")
   expiresAt DateTime
   usedAt    DateTime?
   revokedAt DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -571,6 +615,9 @@ model Student {
   state                 String?
   postalCode            String?
   admissionDate         DateTime      @db.Date
+  // School-exit fact only (withdrawal / transfer-out / graduation); null while
+  // currently enrolled. Never rewrites StudentEnrollmentPeriod boundaries.
+  leftAt                DateTime?     @db.Date
   emergencyContactName  String?
   emergencyContactPhone String?
   // Optional link to a login account (future student portal).
@@ -597,6 +644,8 @@ model Student {
   examResults ExamResult[]
 
   transportAssignments TransportAssignment[]
+  enrollmentPeriods    StudentEnrollmentPeriod[]
+  reportCards          ReportCard[]
 
   @@unique([schoolId, admissionNumber])
   @@index([schoolId, status])
@@ -622,6 +671,8 @@ model StudentEnrollment {
   feeInvoices           FeeInvoice[]
 
   examResults ExamResult[]
+  periods     StudentEnrollmentPeriod[]
+  reportCards ReportCard[]
 
   @@unique([studentId, academicSessionId])
   @@index([academicSessionId])
@@ -1073,38 +1124,38 @@ enum FeeAdjustmentStatus {
 }
 
 model FeeAdjustment {
-  id                    String               @id @default(uuid())
-  schoolId              String
-  studentId             String
-  sessionId             String
+  id                     String              @id @default(uuid())
+  schoolId               String
+  studentId              String
+  sessionId              String
   // Null while the concession targets a (student, session) invoice not yet
   // generated (pending pre-invoice adjustments attach at generation time).
-  invoiceId             String?
-  kind                  FeeAdjustmentKind
+  invoiceId              String?
+  kind                   FeeAdjustmentKind
   // Raw request value: the rupee amount (FIXED_AMOUNT) or the percent number
   // (PERCENTAGE, e.g. 10.00).
-  value                 Decimal              @db.Decimal(12, 2)
+  value                  Decimal             @db.Decimal(12, 2)
   // Frozen monetary snapshot computed at approval (money-rounded); never
   // recomputed. For PERCENTAGE this is round(grossAmount × value/100).
-  computedAmount        Decimal              @db.Decimal(12, 2)
-  status                FeeAdjustmentStatus  @default(REQUESTED)
-  reason                String?
+  computedAmount         Decimal             @db.Decimal(12, 2)
+  status                 FeeAdjustmentStatus @default(REQUESTED)
+  reason                 String?
   // Per-installment reduction snapshot written at approval: which installments
   // absorbed the concession and by how much, so reversal restores exact amounts.
   installmentApplication Json?
   // Override provenance: set ONLY when a SUPER_ADMIN explicitly overrides
   // (SUPER_ADMIN-only, and allowed solely for another user's request — never
   // self-approval, regardless of the school's self-approval policy).
-  overridden            Boolean              @default(false)
-  overriddenById        String?
-  overrideReason        String?
-  requestedById         String?
-  approvedById          String?
-  reversedById          String?
+  overridden             Boolean             @default(false)
+  overriddenById         String?
+  overrideReason         String?
+  requestedById          String?
+  approvedById           String?
+  reversedById           String?
   // Companion reversal record → the original adjustment it undoes.
-  reversalOfId          String?
-  createdAt             DateTime             @default(now())
-  updatedAt             DateTime             @updatedAt
+  reversalOfId           String?
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
 
   school       School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   student      Student         @relation(fields: [studentId], references: [id], onDelete: Restrict)
@@ -1138,6 +1189,8 @@ model ExamType {
   school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
 
   exams Exam[]
+  reportCardSchemeExams     ReportCardSchemeExam[]
+  reportCardExamResolutions ReportCardExamResolution[]
 
   @@unique([schoolId, code])
   @@index([schoolId])
@@ -1719,20 +1772,21 @@ model ExamResult {
 }
 
 model ExamMark {
-  id            String    @id @default(uuid())
+  id            String     @id @default(uuid())
   schoolId      String
   examResultId  String
   examSubjectId String
-  obtainedMarks Decimal?  @db.Decimal(7, 2)
-  isAbsent      Boolean   @default(false)
-  percentage    Decimal?  @db.Decimal(5, 2)
+  obtainedMarks Decimal?   @db.Decimal(7, 2)
+  isAbsent      Boolean    @default(false)
+  status        MarkStatus @default(SCORED)
+  percentage    Decimal?   @db.Decimal(5, 2)
   grade         String?
   isPass        Boolean?
   remarks       String?
   enteredBy     String?
   enteredAt     DateTime?
   updatedBy     String?
-  updatedAt     DateTime  @updatedAt
+  updatedAt     DateTime   @updatedAt
 
   school        School      @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   examResult    ExamResult  @relation(fields: [examResultId], references: [id], onDelete: Cascade)
@@ -1849,6 +1903,11 @@ enum AuditEntityType {
   TRANSPORT_ASSIGNMENT
   REPORT
   FEE_ADJUSTMENT
+  ACADEMIC_CALENDAR
+  CALENDAR_DAY
+  STUDENT_ENROLLMENT_PERIOD
+  ATTENDANCE_REGISTER
+  REPORT_CARD_SCHEME
 }
 
 model AuditLog {
@@ -2300,4 +2359,418 @@ model TransportAssignment {
   @@index([schoolId, studentId, status])
   @@index([studentId, academicSessionId, direction, status])
   @@index([schoolId, routeId])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Academic calendar, enrollment placement history & attendance registers
+// (Phase 1A data-model foundation for the Report Card milestone).
+//
+// Decisions (full design in docs/academic-calendar.md):
+//   - `Provenance` distinguishes seeded (untrusted until confirmed) from
+//     authored data. An unconfirmed seeded date/period is UNKNOWN, never
+//     assumed instructional.
+//   - `StudentEnrollmentPeriod` replaces in-place placement overwrites with an
+//     append-only history. Boundaries are half-open [effectiveFrom, effectiveTo)
+//     so consecutive periods meet at a shared date without overlapping;
+//     `effectiveTo = NULL` is the open/current period. Overlap is prevented at
+//     the database level by an EXCLUDE USING gist constraint (raw SQL; requires
+//     btree_gist) plus transactional service validation.
+//   - `Student.leftAt` records the school-exit fact ONLY; it never rewrites a
+//     period boundary.
+//   - `AcademicCalendar` + `CalendarDay` author the instructional-day model
+//     (INSTRUCTIONAL / NON_INSTRUCTIONAL / UNKNOWN by omission).
+//     `workingWeekdays` is a canonical `Weekday` enum set (MON..SUN).
+//   - `AttendanceRegister` tracks register completeness. `scopeKey` is a
+//     non-null discriminator ('__CLASS__' for class-level, the section id for
+//     section-level) so the unique constraint deduplicates both scopes safely
+//     despite nullable `sectionId`; a CHECK constraint enforces the match.
+//     Server-derived only — a client-supplied key is never trusted.
+// ────────────────────────────────────────────────────────────────────────────
+
+enum Provenance {
+  SEEDED
+  AUTHORED
+}
+
+enum Weekday {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum CalendarDayKind {
+  INSTRUCTIONAL
+  NON_INSTRUCTIONAL
+}
+
+enum AttendanceRegisterStatus {
+  OPEN
+  SUBMITTED
+  VERIFIED
+}
+
+model AcademicCalendar {
+  id                String     @id @default(uuid())
+  schoolId          String
+  academicSessionId String
+  // Canonical MON..SUN set; validated in the service layer.
+  workingWeekdays   Weekday[]
+  provenance        Provenance @default(SEEDED)
+  confirmedAt       DateTime?
+  confirmedByUserId String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  school          School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicSession AcademicSession @relation(fields: [academicSessionId], references: [id], onDelete: Cascade)
+  confirmedByUser User?           @relation("AcademicCalendarConfirmedBy", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
+
+  // At most one calendar per (school, session) is enforced by the composite
+  // unique below; Prisma models the relation as one-to-many.
+  @@unique([schoolId, academicSessionId])
+  @@index([schoolId])
+}
+
+model CalendarDay {
+  id                 String          @id @default(uuid())
+  schoolId           String
+  academicSessionId  String
+  date               DateTime        @db.Date
+  kind               CalendarDayKind
+  // 1.00 (full) | 0.50 (half) | 0.00 (closed); DB CHECK enforces the domain.
+  instructionalValue Decimal         @db.Decimal(3, 2)
+  label              String?
+  note               String?
+  source             Provenance      @default(SEEDED)
+  confirmedAt        DateTime?
+  confirmedByUserId  String?
+  createdByUserId    String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  school          School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicSession AcademicSession @relation(fields: [academicSessionId], references: [id], onDelete: Cascade)
+  confirmedByUser User?           @relation("CalendarDayConfirmedBy", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
+  createdByUser   User?           @relation("CalendarDayCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([schoolId, academicSessionId, date])
+  @@index([schoolId, academicSessionId])
+}
+
+model StudentEnrollmentPeriod {
+  id                String     @id @default(uuid())
+  schoolId          String
+  studentId         String
+  academicSessionId String
+  enrollmentId      String
+  classId           String
+  sectionId         String?
+  // Habitable interval is half-open [effectiveFrom, effectiveTo). NULL
+  // effectiveTo is the open/current period.
+  effectiveFrom     DateTime   @db.Date
+  effectiveTo       DateTime?  @db.Date
+  source            Provenance @default(SEEDED)
+  confirmedAt       DateTime?
+  confirmedByUserId String?
+  createdByUserId   String?
+  updatedByUserId   String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  school          School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student         Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  academicSession AcademicSession   @relation(fields: [academicSessionId], references: [id], onDelete: Cascade)
+  enrollment      StudentEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  class           Class             @relation(fields: [classId], references: [id], onDelete: Cascade)
+  section         Section?          @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  confirmedByUser User?             @relation("EnrollmentPeriodConfirmedBy", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
+  createdByUser   User?             @relation("EnrollmentPeriodCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedByUser   User?             @relation("EnrollmentPeriodUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  // Overlap prevention on the natural key (schoolId, studentId,
+  // academicSessionId, daterange) is added as an EXCLUDE USING gist constraint in
+  // SQL (Prisma cannot model exclusion constraints). A student has at most one
+  // placement period covering any given day in a session.
+  @@index([schoolId, academicSessionId, classId, sectionId, effectiveFrom, effectiveTo])
+  @@index([enrollmentId])
+}
+
+model AttendanceRegister {
+  id                String                   @id @default(uuid())
+  schoolId          String
+  academicSessionId String
+  classId           String
+  sectionId         String?
+  // Non-null discriminator: '__CLASS__' when sectionId IS NULL, else sectionId.
+  // Enforced by a DB CHECK constraint; server-set, never client-supplied.
+  scopeKey          String
+  date              DateTime                 @db.Date
+  status            AttendanceRegisterStatus @default(OPEN)
+  expectedCount     Int
+  submittedAt       DateTime?
+  submittedByUserId String?
+  verifiedAt        DateTime?
+  verifiedByUserId  String?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+
+  school          School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicSession AcademicSession @relation(fields: [academicSessionId], references: [id], onDelete: Cascade)
+  class           Class           @relation(fields: [classId], references: [id], onDelete: Cascade)
+  section         Section?        @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  submittedByUser User?           @relation("AttendanceRegisterSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: SetNull)
+  verifiedByUser  User?           @relation("AttendanceRegisterVerifiedBy", fields: [verifiedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([schoolId, academicSessionId, classId, scopeKey, date])
+  @@index([schoolId, date])
+  @@index([schoolId, academicSessionId, status])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Report Card (docs/report-card.md)
+// ────────────────────────────────────────────────────────────────────────────
+
+enum MarkStatus {
+  SCORED
+  ABSENT
+  NOT_APPLICABLE
+  PENDING
+}
+
+enum ReportCardAggregationPolicy {
+  RAW
+  PERCENTAGE_WEIGHTED
+}
+
+enum ReportCardAbsencePolicy {
+  EXCLUDE_AND_REVIEW
+  TREAT_SUBJECT_AS_FAILED
+}
+
+enum ReportCardOverallPassMode {
+  ALL_SUBJECTS
+  PERCENT_AND_MAX_FAILED
+  CORE_SUBJECTS_AND_PERCENT
+}
+
+enum ReportCardPublicationMode {
+  REQUIRE_DECISION
+}
+
+enum ReportCardExamResolutionStatus {
+  RESOLVED
+  NOT_FINAL
+  AMBIGUOUS
+  MISSING
+  OUT_OF_SCOPE
+}
+
+enum ReportCardExamResolutionReason {
+  CROSS_SECTION_DUPLICATE
+  CLASS_CHANGE
+  NO_RESULT_ROW
+  NO_EXAM_INSTANCE
+  IMPLICIT
+}
+
+enum ReportCardSubjectOutcome {
+  PASS
+  FAIL
+  NOT_APPLICABLE
+  REQUIRES_REVIEW
+}
+
+enum ReportCardAnnualResult {
+  PASS
+  FAIL
+  UNRESOLVED
+  REQUIRES_REVIEW
+}
+
+enum ReportCardStatus {
+  DRAFT
+  PENDING_ARCHIVE
+  ISSUED
+  SUPERSEDED
+  VOID
+}
+
+enum ReportCardSubjectOutcomeReason {
+  PENDING_OR_MISSING_MARKS
+  ALL_NOT_APPLICABLE
+  ABSENT_FORCED_FAIL
+  ABSENT_EXCLUDED_REVIEW
+  WEIGHTS_UNAVAILABLE
+  SUBJECT_PASS_PERCENT_UNAVAILABLE
+}
+
+model ReportCardScheme {
+  id                        String                        @id @default(uuid())
+  schoolId                  String
+  academicSessionId         String
+  classId                   String
+  sectionId                 String?
+  scopeKey                  String
+  aggregationPolicy         ReportCardAggregationPolicy
+  absencePolicy             ReportCardAbsencePolicy       @default(EXCLUDE_AND_REVIEW)
+  overallPassMode           ReportCardOverallPassMode
+  annualSubjectPassPercent  Decimal                       @db.Decimal(5, 2)
+  overallPassPercent        Decimal?                      @db.Decimal(5, 2)
+  maxFailedSubjects         Int?
+  coreSubjectIds            String[]
+  publicationMode           ReportCardPublicationMode     @default(REQUIRE_DECISION)
+  createdByUserId           String?
+  updatedByUserId           String?
+  createdAt                 DateTime                      @default(now())
+  updatedAt                 DateTime                      @updatedAt
+
+  school          School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicSession AcademicSession @relation(fields: [academicSessionId], references: [id], onDelete: Cascade)
+  class           Class           @relation(fields: [classId], references: [id], onDelete: Cascade)
+  section         Section?        @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  createdByUser   User?           @relation("ReportCardSchemeCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedByUser   User?           @relation("ReportCardSchemeUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  exams ReportCardSchemeExam[]
+
+  @@unique([schoolId, academicSessionId, classId, scopeKey])
+  @@index([schoolId, academicSessionId])
+  @@index([schoolId, classId, sectionId])
+}
+
+model ReportCardSchemeExam {
+  id         String   @id @default(uuid())
+  schemeId   String
+  examTypeId String
+  weight     Decimal  @db.Decimal(6, 4)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  scheme   ReportCardScheme @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  examType ExamType         @relation(fields: [examTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([schemeId, examTypeId])
+  @@index([schemeId])
+  @@index([examTypeId])
+}
+
+model ReportCard {
+  id                      String                @id @default(uuid())
+  schoolId                String
+  academicSessionId       String
+  studentId               String
+  enrollmentId            String
+  classId                 String
+  sectionId               String?
+  version                 Int
+  status                  ReportCardStatus      @default(DRAFT)
+  overallResult           ReportCardAnnualResult?
+  overallPercentage       Decimal?              @db.Decimal(5, 2)
+  failedCount             Int?
+  resolvedSubjectCount    Int?
+  requiresReview          Boolean               @default(false)
+  snapshot                Json?
+  snapshotHash            String?
+  publishedAt             DateTime?
+  issuedAt                DateTime?
+  supersedesReportCardId  String?
+  reissueReason           String?
+  createdByUserId         String?
+  publishedByUserId       String?
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+
+  school          School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicSession AcademicSession @relation(fields: [academicSessionId], references: [id], onDelete: Cascade)
+  student         Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  enrollment      StudentEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  class           Class           @relation(fields: [classId], references: [id], onDelete: Cascade)
+  section         Section?        @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  supersedes      ReportCard?     @relation("ReportCardSupersedes", fields: [supersedesReportCardId], references: [id], onDelete: SetNull)
+  supersededBy    ReportCard[]    @relation("ReportCardSupersedes")
+  createdByUser   User?           @relation("ReportCardCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  publishedByUser User?           @relation("ReportCardPublishedBy", fields: [publishedByUserId], references: [id], onDelete: SetNull)
+
+  subjects        ReportCardSubject[]
+  examResolutions ReportCardExamResolution[]
+  artifacts       ReportCardArtifact[]
+
+  @@unique([schoolId, academicSessionId, studentId, version])
+  @@index([schoolId, academicSessionId])
+  @@index([schoolId, studentId])
+  @@index([schoolId, status])
+}
+
+model ReportCardSubject {
+  id                String                       @id @default(uuid())
+  reportCardId      String
+  subjectId         String
+  isCore            Boolean                      @default(false)
+  outcome           ReportCardSubjectOutcome
+  percentage        Decimal?                     @db.Decimal(5, 2)
+  grade             String?
+  reason            ReportCardSubjectOutcomeReason?
+  includedExamIds   String[]
+  excludedExamIds   String[]
+  absentExamIds     String[]
+  createdAt         DateTime                     @default(now())
+  updatedAt         DateTime                     @updatedAt
+
+  reportCard ReportCard @relation(fields: [reportCardId], references: [id], onDelete: Cascade)
+  subject    Subject    @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([reportCardId, subjectId])
+  @@index([reportCardId])
+  @@index([subjectId])
+}
+
+model ReportCardExamResolution {
+  id              String                            @id @default(uuid())
+  reportCardId    String
+  examTypeId      String
+  examId          String?
+  status          ReportCardExamResolutionStatus
+  reason          ReportCardExamResolutionReason?
+  createdAt       DateTime                          @default(now())
+  updatedAt       DateTime                          @updatedAt
+
+  reportCard ReportCard @relation(fields: [reportCardId], references: [id], onDelete: Cascade)
+  examType   ExamType   @relation(fields: [examTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([reportCardId, examTypeId])
+  @@index([reportCardId])
+  @@index([examTypeId])
+}
+
+model ReportCardArtifact {
+  id                 String   @id @default(uuid())
+  schoolId           String
+  reportCardId       String
+  version            Int
+  snapshotHash       String
+  storageKey         String
+  sha256             String
+  byteSize           Int
+  filename           String?
+  uploadedByUserId   String?
+  uploadedAt         DateTime @default(now())
+  confirmedByUserId  String?
+  confirmedAt        DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  school          School     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  reportCard      ReportCard @relation(fields: [reportCardId], references: [id], onDelete: Cascade)
+  uploadedByUser  User?      @relation("ReportCardArtifactUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  confirmedByUser User?      @relation("ReportCardArtifactConfirmedBy", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([reportCardId, version])
+  @@unique([reportCardId])
+  @@index([reportCardId])
+  @@index([schoolId])
 }

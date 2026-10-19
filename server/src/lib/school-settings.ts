@@ -62,6 +62,253 @@ export function parseConcessionSelfApproval(raw: string | null | undefined): Con
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Report-card PDF archive policy
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * School-scoped policy for whether a report card may be ISSUED without an
+ * archived, human-confirmed PDF artifact (docs/report-card.md §9, §9a, §13).
+ *
+ * Like the concession policy above, this is a business rule rather than a
+ * capability, so it is deliberately NOT a permission code — it only gates the
+ * issue step behind an artifact that the actor already needs
+ * `report-cards:archive` to create and `report-cards:publish` to act on.
+ *
+ * - `true` (DEFAULT) — archiving required: a card stays `PENDING_ARCHIVE`
+ *   until a validated, confirmed artifact is bound to its frozen version (§9.5).
+ * - `false` — snapshot-only issue (§9a): issuance does not wait on a PDF, the
+ *   issued record must be labelled as having no archived PDF, and the system
+ *   must never claim one was archived.
+ */
+export const REQUIRE_REPORT_CARD_PDF_ARCHIVE_SETTING_KEY = "requireReportCardPdfArchive"
+
+/**
+ * Fail-SAFE default. Archiving is required by default (§9:222), so a school
+ * that has never saved the key, saved it blank, or has a hand-edited/corrupt
+ * value all read through to the strict default — a card is never issued without
+ * a valid archive because of a missing setting.
+ */
+export const DEFAULT_REQUIRE_REPORT_CARD_PDF_ARCHIVE = true
+
+/**
+ * Parses a stored `SchoolSetting` value into the archive policy. Anything other
+ * than an explicit, unambiguous `false` resolves to `true` (archive required).
+ */
+export function parseRequireReportCardPdfArchive(raw: string | null | undefined): boolean {
+  if (raw === null || raw === undefined) return DEFAULT_REQUIRE_REPORT_CARD_PDF_ARCHIVE
+  const normalized = raw.trim().toLowerCase()
+  if (normalized === "false") return false
+  if (normalized === "true") return true
+  return DEFAULT_REQUIRE_REPORT_CARD_PDF_ARCHIVE
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Report-card signatory configuration
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One configured report-card signatory: a free-text role label and the name of
+ * the person who will sign in that role. Both are school-authored values, never
+ * derived from a Teacher/Staff row (no "class teacher" or "principal" role is
+ * modelled), so the snapshot can only ever freeze what the school configured.
+ */
+export interface ReportCardSignatory {
+  role: string
+  name: string
+}
+
+/**
+ * `SchoolSetting.key` that stores the JSON-encoded signatory list. Kept in this
+ * module (not the settings module) so the settings reader and the report-card
+ * generation service resolve the key, the shape and the validation identically.
+ */
+export const REPORT_CARD_SIGNATORIES_SETTING_KEY = "reportCardSignatories"
+
+/** Upper bound on configured signatories (a report card prints only a few). */
+export const MAX_REPORT_CARD_SIGNATORIES = 4
+
+/**
+ * Canonical parse of the stored signatory value. Unlike the policy parsers above
+ * this has no valid default: an absent/blank key (`unset`), an empty list
+ * (`empty`) and a malformed list (`corrupt`) are all distinct, because the
+ * report-card generation gate must fail closed on every one of them without
+ * inventing a signatory.
+ */
+export type ReportCardSignatoriesParse =
+  | { status: "unset" }
+  | { status: "empty" }
+  | { status: "valid"; signatories: ReportCardSignatory[] }
+  | { status: "corrupt" }
+
+export function parseReportCardSignatories(
+  raw: string | null | undefined,
+): ReportCardSignatoriesParse {
+  if (raw === null || raw === undefined || raw.trim() === "") return { status: "unset" }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return { status: "corrupt" }
+  }
+  if (!Array.isArray(parsed)) return { status: "corrupt" }
+  if (parsed.length === 0) return { status: "empty" }
+  if (parsed.length > MAX_REPORT_CARD_SIGNATORIES) return { status: "corrupt" }
+
+  const signatories: ReportCardSignatory[] = []
+  for (const entry of parsed) {
+    if (typeof entry !== "object" || entry === null) return { status: "corrupt" }
+    const candidate = entry as Record<string, unknown>
+    const role = typeof candidate.role === "string" ? candidate.role.trim() : ""
+    const name = typeof candidate.name === "string" ? candidate.name.trim() : ""
+    if (role === "" || name === "") return { status: "corrupt" }
+    signatories.push({ role, name })
+  }
+  return { status: "valid", signatories }
+}
+
+/**
+ * Backward-compatible read for Settings/branding consumers: a blank, empty or
+ * malformed stored value reads back as an empty list so the settings payload is
+ * never a hard error. The report-card generation gate uses the strict parse
+ * above and fails closed; this lenient projection is display-only.
+ */
+export function parseReportCardSignatoriesForRead(
+  raw: string | null | undefined,
+): ReportCardSignatory[] {
+  const parsed = parseReportCardSignatories(raw)
+  return parsed.status === "valid" ? parsed.signatories : []
+}
+
+/**
+ * Reads and strictly parses the school's signatory configuration. This is the
+ * single authoritative resolution point — callers pass the tenant they already
+ * resolved, never a client-supplied value.
+ */
+export async function readReportCardSignatories(
+  client: SettingClient,
+  schoolId: string,
+): Promise<ReportCardSignatoriesParse> {
+  return parseReportCardSignatories(
+    await readSchoolSetting(client, schoolId, REPORT_CARD_SIGNATORIES_SETTING_KEY),
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// School identity / branding projection (shared by Settings and report cards)
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The school identity block the print letterhead and the report-card snapshot
+ * both render. It is a projection of the canonical `SchoolSetting` key/value
+ * rows (never an independent source), with the editable name falling back to the
+ * tenant's `School.name`. Every optional field is `string | null` so "not set"
+ * is distinguishable from a real value.
+ */
+export interface SchoolBranding {
+  schoolName: string
+  tagline: string | null
+  schoolShortName: string | null
+  contactPhone: string | null
+  contactEmail: string | null
+  addressLine1: string | null
+  addressLine2: string | null
+  city: string | null
+  state: string | null
+  postalCode: string | null
+  country: string | null
+}
+
+/** Canonical branding keys projected by {@link projectBranding}. */
+export const BRANDING_SETTING_KEYS = [
+  "schoolName",
+  "schoolShortName",
+  "tagline",
+  "contactPhone",
+  "contactEmail",
+  "addressLine1",
+  "addressLine2",
+  "city",
+  "state",
+  "postalCode",
+  "country",
+] as const
+
+/**
+ * The key/value store has no null: an unset key reads back as `""`. Branding
+ * speaks `null` for "this tenant has not set it"; a whitespace-only value counts
+ * as unset.
+ */
+export function brandingText(value: string | null | undefined): string | null {
+  const trimmed = value?.trim()
+  return trimmed === undefined || trimmed === "" ? null : trimmed
+}
+
+/**
+ * Pure projection of the stored branding rows (plus the tenant's `School.name`
+ * fallback for an empty school name). Shared by the settings `getBranding`
+ * projection and the report-card generation freeze so both can never disagree.
+ */
+export function projectBranding(
+  stored: ReadonlyMap<string, string>,
+  schoolName: string,
+): SchoolBranding {
+  const storedName = (stored.get("schoolName") ?? "").trim()
+  return {
+    schoolName: storedName === "" ? schoolName : storedName,
+    tagline: brandingText(stored.get("tagline")),
+    schoolShortName: brandingText(stored.get("schoolShortName")),
+    contactPhone: brandingText(stored.get("contactPhone")),
+    contactEmail: brandingText(stored.get("contactEmail")),
+    addressLine1: brandingText(stored.get("addressLine1")),
+    addressLine2: brandingText(stored.get("addressLine2")),
+    city: brandingText(stored.get("city")),
+    state: brandingText(stored.get("state")),
+    postalCode: brandingText(stored.get("postalCode")),
+    country: brandingText(stored.get("country")),
+  }
+}
+
+type BrandingClient =
+  | Prisma.TransactionClient
+  | {
+      school: {
+        findUnique(args: {
+          where: { id: string }
+          select: { name: true }
+        }): Promise<{ name: string } | null>
+      }
+      schoolSetting: {
+        findMany(args: {
+          where: { schoolId: string }
+          select: { key: true; value: true }
+        }): Promise<Array<{ key: string; value: string }>>
+      }
+    }
+
+/**
+ * Reads the tenant's branding projection inside or outside a transaction. The
+ * single authoritative resolution point for the school identity frozen into a
+ * report card and rendered by the print letterhead.
+ */
+export async function readBranding(
+  client: BrandingClient,
+  schoolId: string,
+): Promise<SchoolBranding> {
+  const [school, rows] = await Promise.all([
+    client.school.findUnique({ where: { id: schoolId }, select: { name: true } }),
+    client.schoolSetting.findMany({
+      where: { schoolId },
+      select: { key: true, value: true },
+    }),
+  ])
+  if (!school) throw new Error("Authenticated school not found")
+
+  const stored = new Map(rows.map((row) => [row.key, row.value]))
+  return projectBranding(stored, school.name)
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Generic single-row reader
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -102,5 +349,20 @@ export async function readConcessionSelfApprovalPolicy(
 ): Promise<ConcessionSelfApprovalPolicy> {
   return parseConcessionSelfApproval(
     await readSchoolSetting(client, schoolId, CONCESSION_SELF_APPROVAL_SETTING_KEY),
+  )
+}
+
+/**
+ * Reads the school's report-card PDF archive policy, already parsed and
+ * fail-safe. This is the single authoritative resolution point for the policy —
+ * the report-card service calls it inside the issuance transaction so the
+ * artifact gate is evaluated against the same committed state being mutated.
+ */
+export async function readRequireReportCardPdfArchive(
+  client: SettingClient,
+  schoolId: string,
+): Promise<boolean> {
+  return parseRequireReportCardPdfArchive(
+    await readSchoolSetting(client, schoolId, REQUIRE_REPORT_CARD_PDF_ARCHIVE_SETTING_KEY),
   )
 }

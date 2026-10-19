@@ -2,12 +2,24 @@ import { getPrisma } from "../../lib/database.js"
 import {
   CONCESSION_SELF_APPROVAL_SETTING_KEY,
   DEFAULT_CONCESSION_SELF_APPROVAL,
+  DEFAULT_REQUIRE_REPORT_CARD_PDF_ARCHIVE,
+  REQUIRE_REPORT_CARD_PDF_ARCHIVE_SETTING_KEY,
+  brandingText,
   parseConcessionSelfApproval,
+  parseReportCardSignatoriesForRead,
+  parseRequireReportCardPdfArchive,
+  readBranding,
 } from "../../lib/school-settings.js"
 import type { AuthUser } from "../../types/auth.js"
 import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import type { SchoolSettings, UpdateSettingsInput } from "./setting.schema.js"
 import type { BrandingResponse, SettingsResponse } from "./setting.types.js"
+
+// Re-exported so existing consumers (the print letterhead, branding tests) keep
+// importing the projection helper from the settings seam; the implementation is
+// owned by lib/school-settings.ts so the settings module and the report-card
+// generation service share one normalisation rule.
+export { brandingText }
 
 type PrismaClient = NonNullable<Awaited<ReturnType<typeof getPrisma>>>
 
@@ -35,6 +47,7 @@ const SETTING_DEFAULTS: Record<keyof SchoolSettings, string> = {
   attendanceWorkdays: "Mon,Tue,Wed,Thu,Fri",
   attendanceDefaultMarking: "daily",
   attendanceLateGraceMinutes: "5",
+  reportCardSignatories: "[]",
   timetablePeriodsPerDay: "6",
   timetableStartTime: "08:00",
   timetableEndTime: "14:00",
@@ -46,6 +59,9 @@ const SETTING_DEFAULTS: Record<keyof SchoolSettings, string> = {
   // Fails SAFE: a school that never saved this key requires independent
   // approval, which is exactly the behavior that predates the setting.
   feeConcessionSelfApproval: DEFAULT_CONCESSION_SELF_APPROVAL,
+  // Fails SAFE: a school that never saved this key must archive a PDF before a
+  // report card may be issued (docs/report-card.md §9 default).
+  requireReportCardPdfArchive: String(DEFAULT_REQUIRE_REPORT_CARD_PDF_ARCHIVE),
 }
 
 async function requirePrisma(): Promise<PrismaClient> {
@@ -61,6 +77,12 @@ async function requirePrisma(): Promise<PrismaClient> {
  */
 const SETTING_PARSERS: Partial<Record<keyof SchoolSettings, (raw: string) => unknown>> = {
   feeConcessionSelfApproval: parseConcessionSelfApproval,
+  // Not left to the generic boolean coercion (`raw === "true"`): a blank or
+  // hand-edited row must fail safe to "archive required", never to "optional".
+  requireReportCardPdfArchive: parseRequireReportCardPdfArchive,
+  // A JSON-encoded list cannot use the generic string coercion: a corrupt row
+  // must read back as an empty list for display rather than leak the raw JSON.
+  reportCardSignatories: parseReportCardSignatoriesForRead,
 }
 
 /** Coerces a stored string back to the typed value for the seeded defaults. */
@@ -92,6 +114,7 @@ const schoolSettingsSchemaShape: Record<keyof SchoolSettings, "string" | "number
   attendanceWorkdays: "string",
   attendanceDefaultMarking: "string",
   attendanceLateGraceMinutes: "number",
+  reportCardSignatories: "string",
   timetablePeriodsPerDay: "number",
   timetableStartTime: "string",
   timetableEndTime: "string",
@@ -101,6 +124,9 @@ const schoolSettingsSchemaShape: Record<keyof SchoolSettings, "string" | "number
   feeDefaultDueDay: "number",
   feeEnableOnlinePayments: "boolean",
   feeConcessionSelfApproval: "string",
+  // Kept as "string" so `SETTING_PARSERS` (which fails safe) is the only path
+  // that interprets it; `coerceSetting` returns a parser's result unchanged.
+  requireReportCardPdfArchive: "string",
 }
 
 /** Reads all tenant-scoped settings for a school, merging defaults over DB rows. */
@@ -128,44 +154,52 @@ export async function getSettings(schoolId: string): Promise<SettingsResponse> {
 }
 
 /**
- * The key/value store has no null: an unset key reads back as `""`. The branding
- * contract speaks `null` for "this tenant has not set it", so a client can tell
- * unset from a real value without sniffing for blank strings. A whitespace-only
- * value counts as unset.
- */
-export function brandingText(value: string | undefined): string | null {
-  const trimmed = value?.trim()
-  return trimmed === undefined || trimmed === "" ? null : trimmed
-}
-
-/**
  * Branding projection for the application chrome and the print letterhead.
- * Presolves the same canonical `SchoolSetting` rows `getSettings` reads
- * (falling back to the tenant's `School.name` when the editable name is empty)
- * so any authenticated user of the tenant — including portal-only roles without
- * `settings:view` — can render the school's identity. Always scoped to the
- * caller's own school.
+ * Reads the canonical `SchoolSetting` rows (falling back to the tenant's
+ * `School.name` when the editable name is empty) so any authenticated user of
+ * the tenant — including portal-only roles without `settings:view` — can render
+ * the school's identity. Always scoped to the caller's own school.
+ *
+ * Delegates to `readBranding` so the app chrome and the frozen report-card
+ * snapshot project the identical shape from the identical rows.
  *
  * Only identity and the public contact block are projected. This is not a
  * settings dump: grading, attendance, timetable, fee, currency and colour
  * settings stay behind the `settings:view` route.
  */
 export async function getBranding(schoolId: string): Promise<BrandingResponse> {
-  const { settings, school } = await getSettings(schoolId)
-  return {
-    schoolName: settings.schoolName.trim() || school.name,
-    tagline: brandingText(settings.tagline),
-    schoolShortName: brandingText(settings.schoolShortName),
-    contactPhone: brandingText(settings.contactPhone),
-    contactEmail: brandingText(settings.contactEmail),
-    addressLine1: brandingText(settings.addressLine1),
-    addressLine2: brandingText(settings.addressLine2),
-    city: brandingText(settings.city),
-    state: brandingText(settings.state),
-    postalCode: brandingText(settings.postalCode),
-    country: brandingText(settings.country),
-  }
+  const prisma = await requirePrisma()
+  return readBranding(prisma, schoolId)
 }
+
+/**
+ * Settings whose before/after value is recorded in the audit metadata (rather
+ * than just their name), because changing one changes what the system allows:
+ *
+ * - `feeConcessionSelfApproval` waives segregation of duties for self-approvals.
+ * - `requireReportCardPdfArchive` changes whether a report card may be ISSUED
+ *   with no archived PDF (docs/report-card.md §9/§9a).
+ *
+ * `field` is the metadata key each change is reported under, so the
+ * pre-existing `policyChange` contract stays byte-identical for the concession
+ * setting and the archive policy is reported alongside it under its own name.
+ */
+const TRACKED_POLICY_SETTINGS: {
+  key: keyof SchoolSettings
+  field: "policyChange" | "pdfArchivePolicyChange"
+  fallback: string
+}[] = [
+  {
+    key: CONCESSION_SELF_APPROVAL_SETTING_KEY,
+    field: "policyChange",
+    fallback: DEFAULT_CONCESSION_SELF_APPROVAL,
+  },
+  {
+    key: REQUIRE_REPORT_CARD_PDF_ARCHIVE_SETTING_KEY,
+    field: "pdfArchivePolicyChange",
+    fallback: String(DEFAULT_REQUIRE_REPORT_CARD_PDF_ARCHIVE),
+  },
+]
 
 /** Persists the provided settings into the tenant-scoped key/value store. */
 export async function updateSettings(
@@ -178,15 +212,17 @@ export async function updateSettings(
 
   const entries = Object.entries(input) as [keyof SchoolSettings, unknown][]
   await prisma.$transaction(async (tx) => {
-    // Read the concession self-approval policy's current value inside the same
-    // transaction as the write, so the audit row records a real before/after.
-    let policyChange: { previousValue: string; newValue: string } | null = null
-    if (entries.some(([key]) => key === "feeConcessionSelfApproval")) {
+    // Read each tracked policy's current value inside the same transaction as
+    // the write, so the audit row records a real before/after committed by this
+    // same transaction (a value read outside it could be stale).
+    const pendingChanges = new Map<string, { previousValue: string; newValue: string }>()
+    for (const { key, fallback } of TRACKED_POLICY_SETTINGS) {
+      if (!entries.some(([entryKey]) => entryKey === key)) continue
       const existing = await tx.schoolSetting.findUnique({
-        where: { schoolId_key: { schoolId, key: CONCESSION_SELF_APPROVAL_SETTING_KEY } },
+        where: { schoolId_key: { schoolId, key } },
         select: { value: true },
       })
-      policyChange = { previousValue: existing?.value ?? DEFAULT_CONCESSION_SELF_APPROVAL, newValue: "" }
+      pendingChanges.set(key, { previousValue: existing?.value ?? fallback, newValue: "" })
     }
 
     for (const [key, value] of entries) {
@@ -194,12 +230,21 @@ export async function updateSettings(
       // Scoped to the policy key: a payload may carry many settings at once, and
       // a later unrelated entry must not overwrite the recorded new value with
       // its own stored representation.
-      if (policyChange && key === CONCESSION_SELF_APPROVAL_SETTING_KEY) policyChange.newValue = raw
+      const pending = pendingChanges.get(key)
+      if (pending) pending.newValue = raw
       await tx.schoolSetting.upsert({
         where: { schoolId_key: { schoolId, key } },
         update: { value: raw },
         create: { schoolId, key, value: raw },
       })
+    }
+
+    const metadata: Record<string, unknown> = { keys: entries.map(([key]) => key) }
+    for (const { key, field } of TRACKED_POLICY_SETTINGS) {
+      const change = pendingChanges.get(key)
+      if (change) {
+        metadata[field] = { key, previousValue: change.previousValue, newValue: change.newValue }
+      }
     }
 
     await recordAudit(tx, {
@@ -212,21 +257,9 @@ export async function updateSettings(
       entityType: "SCHOOL_SETTING",
       entityId: null,
       summary: `Updated ${entries.length} school setting(s)`,
-      metadata: {
-        keys: entries.map(([key]) => key),
-        // The self-approval policy waives segregation of duties, so its
-        // before/after value is recorded. Every other key keeps recording names
-        // only, so no new setting values enter the audit trail.
-        ...(policyChange
-          ? {
-              policyChange: {
-                key: CONCESSION_SELF_APPROVAL_SETTING_KEY,
-                previousValue: policyChange.previousValue,
-                newValue: policyChange.newValue,
-              },
-            }
-          : {}),
-      },
+      // Only the tracked policies above contribute values; every other key is
+      // recorded by name, so no routine setting values enter the audit trail.
+      metadata,
     })
   })
 
@@ -236,5 +269,6 @@ export async function updateSettings(
 function settingToStored(value: unknown): string {
   if (typeof value === "boolean") return value ? "true" : "false"
   if (typeof value === "number") return String(value)
+  if (Array.isArray(value)) return JSON.stringify(value)
   return String(value ?? "")
 }
