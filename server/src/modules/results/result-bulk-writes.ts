@@ -25,7 +25,8 @@ import { Prisma } from "@prisma/client"
  *  2. An untyped `VALUES` list column containing a NULL is inferred as `text`
  *     by PostgreSQL, and assigning text to `DECIMAL`/`BOOLEAN` fails. Every
  *     non-text column in the UPDATE statements is therefore explicitly CAST.
- *     (The plain INSERT needs no casts: its types come from the target table.)
+ *     (The INSERT infers most column types from the target table, but its enum
+ *     `status` column is explicitly cast because Prisma binds it as `text`.)
  *
  * All data values are bound parameters via `Prisma.sql` — never interpolated —
  * and Decimals are passed as `Prisma.Decimal` so scale/exactness is preserved.
@@ -85,7 +86,7 @@ export async function bulkUpsertExamMarks(
       (row) =>
         Prisma.sql`(${randomUUID()}, ${params.schoolId}, ${row.examResultId}, ${
           row.examSubjectId
-        }, ${row.obtainedMarks}, ${row.isAbsent}, ${row.status}, ${row.percentage}, ${row.grade}, ${
+        }, ${row.obtainedMarks}, ${row.isAbsent}, ${row.status}::"MarkStatus", ${row.percentage}, ${row.grade}, ${
           row.isPass
         }, ${row.remarks}, ${params.enteredBy}, ${now}, ${params.enteredBy}, ${now})`,
     ),
