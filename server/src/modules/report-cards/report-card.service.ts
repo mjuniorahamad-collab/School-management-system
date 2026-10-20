@@ -173,7 +173,12 @@ async function findScheme(
 export async function generateReportCard(input: GenerateReportCardInput, actor: ReportCardActor) {
   const prisma = await requirePrisma()
   try {
-    return await prisma.$transaction((tx) => generateInTransaction(tx, input, actor))
+    // Generation resolves exams, aggregates marks/grades and freezes the v2
+    // snapshot in one interactive transaction. Prisma's 5 s default is too tight
+    // for a full class (P2028), so the budget is raised rather than split.
+    return await prisma.$transaction((tx) => generateInTransaction(tx, input, actor), {
+      timeout: 20_000,
+    })
   } catch (error) {
     // Concurrent generations for the same (school, session, student) serialize
     // on the enrollment anchor inside the transaction, so the loser re-reads the

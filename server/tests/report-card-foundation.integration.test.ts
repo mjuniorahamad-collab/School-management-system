@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createApp } from "../src/app.js"
 import { hashPassword } from "../src/auth/password.js"
 import { REPORT_CARD_DRAFT_EXISTS } from "../src/lib/ApiError.js"
+import { REPORT_CARD_SIGNATORIES_SETTING_KEY } from "../src/lib/school-settings.js"
 import { SUPER_ADMIN_ROLE } from "../src/permissions/permissions.js"
 import {
   enrollmentPeriodOverlapError,
@@ -387,6 +388,13 @@ describe.skipIf(!TEST_DATABASE_URL)("Report-card foundation concurrency (integra
       })
       await prisma.gradingBand.create({
         data: { schoolId: fixtures.schoolId, minPercent: 0, maxPercent: 100, grade: "A" },
+      })
+      await prisma.schoolSetting.create({
+        data: {
+          schoolId: fixtures.schoolId,
+          key: REPORT_CARD_SIGNATORIES_SETTING_KEY,
+          value: JSON.stringify([{ role: "Principal", name: "Dr. Margaret Hamilton" }]),
+        },
       })
       await prisma.reportCardScheme.create({
         data: {
