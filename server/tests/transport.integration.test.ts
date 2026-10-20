@@ -875,7 +875,16 @@ async function resetAllTables(prisma: PrismaClient): Promise<void> {
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeStructure" CASCADE')
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeHead" CASCADE')
   await prisma.timetableEntry.deleteMany()
+  // AttendanceRegister.sectionId is ON DELETE SET NULL, and a DB CHECK requires
+  // that a row with a NULL sectionId carry the '__CLASS__' scopeKey. Deleting a
+  // section without first clearing section-scoped registers rewrites them to NULL
+  // while scopeKey still holds the old section id, so the CHECK fails and the
+  // whole reset aborts. Clear registers (and calendars) before sections/sessions,
+  // mirroring report-card-foundation.integration.test.ts.
+  await prisma.attendanceRegister.deleteMany()
   await prisma.attendanceRecord.deleteMany()
+  await prisma.calendarDay.deleteMany()
+  await prisma.academicCalendar.deleteMany()
   await prisma.periodSlot.deleteMany()
   await prisma.studentGuardian.deleteMany()
   await prisma.studentEnrollment.deleteMany()
