@@ -506,6 +506,9 @@ async function resetAllTables(prisma: PrismaClient): Promise<void> {
   await prisma.userRole.deleteMany()
   await prisma.tenantMembership.deleteMany()
   await prisma.academicSession.deleteMany()
+  // Section deletes SET NULL AttendanceRegister.sectionId, but the scopeKey DB
+  // CHECK requires '__CLASS__' on NULL-section rows — registers must go first.
+  await prisma.attendanceRegister.deleteMany()
   await prisma.section.deleteMany()
   await prisma.class.deleteMany()
   await prisma.user.deleteMany()

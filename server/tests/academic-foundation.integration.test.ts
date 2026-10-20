@@ -106,6 +106,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Academic Foundation API (integration)", () 
 
   afterEach(async () => {
     // Clean up records created during tests (order respects foreign keys).
+    // Section deletes SET NULL AttendanceRegister.sectionId, but the scopeKey DB
+    // CHECK requires '__CLASS__' on NULL-section rows — registers must go first.
+    await prisma.attendanceRegister.deleteMany()
     await prisma.section.deleteMany({ where: { classId: { not: fixtures.fixtureClassId } } })
     await prisma.class.deleteMany({ where: { id: { not: fixtures.fixtureClassId } } })
     await prisma.academicSession.deleteMany({
@@ -336,6 +339,9 @@ async function resetAllTables(prisma: PrismaClient): Promise<void> {
   await prisma.studentEnrollment.deleteMany()
   await prisma.student.deleteMany()
   await prisma.guardian.deleteMany()
+  // Section deletes SET NULL AttendanceRegister.sectionId, but the scopeKey DB
+  // CHECK requires '__CLASS__' on NULL-section rows — registers must go first.
+  await prisma.attendanceRegister.deleteMany()
   await prisma.section.deleteMany()
   await prisma.class.deleteMany()
   await prisma.session.deleteMany()
