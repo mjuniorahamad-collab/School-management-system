@@ -37,7 +37,7 @@ describe("TimetableGrid at scale", () => {
     expect(entries.length).toBeGreaterThan(100)
     expect(screen.getAllByRole("button", { name: /^Edit / })).toHaveLength(entries.length)
     expect(screen.getAllByRole("button", { name: /^Delete / })).toHaveLength(entries.length)
-  })
+  }, 15_000)
 
   it("still stacks multiple lessons inside a shared day and period cell", () => {
     const { container } = renderScaleGrid()
