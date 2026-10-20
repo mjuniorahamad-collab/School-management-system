@@ -22,6 +22,7 @@
     "db:migrate": "prisma migrate dev --schema server/prisma/schema.prisma",
     "db:seed": "prisma db seed --schema server/prisma/schema.prisma",
     "bootstrap:production": "tsx server/prisma/bootstrap-production.ts",
+    "permissions:reconcile": "tsx server/prisma/reconcile-permissions.ts",
     "timetable:scale:seed": "tsx scripts/timetable-scale-fixtures.ts seed",
     "timetable:scale:cleanup": "tsx scripts/timetable-scale-fixtures.ts cleanup",
     "db:local:start": "tsx scripts/pg-local.ts start",
