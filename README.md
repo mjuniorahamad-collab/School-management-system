@@ -44,7 +44,7 @@ server/         Express + TypeScript + Prisma (PostgreSQL) API
   src/
     config/     Typed environment (zod)
     auth/       Password scrypt, token/cookie primitives, hasPermission
-permissions/ Canonical permission catalog (115 codes, 11 roles)
+permissions/ Canonical permission catalog (119 codes, 10 roles)
     controllers/  HTTP handlers
     middleware/   requireAuth / requirePermission / error handling / 404s
     routes/       Routers mounted under /api/v1 (auth.* under /api/v1/auth)
@@ -110,7 +110,7 @@ The first real domain module, used as the template for every future module:
 - **Real, DB-backed.** Email/password login (scrypt-hashed), opaque access/refresh
   tokens stored hashed in the `Session` table, `sms.access`/`sms.refresh`
   httpOnly cookies with refresh rotation. No JWTs, no auth library, nothing fake.
-- **Roles & permissions.** 115 permission codes across 11 roles. The super admin
+- **Roles & permissions.** 119 permission codes across 10 roles. The super admin
   (SUPER_ADMIN) bypasses checks by role. Server enforces via route middleware;
   the frontend `can()` only hides UI.
 - **Sign in** at `http://localhost:5173/login`. After `npm run db:seed`, log in

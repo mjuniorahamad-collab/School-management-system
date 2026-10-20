@@ -168,7 +168,7 @@ in a maintenance window, and verify with the checks below.
 
 After the first migration is applied to a **blank** production database, run
 the bootstrap script to create the structural/master records: school, current
-academic session, the full permission catalog (115 codes), 11 roles with their
+academic session, the full permission catalog (119 codes), 10 roles with their
 grants, and the initial super admin identity.
 
 The script requires `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` to be set in

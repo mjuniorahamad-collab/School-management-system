@@ -417,8 +417,8 @@ Design decisions — follow these when extending auth:
   Errors: unauthenticated → `UNAUTHORIZED` (401); missing permission →
   `FORBIDDEN` (403).
 - **RBAC models.** `User` ↔ `UserRole` ↔ `Role` ↔ `RolePermission` ↔ `Permission`.
-  `server/src/permissions/permissions.ts` is the canonical catalog: 115 permission
-  codes across 11 roles (`SUPER_ADMIN` bypasses checks by role, never by email).
+  `server/src/permissions/permissions.ts` is the canonical catalog: 119 permission
+  codes across 10 roles (`SUPER_ADMIN` bypasses checks by role, never by email).
   `requirePermission(code)` enforces server-side as route middleware — never inside
   controllers. Frontend `can()` mirrors checks for UI hiding only; it is not a
   security boundary.

@@ -3,7 +3,7 @@
 // Creates ONLY the structural/master records required for the first real
 // school and super admin to sign in and use the application:
 //   - School (BFIS) + one ACTIVE AcademicSession
-//   - the full permission catalog (115), the 11 roles, and their role grants
+//   - the full permission catalog, the 10 roles, and their role grants
 //   - the initial Super Admin identity: User + UserRole + ACTIVE TenantMembership
 //
 // It NEVER creates demo/business records (no students, guardians, enrollments,
