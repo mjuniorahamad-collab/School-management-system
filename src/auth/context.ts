@@ -1,5 +1,6 @@
 import { createContext } from "react"
 import type { AuthMembership, AuthUser, LoginInput } from "@/auth/types"
+import type { PermissionCode } from "@/types/permissions"
 
 export const ME_QUERY_KEY = ["auth", "me"] as const
 
@@ -8,7 +9,7 @@ export interface AuthContextValue {
   isLoading: boolean
   isError: boolean
   refetch: () => void
-  can: (permission: string) => boolean
+  can: (permission: PermissionCode) => boolean
   signIn: (input: LoginInput) => Promise<AuthUser>
   signOut: () => Promise<void>
   /** Schools the user can switch to. Empty for single-tenant users. */

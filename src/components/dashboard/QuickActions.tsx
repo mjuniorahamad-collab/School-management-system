@@ -14,13 +14,14 @@ import { PaymentFormDialog } from "@/components/payments/PaymentFormDialog"
 import { NoticeFormDialog } from "@/components/notices/NoticeFormDialog"
 import { cn } from "@/lib/utils"
 import type { LucideIcon } from "lucide-react"
+import type { PermissionCode } from "@/types/permissions"
 
 interface QuickAction {
   id: string
   label: string
   description: string
   icon: LucideIcon
-  requiredPermission: string
+  requiredPermission: PermissionCode
 }
 
 const QUICK_ACTIONS: QuickAction[] = [

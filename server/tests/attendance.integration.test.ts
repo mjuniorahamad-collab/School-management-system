@@ -29,6 +29,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Attendance API (integration)", () => {
   let prisma: PrismaClient
   const adminAgent = request.agent(app)
   const teacherAgent = request.agent(app)
+  const markerAgent = request.agent(app)
 
   const studentA = { id: "", admissionNumber: "" }
   const studentB = { id: "", admissionNumber: "" }
@@ -123,6 +124,37 @@ describe.skipIf(!TEST_DATABASE_URL)("Attendance API (integration)", () => {
     const superAdminRole = await prisma.role.create({ data: { name: SUPER_ADMIN_ROLE, description: "Test super admin" } })
     const teacherRole = await prisma.role.create({ data: { name: "TEACHER", description: "Test teacher" } })
 
+    // A role that may mark and VIEW attendance but may not DELETE it. The
+    // delete guard is a separate permission, so the actor must hold
+    // `attendance:delete` explicitly.
+    const markerRole = await prisma.role.create({ data: { name: "ATTENDANCE_MARKER", description: "Test marker" } })
+    const viewPermission = await prisma.permission.create({
+      data: { code: "attendance:view", resource: "attendance", action: "view" },
+    })
+    const createPermission = await prisma.permission.create({
+      data: { code: "attendance:create", resource: "attendance", action: "create" },
+    })
+    await prisma.rolePermission.createMany({
+      data: [
+        { roleId: markerRole.id, permissionId: viewPermission.id },
+        { roleId: markerRole.id, permissionId: createPermission.id },
+      ],
+    })
+
+    const markerUser = await prisma.user.create({
+      data: {
+        schoolId: school.id,
+        name: "Attendance Marker",
+        email: "attendance.marker@example.com",
+        passwordHash: hashPassword("marker-secret-123"),
+        status: "ACTIVE",
+        roles: { create: [{ role: { connect: { id: markerRole.id } } }] },
+      },
+    })
+    await prisma.tenantMembership.create({
+      data: { userId: markerUser.id, schoolId: school.id, roleId: markerRole.id, status: "ACTIVE" },
+    })
+
     const adminUser = await prisma.user.create({
       data: {
         schoolId: school.id,
@@ -153,6 +185,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Attendance API (integration)", () => {
 
     await login(adminAgent, "attendance.admin@example.com", fixtures.adminPassword)
     await login(teacherAgent, "attendance.teacher@example.com", "teacher-secret-123")
+    await login(markerAgent, "attendance.marker@example.com", "marker-secret-123")
   })
 
   afterEach(async () => {
@@ -371,40 +404,62 @@ describe.skipIf(!TEST_DATABASE_URL)("Attendance API (integration)", () => {
       expect(res.status).toBe(404)
     })
   })
+
+  describe("delete permission", () => {
+    it("denies deletion to a role without attendance:delete", async () => {
+      const created = await adminAgent.post("/api/v1/attendance").send(markPayload(studentA.id))
+      const id = created.body.data.id
+
+      // The marker role may view and mark attendance, but not delete it.
+      const view = await markerAgent.get(`/api/v1/attendance/${id}`)
+      expect(view.status).toBe(200)
+
+      const res = await markerAgent.delete(`/api/v1/attendance/${id}`)
+      expect(res.status).toBe(403)
+      expect(res.body.error.code).toBe("FORBIDDEN")
+
+      const after = await adminAgent.get(`/api/v1/attendance/${id}`)
+      expect(after.status).toBe(200)
+    })
+
+    it("denies deletion to a role without any attendance permission", async () => {
+      const created = await adminAgent.post("/api/v1/attendance").send(markPayload(studentA.id))
+      const id = created.body.data.id
+
+      const res = await teacherAgent.delete(`/api/v1/attendance/${id}`)
+      expect(res.status).toBe(403)
+      expect(res.body.error.code).toBe("FORBIDDEN")
+    })
+
+    it("allows deletion for a role that holds attendance:delete", async () => {
+      const created = await adminAgent.post("/api/v1/attendance").send(markPayload(studentA.id))
+      const id = created.body.data.id
+
+      const res = await adminAgent.delete(`/api/v1/attendance/${id}`)
+      expect(res.status).toBe(200)
+      expect(res.body.success).toBe(true)
+    })
+
+    it("requires an authenticated session", async () => {
+      const created = await adminAgent.post("/api/v1/attendance").send(markPayload(studentA.id))
+      const id = created.body.data.id
+
+      const res = await request(app).delete(`/api/v1/attendance/${id}`)
+      expect(res.status).toBe(401)
+      expect(res.body.error.code).toBe("UNAUTHORIZED")
+    })
+  })
 })
 
 async function resetAllTables(prisma: PrismaClient): Promise<void> {
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "AuditLog" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Message" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "ConversationParticipant" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Conversation" CASCADE')
-  await prisma.timetableEntry.deleteMany()
-  await prisma.attendanceRecord.deleteMany()
-  await prisma.periodSlot.deleteMany()
-  await prisma.studentGuardian.deleteMany()
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeInvoice" CASCADE')
-  await prisma.studentEnrollment.deleteMany()
-  await prisma.student.deleteMany()
-  await prisma.guardian.deleteMany()
-  await prisma.teacherSubject.deleteMany()
-  await prisma.teacherClass.deleteMany()
-  await prisma.staff.deleteMany()
-  await prisma.teacher.deleteMany()
-  await prisma.subject.deleteMany()
-  // Section deletes SET NULL AttendanceRegister.sectionId, but the scopeKey DB
-  // CHECK requires '__CLASS__' on NULL-section rows — registers must go first.
-  await prisma.attendanceRegister.deleteMany()
-  await prisma.section.deleteMany()
-  await prisma.class.deleteMany()
-  await prisma.session.deleteMany()
-  await prisma.userRole.deleteMany()
-  await prisma.tenantMembership.deleteMany()
-  await prisma.academicSession.deleteMany()
-  await prisma.user.deleteMany()
-  await prisma.rolePermission.deleteMany()
+  // One TRUNCATE ... CASCADE clears every school-scoped table AND the rows that
+  // RESTRICT a delete (payments, receipts, adjustments, enrolments, ...). An
+  // ordered list of DELETEs aborts as soon as a previously run suite left a
+  // Restrict child behind: the DB-backed suites share ONE test database and
+  // run one after another.
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "School" CASCADE')
   await prisma.permission.deleteMany()
   await prisma.role.deleteMany()
-  await prisma.school.deleteMany()
 }
 
 async function login(

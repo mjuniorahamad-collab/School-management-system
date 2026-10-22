@@ -259,7 +259,7 @@ export function AttendancePage() {
             isPending={recordsPending}
             isError={recordsError}
             canEdit={canEdit}
-            canDelete={can("attendance:update")}
+            canDelete={can("attendance:delete")}
             onRetry={() => void refetchRecords()}
             onEdit={(record) => setEditing(record)}
             onDelete={(record) => setDeleting(record)}

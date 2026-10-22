@@ -46,4 +46,6 @@ attendanceRouter.post(
 
 attendanceRouter.get("/:id", requirePermission("attendance:view"), getAttendanceRecordHandler)
 attendanceRouter.patch("/:id", requirePermission("attendance:update"), updateAttendanceRecordHandler)
-attendanceRouter.delete("/:id", requirePermission("attendance:update"), deleteAttendanceRecordHandler)
+// Deleting a marked record removes the audit trail of who marked what, so it
+// carries its own permission instead of reusing `attendance:update`.
+attendanceRouter.delete("/:id", requirePermission("attendance:delete"), deleteAttendanceRecordHandler)

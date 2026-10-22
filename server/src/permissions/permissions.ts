@@ -27,6 +27,11 @@ export const PERMISSION_CODES = [
   "attendance:view",
   "attendance:create",
   "attendance:update",
+  // Deleting a marked attendance record is a separate, higher-privilege action
+  // than correcting it: it removes the audit trail of who marked what. It is
+  // granted to school leadership only (SUPER_ADMIN, SCHOOL_ADMIN, PRINCIPAL) —
+  // never to TEACHER, who can mark and correct records but not remove them.
+  "attendance:delete",
   "fees:view",
   "fees:create",
   "fees:update",
@@ -222,6 +227,7 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
     ...codes("staff", [VIEW, CREATE, UPDATE]),
     ...codes("admissions", [VIEW, CREATE, UPDATE]),
     "attendance:view",
+    "attendance:delete",
     ...codes("academic-sessions", [VIEW, CREATE, UPDATE]),
     "calendar:manage",
     "enrollment:history:manage",

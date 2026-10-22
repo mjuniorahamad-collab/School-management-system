@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { PERMISSION_CODES as FRONTEND_PERMISSION_CODES } from "../../src/types/permissions.js"
 import {
   PERMISSION_CODES,
   ROLE_PERMISSIONS,
@@ -53,5 +54,19 @@ describe("permission catalog integrity (database-free)", () => {
   it("catalog codes are unique", () => {
     const unique = new Set(PERMISSION_CODES)
     expect(unique.size).toBe(PERMISSION_CODES.length)
+  })
+})
+
+describe("frontend permission mirror (database-free)", () => {
+  it("mirrors the canonical catalogue exactly", () => {
+    // The frontend cannot import the server module (separate builds, no server
+    // code in the browser bundle), so `src/types/permissions.ts` mirrors the
+    // catalogue. This test is the guard that keeps the mirror honest: a code
+    // added on one side only fails here instead of failing silently in the UI.
+    expect([...FRONTEND_PERMISSION_CODES].sort()).toEqual([...PERMISSION_CODES].sort())
+  })
+
+  it("mirrors the catalogue in the same order", () => {
+    expect([...FRONTEND_PERMISSION_CODES]).toEqual([...PERMISSION_CODES])
   })
 })

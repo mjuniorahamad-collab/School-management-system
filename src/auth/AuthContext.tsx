@@ -6,6 +6,7 @@ import { canUser } from "@/auth/can"
 import { AuthContext, ME_QUERY_KEY } from "@/auth/context"
 import type { AuthContextValue } from "@/auth/context"
 import type { LoginInput } from "@/auth/types"
+import type { PermissionCode } from "@/types/permissions"
 import { getActiveSchoolId, setActiveSchoolId } from "@/auth/activeSchool"
 import { isAuthQueryKey, resetSessionState } from "@/auth/sessionReset"
 import { fetchMe, login as loginRequest, logout as logoutRequest } from "@/services/authService"
@@ -50,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!storedIsValid) setActiveSchoolId(user.school.id)
   }, [user])
 
-  const can = useCallback((permission: string) => canUser(user, permission), [user])
+  const can = useCallback((permission: PermissionCode) => canUser(user, permission), [user])
 
   // `signIn` sets the header via the module-level active school *before* the
   // request, so login itself lands on the last-used tenant.
