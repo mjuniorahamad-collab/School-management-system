@@ -851,61 +851,14 @@ describe.skipIf(!TEST_DATABASE_URL)("Transport API (integration)", () => {
 })
 
 async function resetAllTables(prisma: PrismaClient): Promise<void> {
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "TransportAssignment" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "TransportDriver" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "TransportStop" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "TransportRoute" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "TransportVehicle" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "AuditLog" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "LibraryLoan" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "LibraryCopy" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "LibraryBook" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Message" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "ConversationParticipant" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Conversation" CASCADE')
-  // Fee rows reference enrollments (Restrict FK). Run order must be irrelevant:
-  // other suites leave the shared test DB pristine, truncate the fee stack here
-  // like every other integration suite so studentEnrollment deletes never trip
-  // feeInvoice_enrollmentId_fkey regardless of which suite ran first.
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeReceipt" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeePayment" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeInstallment" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeInvoice" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeStructureItem" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeStructure" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeHead" CASCADE')
-  await prisma.timetableEntry.deleteMany()
-  // AttendanceRegister.sectionId is ON DELETE SET NULL, and a DB CHECK requires
-  // that a row with a NULL sectionId carry the '__CLASS__' scopeKey. Deleting a
-  // section without first clearing section-scoped registers rewrites them to NULL
-  // while scopeKey still holds the old section id, so the CHECK fails and the
-  // whole reset aborts. Clear registers (and calendars) before sections/sessions,
-  // mirroring report-card-foundation.integration.test.ts.
-  await prisma.attendanceRegister.deleteMany()
-  await prisma.attendanceRecord.deleteMany()
-  await prisma.calendarDay.deleteMany()
-  await prisma.academicCalendar.deleteMany()
-  await prisma.periodSlot.deleteMany()
-  await prisma.studentGuardian.deleteMany()
-  await prisma.studentEnrollment.deleteMany()
-  await prisma.student.deleteMany()
-  await prisma.guardian.deleteMany()
-  await prisma.teacherSubject.deleteMany()
-  await prisma.teacherClass.deleteMany()
-  await prisma.staff.deleteMany()
-  await prisma.teacher.deleteMany()
-  await prisma.subject.deleteMany()
-  await prisma.section.deleteMany()
-  await prisma.class.deleteMany()
-  await prisma.session.deleteMany()
-  await prisma.userRole.deleteMany()
-  await prisma.tenantMembership.deleteMany()
-  await prisma.academicSession.deleteMany()
-  await prisma.user.deleteMany()
-  await prisma.rolePermission.deleteMany()
+  // One TRUNCATE ... CASCADE clears every school-scoped table AND the rows that
+  // RESTRICT a delete (payments, receipts, adjustments, enrolments, ...). An
+  // ordered list of DELETEs aborts as soon as a previously run suite left a
+  // Restrict child behind: the DB-backed suites share ONE test database and
+  // run one after another.
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "School" CASCADE')
   await prisma.permission.deleteMany()
   await prisma.role.deleteMany()
-  await prisma.school.deleteMany()
 }
 
 async function login(

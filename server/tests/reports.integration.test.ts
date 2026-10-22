@@ -924,41 +924,14 @@ describe.skipIf(!TEST_DATABASE_URL)("Reports API (integration)", () => {
 })
 
 async function resetAllTables(prisma: PrismaClient): Promise<void> {
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "AuditLog" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeReceipt" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeePayment" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeInstallment" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeInvoice" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "ExamMark" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "ExamResult" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "ExamSubject" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Exam" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "ExamType" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "TeacherSubject" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "TeacherClass" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Teacher" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Subject" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "AdmissionApplication" CASCADE')
-  await prisma.attendanceRecord.deleteMany()
-  await prisma.timetableEntry.deleteMany()
-  await prisma.periodSlot.deleteMany()
-  await prisma.studentEnrollment.deleteMany()
-  await prisma.student.deleteMany()
-  await prisma.guardian.deleteMany()
-  await prisma.studentGuardian.deleteMany()
-  // Section deletes SET NULL AttendanceRegister.sectionId, but the scopeKey DB
-  // CHECK requires '__CLASS__' on NULL-section rows — registers must go first.
-  await prisma.attendanceRegister.deleteMany()
-  await prisma.section.deleteMany()
-  await prisma.class.deleteMany()
-  await prisma.academicSession.deleteMany()
-  await prisma.userRole.deleteMany()
-  await prisma.tenantMembership.deleteMany()
-  await prisma.user.deleteMany()
-  await prisma.rolePermission.deleteMany()
+  // One TRUNCATE ... CASCADE clears every school-scoped table AND the rows that
+  // RESTRICT a delete (payments, receipts, adjustments, enrolments, ...). An
+  // ordered list of DELETEs aborts as soon as a previously run suite left a
+  // Restrict child behind: the DB-backed suites share ONE test database and
+  // run one after another.
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "School" CASCADE')
   await prisma.permission.deleteMany()
   await prisma.role.deleteMany()
-  await prisma.school.deleteMany()
 }
 
 async function login(

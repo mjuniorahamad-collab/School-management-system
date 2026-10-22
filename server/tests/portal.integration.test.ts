@@ -472,38 +472,14 @@ describe.skipIf(!TEST_DATABASE_URL)("Student/Parent Portal (integration)", () =>
 })
 
 async function resetAllTables(prisma: PrismaClient): Promise<void> {
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "AuditLog" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Message" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "ConversationParticipant" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Conversation" CASCADE')
-  await prisma.feeReceipt.deleteMany()
-  await prisma.feePayment.deleteMany()
-  await prisma.feeAdjustment.deleteMany()
-  await prisma.feeInstallment.deleteMany()
-  await prisma.feeInvoice.deleteMany()
-  await prisma.studentGuardian.deleteMany()
-  await prisma.studentEnrollment.deleteMany()
-  await prisma.examResult.deleteMany()
-  await prisma.attendanceRecord.deleteMany()
-  await prisma.libraryLoan.deleteMany()
-  await prisma.transportAssignment.deleteMany()
-  await prisma.student.deleteMany()
-  await prisma.guardian.deleteMany()
-  await prisma.schoolSetting.deleteMany()
-  // Section deletes SET NULL AttendanceRegister.sectionId, but the scopeKey DB
-  // CHECK requires '__CLASS__' on NULL-section rows — registers must go first.
-  await prisma.attendanceRegister.deleteMany()
-  await prisma.section.deleteMany()
-  await prisma.class.deleteMany()
-  await prisma.session.deleteMany()
-  await prisma.userRole.deleteMany()
-  await prisma.tenantMembership.deleteMany()
-  await prisma.academicSession.deleteMany()
-  await prisma.user.deleteMany()
-  await prisma.rolePermission.deleteMany()
+  // One TRUNCATE ... CASCADE clears every school-scoped table AND the rows that
+  // RESTRICT a delete (payments, receipts, adjustments, enrolments, ...). An
+  // ordered list of DELETEs aborts as soon as a previously run suite left a
+  // Restrict child behind: the DB-backed suites share ONE test database and
+  // run one after another.
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "School" CASCADE')
   await prisma.permission.deleteMany()
   await prisma.role.deleteMany()
-  await prisma.school.deleteMany()
 }
 
 async function login(
