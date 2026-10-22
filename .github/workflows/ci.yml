@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, "fix/timetable-multi-entry-rendering"]
+    branches: [main, "fix/timetable-multi-entry-rendering", "ci/validate-school-management-20261022"]
   pull_request:
 
 jobs:
