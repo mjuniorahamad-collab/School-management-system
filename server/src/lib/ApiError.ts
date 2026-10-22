@@ -8,6 +8,7 @@ export const FORBIDDEN = "FORBIDDEN"
 export const INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
 export const ACCOUNT_DISABLED = "ACCOUNT_DISABLED"
 export const STORAGE_ERROR = "STORAGE_ERROR"
+export const DEPENDENCY_CONFLICT = "DEPENDENCY_CONFLICT"
 export const ATTENDANCE_EXISTS = "ATTENDANCE_EXISTS"
 export const ATTENDANCE_REGISTER_LOCKED = "ATTENDANCE_REGISTER_LOCKED"
 export const REPORT_CARD_DRAFT_EXISTS = "REPORT_CARD_DRAFT_EXISTS"
@@ -77,6 +78,18 @@ export function accountDisabledError(message = "This account is disabled or susp
  */
 export function storageError(message = "Object storage is unavailable"): ApiError {
   return new ApiError(502, STORAGE_ERROR, message)
+}
+
+/**
+ * A foreign-key dependency conflict: the record is still referenced by other
+ * rows (or references a row that no longer exists). The message is deliberately
+ * generic — the underlying constraint name, table and SQL never reach the
+ * client. The full detail is logged server-side only.
+ */
+export function dependencyConflictError(
+  message = "This operation conflicts with related records in the database",
+): ApiError {
+  return new ApiError(409, DEPENDENCY_CONFLICT, message)
 }
 
 /**
