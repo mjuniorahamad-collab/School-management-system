@@ -39,6 +39,7 @@ const slotOne: PeriodSlotListItem = {
   startTime: "08:00",
   endTime: "08:45",
   sortOrder: 1,
+  isActive: true,
   createdAt: "2026-04-01T00:00:00.000Z",
   updatedAt: "2026-04-01T00:00:00.000Z",
 }
@@ -50,6 +51,7 @@ const slotTwo: PeriodSlotListItem = {
   startTime: "08:45",
   endTime: "09:30",
   sortOrder: 2,
+  isActive: true,
 }
 
 function makeEntry(overrides: Partial<TimetableEntryListItem> = {}): TimetableEntryListItem {

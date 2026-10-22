@@ -2,6 +2,7 @@ import type {
   TimetableDay,
   TimetableEntryCopyDayPayload,
   TimetableEntryFormPayload,
+  TimetableEntryListItem,
 } from "@/types/timetable"
 
 export interface TimetableFormValue {
@@ -79,5 +80,36 @@ export function defaultCopyDayForm(): CopyDayFormValue {
   return {
     sourceDay: "MONDAY",
     targetDay: "TUESDAY",
+  }
+}
+
+export interface StoredPeriodSlotOption {
+  id: string
+  name: string
+  startTime: string
+  endTime: string
+}
+
+/**
+ * The period picker offers ACTIVE slots only. When the entry being edited still
+ * points at a slot that was retired after it was created, that stored slot is
+ * added back as a labelled option so the form shows the truth instead of an
+ * empty period.
+ *
+ * The server keeps accepting the stored (retired) slot as long as the id is
+ * submitted unchanged; moving the lesson to a DIFFERENT retired slot is still
+ * rejected.
+ */
+export function resolveStoredPeriodSlot(
+  activeSlots: ReadonlyArray<{ id: string }>,
+  editing: Pick<TimetableEntryListItem, "periodSlotId" | "periodSlotName" | "periodSlotStartTime" | "periodSlotEndTime"> | null,
+): StoredPeriodSlotOption | null {
+  if (!editing) return null
+  if (activeSlots.some((slot) => slot.id === editing.periodSlotId)) return null
+  return {
+    id: editing.periodSlotId,
+    name: editing.periodSlotName,
+    startTime: editing.periodSlotStartTime,
+    endTime: editing.periodSlotEndTime,
   }
 }

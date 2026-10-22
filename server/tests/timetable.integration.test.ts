@@ -45,6 +45,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Timetable API (integration)", () => {
   let prisma: PrismaClient
   const adminAgent = request.agent(app)
   const teacherAgent = request.agent(app)
+  const noAccessAgent = request.agent(app)
 
   beforeAll(async () => {
     if (!TEST_DATABASE_URL) throw new Error("TEST_DATABASE_URL is required for this suite")
@@ -154,6 +155,20 @@ describe.skipIf(!TEST_DATABASE_URL)("Timetable API (integration)", () => {
 
     const superAdminRole = await prisma.role.create({ data: { name: SUPER_ADMIN_ROLE, description: "Test super admin" } })
     const teacherRole = await prisma.role.create({ data: { name: "TEACHER", description: "Test teacher" } })
+    // A role with no timetable permissions at all, used to prove that the
+    // permission guard denies access before the ownership rules are reached.
+    const noAccessRole = await prisma.role.create({ data: { name: "NO_TIMETABLE_ACCESS", description: "Test no access" } })
+
+    // The teacher needs the real timetable permissions, otherwise every teacher
+    // request would be rejected by the permission guard and the ownership rules
+    // below could never be reached.
+    for (const code of ["timetable:view", "timetable:create", "timetable:update", "timetable:delete"]) {
+      const [resource, action] = code.split(":")
+      const permission = await prisma.permission.create({
+        data: { code, resource, action, description: `Test ${code}` },
+      })
+      await prisma.rolePermission.create({ data: { roleId: teacherRole.id, permissionId: permission.id } })
+    }
 
     const adminUser = await prisma.user.create({
       data: {
@@ -178,9 +193,25 @@ describe.skipIf(!TEST_DATABASE_URL)("Timetable API (integration)", () => {
       },
     })
     await prisma.tenantMembership.create({ data: { userId: teacherUser.id, schoolId: school.id, roleId: teacherRole.id, status: "ACTIVE" } })
+    // Link the account to the teacher profile so the acting-teacher resolution
+    // (and therefore the ownership rules) can be exercised.
+    await prisma.teacher.update({ where: { id: teacher.id }, data: { userId: teacherUser.id } })
+
+    const noAccessUser = await prisma.user.create({
+      data: {
+        schoolId: school.id,
+        name: "Timetable Observer",
+        email: "timetable.observer@example.com",
+        passwordHash: hashPassword("observer-secret-123"),
+        status: "ACTIVE",
+        roles: { create: [{ role: { connect: { id: noAccessRole.id } } }] },
+      },
+    })
+    await prisma.tenantMembership.create({ data: { userId: noAccessUser.id, schoolId: school.id, roleId: noAccessRole.id, status: "ACTIVE" } })
 
     await login(adminAgent, "timetable.admin@example.com", fixtures.adminPassword)
     await login(teacherAgent, "timetable.teacher@example.com", "teacher-secret-123")
+    await login(noAccessAgent, "timetable.observer@example.com", "observer-secret-123")
   })
 
   afterEach(async () => {
@@ -220,7 +251,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Timetable API (integration)", () => {
     })
 
     it("denies a role without the timetable:view permission", async () => {
-      const res = await teacherAgent.get("/api/v1/timetable")
+      const res = await noAccessAgent.get("/api/v1/timetable")
       expect(res.status).toBe(403)
       expect(res.body.error.code).toBe("FORBIDDEN")
     })
@@ -465,6 +496,59 @@ describe.skipIf(!TEST_DATABASE_URL)("Timetable API (integration)", () => {
       expect(res.body.error.code).toBe("BAD_REQUEST")
       expect(res.body.error.message).toMatch(/period slot/i)
     })
+
+    // Teacher ownership on UPDATE (the same rule the delete path applies).
+    it("refuses to update another teacher's entry", async () => {
+      const created = await adminAgent
+        .post("/api/v1/timetable")
+        .send(entryPayload({ teacherId: fixtures.secondTeacherId }))
+      const id = created.body.data.id
+
+      const res = await teacherAgent.patch(`/api/v1/timetable/${id}`).send({ dayOfWeek: "FRIDAY" })
+      expect(res.status).toBe(403)
+      expect(res.body.error.code).toBe("FORBIDDEN")
+
+      // The entry must still be unchanged.
+      const after = await adminAgent.get(`/api/v1/timetable/${id}`)
+      expect(after.status).toBe(200)
+      expect(after.body.data.dayOfWeek).toBe("MONDAY")
+    })
+
+    it("refuses to hand another teacher's entry over to somebody else", async () => {
+      const created = await adminAgent
+        .post("/api/v1/timetable")
+        .send(entryPayload({ teacherId: fixtures.secondTeacherId }))
+      const id = created.body.data.id
+
+      const res = await teacherAgent
+        .patch(`/api/v1/timetable/${id}`)
+        .send({ teacherId: fixtures.teacherId })
+      expect(res.status).toBe(403)
+      expect(res.body.error.code).toBe("FORBIDDEN")
+
+      const after = await adminAgent.get(`/api/v1/timetable/${id}`)
+      expect(after.body.data.teacherId).toBe(fixtures.secondTeacherId)
+    })
+
+    it("lets a teacher update their own entry", async () => {
+      const created = await adminAgent.post("/api/v1/timetable").send(entryPayload())
+      const id = created.body.data.id
+
+      const res = await teacherAgent.patch(`/api/v1/timetable/${id}`).send({ dayOfWeek: "FRIDAY" })
+      expect(res.status).toBe(200)
+      expect(res.body.data.dayOfWeek).toBe("FRIDAY")
+    })
+
+    it("keeps an administrator's update unrestricted", async () => {
+      const created = await adminAgent
+        .post("/api/v1/timetable")
+        .send(entryPayload({ teacherId: fixtures.secondTeacherId }))
+      const id = created.body.data.id
+
+      const res = await adminAgent.patch(`/api/v1/timetable/${id}`).send({ dayOfWeek: "FRIDAY" })
+      expect(res.status).toBe(200)
+      expect(res.body.data.dayOfWeek).toBe("FRIDAY")
+    })
   })
 
   describe("delete", () => {
@@ -478,9 +562,47 @@ describe.skipIf(!TEST_DATABASE_URL)("Timetable API (integration)", () => {
       expect(after.status).toBe(404)
     })
 
-    it("returns 204 idempotently only when the entry exists", async () => {
+    it("returns 404 when deleting an entry that does not exist", async () => {
       const res = await adminAgent.delete("/api/v1/timetable/ffffffff-ffff-ffff-ffff-ffffffffffff")
       expect(res.status).toBe(404)
+    })
+
+    it("records an audit log entry for the delete", async () => {
+      const created = await adminAgent.post("/api/v1/timetable").send(entryPayload())
+      const id = created.body.data.id
+      await adminAgent.delete(`/api/v1/timetable/${id}`)
+
+      const audit = await prisma.auditLog.findFirst({
+        where: { entityType: "TIMETABLE_ENTRY", entityId: id },
+      })
+      expect(audit).not.toBeNull()
+      expect(audit?.action).toBe("DELETE")
+      expect(audit?.schoolId).toBe(fixtures.schoolId)
+    })
+
+    it("refuses to delete another teacher's entry", async () => {
+      const created = await adminAgent
+        .post("/api/v1/timetable")
+        .send(entryPayload({ teacherId: fixtures.secondTeacherId }))
+      const id = created.body.data.id
+
+      const res = await teacherAgent.delete(`/api/v1/timetable/${id}`)
+      expect(res.status).toBe(403)
+      expect(res.body.error.code).toBe("FORBIDDEN")
+
+      // The entry must still be there.
+      const after = await adminAgent.get(`/api/v1/timetable/${id}`)
+      expect(after.status).toBe(200)
+    })
+
+    it("lets a teacher delete their own entry", async () => {
+      const created = await adminAgent.post("/api/v1/timetable").send(entryPayload())
+      const id = created.body.data.id
+
+      const res = await teacherAgent.delete(`/api/v1/timetable/${id}`)
+      expect(res.status).toBe(200)
+      const after = await adminAgent.get(`/api/v1/timetable/${id}`)
+      expect(after.status).toBe(404)
     })
   })
 
@@ -494,8 +616,58 @@ describe.skipIf(!TEST_DATABASE_URL)("Timetable API (integration)", () => {
       })
       expect(res.status).toBe(200)
       expect(res.body.data.copied).toBe(1)
+      expect(res.body.data.skipped).toBe(0)
       const tuesday = await adminAgent.get("/api/v1/timetable?dayOfWeek=TUESDAY")
       expect(tuesday.body.data.total).toBe(1)
+    })
+
+    // A conflicting lesson on the target day is silently dropped by
+    // `skipDuplicates`. The skipped count makes that visible instead of
+    // pretending the whole day moved.
+    it("reports how many lessons were skipped because the target slot was taken", async () => {
+      // Rita already teaches class A in Period 1 on TUESDAY.
+      await adminAgent
+        .post("/api/v1/timetable")
+        .send(entryPayload({ dayOfWeek: "TUESDAY", teacherId: fixtures.secondTeacherId }))
+      // Tim's MONDAY lesson would land on the same class+slot on TUESDAY. A
+      // teacher copy only replaces their OWN lessons, so Rita's row survives
+      // and the copied lesson conflicts with it.
+      await adminAgent.post("/api/v1/timetable").send(entryPayload())
+
+      const res = await teacherAgent.post("/api/v1/timetable/copy-day").send({
+        academicSessionId: fixtures.sessionId,
+        sourceDay: "MONDAY",
+        targetDay: "TUESDAY",
+      })
+      expect(res.status).toBe(200)
+      expect(res.body.data.copied).toBe(0)
+      expect(res.body.data.skipped).toBe(1)
+    })
+
+    it("records the skipped count in the audit metadata", async () => {
+      await adminAgent
+        .post("/api/v1/timetable")
+        .send(entryPayload({ dayOfWeek: "TUESDAY", teacherId: fixtures.secondTeacherId }))
+      await adminAgent.post("/api/v1/timetable").send(entryPayload())
+      await teacherAgent.post("/api/v1/timetable/copy-day").send({
+        academicSessionId: fixtures.sessionId,
+        sourceDay: "MONDAY",
+        targetDay: "TUESDAY",
+      })
+
+      const audit = await prisma.auditLog.findFirst({
+        where: {
+          entityType: "TIMETABLE_ENTRY",
+          action: "UPDATE",
+          summary: { contains: "copied timetable day", mode: "insensitive" },
+        },
+        // The audit log is not cleared between tests — take the newest entry.
+        orderBy: { createdAt: "desc" },
+      })
+      expect(audit).not.toBeNull()
+      const metadata = (audit?.metadata ?? {}) as { copied?: number; skipped?: number }
+      expect(metadata.copied).toBe(0)
+      expect(metadata.skipped).toBe(1)
     })
 
     it("rejects copying a day onto itself", async () => {
@@ -506,41 +678,68 @@ describe.skipIf(!TEST_DATABASE_URL)("Timetable API (integration)", () => {
       })
       expect(res.status).toBe(400)
     })
+
+    it("records an audit log entry for the copy", async () => {
+      await adminAgent.post("/api/v1/timetable").send(entryPayload())
+      await adminAgent.post("/api/v1/timetable/copy-day").send({
+        academicSessionId: fixtures.sessionId,
+        sourceDay: "MONDAY",
+        targetDay: "TUESDAY",
+      })
+
+      const audit = await prisma.auditLog.findFirst({
+        where: {
+          entityType: "TIMETABLE_ENTRY",
+          action: "UPDATE",
+          summary: { contains: "copied timetable day", mode: "insensitive" },
+        },
+      })
+      expect(audit).not.toBeNull()
+      expect(audit?.schoolId).toBe(fixtures.schoolId)
+    })
+
+    it("never deletes another teacher's lessons on the target day", async () => {
+      // Rita (another teacher) already has a lesson on TUESDAY, in a different
+      // period slot so the copy below cannot conflict with it.
+      await adminAgent
+        .post("/api/v1/timetable")
+        .send(
+          entryPayload({
+            dayOfWeek: "TUESDAY",
+            periodSlotId: fixtures.secondPeriodSlotId,
+            teacherId: fixtures.secondTeacherId,
+          }),
+        )
+      // Tim's own lesson on MONDAY is what the teacher copies.
+      await adminAgent.post("/api/v1/timetable").send(entryPayload())
+
+      const res = await teacherAgent.post("/api/v1/timetable/copy-day").send({
+        academicSessionId: fixtures.sessionId,
+        sourceDay: "MONDAY",
+        targetDay: "TUESDAY",
+      })
+      expect(res.status).toBe(200)
+      expect(res.body.data.copied).toBe(1)
+
+      const tuesday = await adminAgent.get("/api/v1/timetable?dayOfWeek=TUESDAY")
+      // Rita's lesson survived and Tim's copy was added.
+      expect(tuesday.body.data.total).toBe(2)
+      const teacherIds = tuesday.body.data.items.map((item: { teacherId: string }) => item.teacherId)
+      expect(teacherIds).toContain(fixtures.secondTeacherId)
+      expect(teacherIds).toContain(fixtures.teacherId)
+    })
   })
 })
 
 async function resetAllTables(prisma: PrismaClient): Promise<void> {
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "AuditLog" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Message" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "ConversationParticipant" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Conversation" CASCADE')
-  await prisma.timetableEntry.deleteMany()
-  await prisma.attendanceRecord.deleteMany()
-  await prisma.periodSlot.deleteMany()
-  await prisma.studentGuardian.deleteMany()
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeInvoice" CASCADE')
-  await prisma.studentEnrollment.deleteMany()
-  await prisma.student.deleteMany()
-  await prisma.guardian.deleteMany()
-  await prisma.teacherSubject.deleteMany()
-  await prisma.teacherClass.deleteMany()
-  await prisma.staff.deleteMany()
-  await prisma.teacher.deleteMany()
-  await prisma.subject.deleteMany()
-  // Section deletes SET NULL AttendanceRegister.sectionId, but the scopeKey DB
-  // CHECK requires '__CLASS__' on NULL-section rows — registers must go first.
-  await prisma.attendanceRegister.deleteMany()
-  await prisma.section.deleteMany()
-  await prisma.class.deleteMany()
-  await prisma.session.deleteMany()
-  await prisma.userRole.deleteMany()
-  await prisma.tenantMembership.deleteMany()
-  await prisma.academicSession.deleteMany()
-  await prisma.user.deleteMany()
-  await prisma.rolePermission.deleteMany()
+  // One TRUNCATE ... CASCADE clears every school-scoped table AND the rows that
+  // RESTRICT a delete (payments, receipts, adjustments, enrolments, ...). An
+  // ordered list of DELETEs aborts as soon as a previously run suite left a
+  // Restrict child behind: the DB-backed suites share ONE test database and
+  // run one after another.
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "School" CASCADE')
   await prisma.permission.deleteMany()
   await prisma.role.deleteMany()
-  await prisma.school.deleteMany()
 }
 
 async function login(

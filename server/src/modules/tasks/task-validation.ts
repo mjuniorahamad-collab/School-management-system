@@ -1,7 +1,13 @@
 import { ROLE_NAMES, SUPER_ADMIN_ROLE } from "../../permissions/permissions.js"
 import { badRequestError, forbiddenError } from "../../lib/ApiError.js"
+import type { Prisma, PrismaClient } from "@prisma/client"
 
-export type TaskValidationPrisma = import("@prisma/client").PrismaClient
+/**
+ * The Prisma surface these helpers need. Both the full client and an
+ * interactive-transaction client are accepted so a caller can resolve the
+ * acting teacher INSIDE the same transaction as the write it guards.
+ */
+export type TaskValidationPrisma = PrismaClient | Prisma.TransactionClient
 
 interface TaskTargetingInput {
   academicSessionId: string

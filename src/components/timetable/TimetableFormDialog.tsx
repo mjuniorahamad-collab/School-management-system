@@ -21,6 +21,7 @@ import {
 import { useCreateTimetableEntry, useUpdateTimetableEntry } from "@/hooks/useTimetable"
 import {
   defaultTimetableForm,
+  resolveStoredPeriodSlot,
   timetableFormToPayload,
   validateTimetableForm,
 } from "@/lib/timetableFormRules"
@@ -96,6 +97,18 @@ function Content({
     queryKey: ["period-slots", "options"],
     queryFn: () => periodSlotsService.list({}),
   })
+
+  // The period picker offers ACTIVE slots only. When the entry being edited
+  // still points at a slot that was retired after it was created, that stored
+  // slot is added back as a labelled option so the form shows the truth
+  // instead of an empty period. The server keeps accepting it as long as the
+  // id is submitted unchanged.
+  //
+  // The stored slot is only resolved once the slot list has loaded: before
+  // that the list is unknown, and claiming "retired period" on every lesson
+  // would be wrong.
+  const activeSlots = periodSlots?.items ?? []
+  const storedSlot = periodSlots ? resolveStoredPeriodSlot(activeSlots, editing) : null
 
   const createMutation = useCreateTimetableEntry()
   const updateMutation = useUpdateTimetableEntry(editing?.id ?? "")
@@ -189,13 +202,24 @@ function Content({
                     <SelectValue placeholder="Select period…" />
                   </SelectTrigger>
                   <SelectContent>
-                    {(periodSlots?.items ?? []).map((period) => (
+                    {storedSlot && (
+                      <SelectItem value={storedSlot.id}>
+                        {storedSlot.name} ({storedSlot.startTime}–{storedSlot.endTime}) — inactive
+                      </SelectItem>
+                    )}
+                    {activeSlots.map((period) => (
                       <SelectItem key={period.id} value={period.id}>
                         {period.name} ({period.startTime}–{period.endTime})
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {storedSlot && (
+                  <p className="text-xs text-muted-foreground">
+                    This lesson uses a retired period. It stays editable, but it cannot be moved to
+                    another retired period.
+                  </p>
+                )}
               </div>
 
               <div className="flex flex-col gap-1.5">

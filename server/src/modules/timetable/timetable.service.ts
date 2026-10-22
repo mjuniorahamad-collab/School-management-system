@@ -1,6 +1,9 @@
 import { Prisma } from "@prisma/client"
-import { badRequestError, notFoundError } from "../../lib/ApiError.js"
+import { badRequestError, forbiddenError, notFoundError } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
+import type { AuthUser } from "../../types/auth.js"
+import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
+import { isTaskAdminActor, resolveActingTeacher } from "../tasks/task-validation.js"
 import { conflictMessage } from "./timetable.rules.js"
 import type {
   CopyTimetableDayInput,
@@ -12,6 +15,12 @@ import { toTimetableEntryDetail, toTimetableEntryListItem } from "./timetable.ma
 import type { TimetableEntryDetail, TimetableEntryListResult } from "./timetable.types.js"
 
 type PrismaClient = NonNullable<Awaited<ReturnType<typeof getPrisma>>>
+
+/**
+ * The authenticated actor a timetable write is attributed to. The tenant is
+ * always the caller's ACTIVE membership — never a value taken from the body.
+ */
+export type TimetableActorContext = AuthUser
 
 const ENTRY_INCLUDE = {
   periodSlot: { select: { name: true, startTime: true, endTime: true } },
@@ -112,14 +121,10 @@ export async function createTimetableEntry(
 export async function updateTimetableEntry(
   id: string,
   input: UpdateTimetableEntryInput,
-  schoolId: string,
+  actor: TimetableActorContext,
 ): Promise<TimetableEntryDetail> {
   const prisma = await requirePrisma()
-  const existing = await prisma.timetableEntry.findFirst({
-    where: { id, schoolId },
-    select: { id: true, academicSessionId: true, classId: true, sectionId: true, subjectId: true, teacherId: true, dayOfWeek: true, periodSlotId: true },
-  })
-  if (!existing) throw notFoundError("Timetable entry not found")
+  const schoolId = actor.school.id
 
   const data: Prisma.TimetableEntryUncheckedUpdateInput = {}
   if (input.academicSessionId !== undefined) data.academicSessionId = input.academicSessionId
@@ -130,26 +135,54 @@ export async function updateTimetableEntry(
   if (input.subjectId !== undefined) data.subjectId = input.subjectId
   if (input.teacherId !== undefined) data.teacherId = input.teacherId
 
-  if (Object.keys(data).length === 0) {
-    return getTimetableEntryById(id, schoolId)
-  }
-
-  await validateForeignKeys(prisma, {
-    academicSessionId: (data.academicSessionId as string) ?? existing.academicSessionId,
-    classId: (data.classId as string) ?? existing.classId,
-    sectionId: (data.sectionId as string | null | undefined) !== undefined
-      ? (data.sectionId as string | null)
-      : existing.sectionId,
-    subjectId: (data.subjectId as string) ?? existing.subjectId,
-    teacherId: (data.teacherId as string) ?? existing.teacherId,
-    periodSlotId: (data.periodSlotId as string) ?? existing.periodSlotId,
-  }, schoolId)
-
   try {
-    const updated = await prisma.timetableEntry.update({
-      where: { id },
-      data,
-      include: ENTRY_INCLUDE,
+    const updated = await prisma.$transaction(async (tx) => {
+      const existing = await tx.timetableEntry.findFirst({
+        where: { id, schoolId },
+        select: { id: true, academicSessionId: true, classId: true, sectionId: true, subjectId: true, teacherId: true, dayOfWeek: true, periodSlotId: true },
+      })
+      if (!existing) throw notFoundError("Timetable entry not found")
+
+      // Teacher ownership: the same rule the delete path applies. A teacher
+      // may only change the lessons they teach — editing another teacher's
+      // entry (or handing it to somebody else) is refused. Administrators are
+      // unrestricted within their own school.
+      await assertTimetableTeacherOwnership(tx, actor, existing.teacherId)
+
+      if (Object.keys(data).length === 0) {
+        return tx.timetableEntry.findFirstOrThrow({
+          where: { id, schoolId },
+          include: ENTRY_INCLUDE,
+        })
+      }
+
+      await validateForeignKeys(
+        tx,
+        {
+          academicSessionId: (data.academicSessionId as string) ?? existing.academicSessionId,
+          classId: (data.classId as string) ?? existing.classId,
+          sectionId: (data.sectionId as string | null | undefined) !== undefined
+            ? (data.sectionId as string | null)
+            : existing.sectionId,
+          subjectId: (data.subjectId as string) ?? existing.subjectId,
+          teacherId: (data.teacherId as string) ?? existing.teacherId,
+          periodSlotId: (data.periodSlotId as string) ?? existing.periodSlotId,
+        },
+        schoolId,
+        {
+          // A period slot retired AFTER this entry was created must not freeze the
+          // entry: the client always re-submits the whole form, so the stored slot
+          // id is accepted as long as it is UNCHANGED. Choosing a DIFFERENT retired
+          // slot is still rejected (it is not in this set).
+          allowedInactivePeriodSlotIds: new Set([existing.periodSlotId]),
+        },
+      )
+
+      return tx.timetableEntry.update({
+        where: { id },
+        data,
+        include: ENTRY_INCLUDE,
+      })
     })
     return toTimetableEntryDetail(updated)
   } catch (error) {
@@ -167,77 +200,188 @@ export async function updateTimetableEntry(
   }
 }
 
-export async function deleteTimetableEntry(id: string, schoolId: string): Promise<void> {
+export async function deleteTimetableEntry(
+  id: string,
+  actor: TimetableActorContext,
+): Promise<void> {
   const prisma = await requirePrisma()
-  const existing = await prisma.timetableEntry.findFirst({
-    where: { id, schoolId },
-    select: { id: true },
+  const schoolId = actor.school.id
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
+
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.timetableEntry.findFirst({
+      where: { id, schoolId },
+      select: { id: true, teacherId: true, dayOfWeek: true, academicSessionId: true },
+    })
+    if (!existing) throw notFoundError("Timetable entry not found")
+
+    await assertTimetableTeacherOwnership(tx, actor, existing.teacherId)
+
+    // Tenant-scoped and atomic: the delete can only ever remove a row of the
+    // caller's own school, and a row that vanished between the read and the
+    // delete is reported as "not found" instead of silently succeeding.
+    const removed = await tx.timetableEntry.deleteMany({
+      where: { id, schoolId },
+    })
+    if (removed.count === 0) throw notFoundError("Timetable entry not found")
+
+    await recordAudit(tx, {
+      schoolId,
+      actorId: auditActor.id,
+      actorName: auditActor.name,
+      actorRole: auditActor.role,
+      actorEmail: auditActor.email,
+      action: "DELETE",
+      entityType: "TIMETABLE_ENTRY",
+      entityId: id,
+      summary: "Deleted timetable entry",
+      metadata: {
+        dayOfWeek: existing.dayOfWeek,
+        academicSessionId: existing.academicSessionId,
+        teacherId: existing.teacherId,
+      },
+    })
   })
-  if (!existing) throw notFoundError("Timetable entry not found")
-  await prisma.timetableEntry.delete({ where: { id } })
 }
 
 export async function copyTimetableDay(
   input: CopyTimetableDayInput,
-  schoolId: string,
-): Promise<{ copied: number }> {
+  actor: TimetableActorContext,
+): Promise<{ copied: number; skipped: number }> {
   if (input.sourceDay === input.targetDay) {
     throw badRequestError("Source day and target day must be different")
   }
 
   const prisma = await requirePrisma()
+  const schoolId = actor.school.id
+  const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
-  const sourceEntries = await prisma.timetableEntry.findMany({
-    where: {
-      schoolId,
-      academicSessionId: input.academicSessionId,
-      dayOfWeek: input.sourceDay,
-    },
-  })
-
-  if (sourceEntries.length === 0) {
-    return { copied: 0 }
-  }
-
-  // Delete existing entries for the target day before copying.
-  await prisma.timetableEntry.deleteMany({
-    where: {
-      schoolId,
-      academicSessionId: input.academicSessionId,
-      dayOfWeek: input.targetDay,
-    },
-  })
-
-  let copied = 0
-  for (const entry of sourceEntries) {
-    try {
-      await prisma.timetableEntry.create({
-        data: {
-          schoolId,
-          academicSessionId: entry.academicSessionId,
-          dayOfWeek: input.targetDay,
-          periodSlotId: entry.periodSlotId,
-          classId: entry.classId,
-          sectionId: entry.sectionId,
-          subjectId: entry.subjectId,
-          teacherId: entry.teacherId,
-        },
+  // A teacher may only ever replace their own lessons; an administrator
+  // (SCHOOL_ADMIN / SUPER_ADMIN) manages the whole day.
+  const isAdmin = isTaskAdminActor(actor.roles)
+  const actingTeacherId = isAdmin
+    ? null
+    : await resolveActingTeacher(prisma, {
+        schoolId,
+        userId: actor.id,
+        roles: actor.roles,
       })
-      copied++
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-        // Skip conflicting entries silently — partial copy is acceptable.
-        continue
-      }
-      throw error
-    }
+  if (!isAdmin && !actingTeacherId) {
+    throw forbiddenError("Your account is not linked to a teacher profile in this school")
   }
 
-  return { copied }
+  const ownershipScope = actingTeacherId ? { teacherId: actingTeacherId } : {}
+
+  return prisma.$transaction(async (tx) => {
+    const sourceEntries = await tx.timetableEntry.findMany({
+      where: {
+        schoolId,
+        academicSessionId: input.academicSessionId,
+        dayOfWeek: input.sourceDay,
+        ...ownershipScope,
+      },
+      select: {
+        academicSessionId: true,
+        periodSlotId: true,
+        classId: true,
+        sectionId: true,
+        subjectId: true,
+        teacherId: true,
+      },
+    })
+
+    if (sourceEntries.length === 0) {
+      return { copied: 0, skipped: 0 }
+    }
+
+    // Delete existing entries for the target day before copying. Scoped to the
+    // caller's own school (and, for a teacher, to their own lessons) so a copy
+    // can never destroy another tenant's or another teacher's timetable.
+    const removed = await tx.timetableEntry.deleteMany({
+      where: {
+        schoolId,
+        academicSessionId: input.academicSessionId,
+        dayOfWeek: input.targetDay,
+        ...ownershipScope,
+      },
+    })
+
+    // One atomic insert. `skipDuplicates` keeps the established "a conflicting
+    // entry is skipped, the rest are copied" rule without aborting the
+    // surrounding transaction the way a caught per-row insert error would.
+    const inserted = await tx.timetableEntry.createMany({
+      data: sourceEntries.map((entry) => ({
+        schoolId,
+        academicSessionId: entry.academicSessionId,
+        dayOfWeek: input.targetDay,
+        periodSlotId: entry.periodSlotId,
+        classId: entry.classId,
+        sectionId: entry.sectionId,
+        subjectId: entry.subjectId,
+        teacherId: entry.teacherId,
+      })),
+      skipDuplicates: true,
+    })
+
+    // `skipDuplicates` silently drops the lessons whose target slot is already
+    // taken. The count is reported back so the caller can tell the user how
+    // many lessons were NOT copied instead of pretending the whole day moved.
+    const skipped = sourceEntries.length - inserted.count
+
+    await recordAudit(tx, {
+      schoolId,
+      actorId: auditActor.id,
+      actorName: auditActor.name,
+      actorRole: auditActor.role,
+      actorEmail: auditActor.email,
+      action: "UPDATE",
+      entityType: "TIMETABLE_ENTRY",
+      entityId: null,
+      summary: `Copied timetable day ${input.sourceDay} to ${input.targetDay}`,
+      metadata: {
+        academicSessionId: input.academicSessionId,
+        sourceDay: input.sourceDay,
+        targetDay: input.targetDay,
+        copied: inserted.count,
+        skipped,
+        removed: removed.count,
+        scopedToTeacherId: actingTeacherId,
+      },
+    })
+
+    return { copied: inserted.count, skipped }
+  })
+}
+
+/**
+ * Teacher ownership check for a timetable entry.
+ *
+ * Administrators (SCHOOL_ADMIN / SUPER_ADMIN) are unrestricted within their own
+ * school. Everyone else must be linked to a Teacher profile in this school and
+ * may only act on the entries they teach.
+ */
+async function assertTimetableTeacherOwnership(
+  tx: Prisma.TransactionClient,
+  actor: TimetableActorContext,
+  entryTeacherId: string,
+): Promise<void> {
+  if (isTaskAdminActor(actor.roles)) return
+
+  const actingTeacherId = await resolveActingTeacher(tx, {
+    schoolId: actor.school.id,
+    userId: actor.id,
+    roles: actor.roles,
+  })
+  if (!actingTeacherId) {
+    throw forbiddenError("Your account is not linked to a teacher profile in this school")
+  }
+  if (actingTeacherId !== entryTeacherId) {
+    throw forbiddenError("Teachers may only manage their own timetable entries")
+  }
 }
 
 async function validateForeignKeys(
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   input: {
     academicSessionId: string
     classId: string
@@ -247,13 +391,18 @@ async function validateForeignKeys(
     periodSlotId?: string
   },
   schoolId: string,
+  options: { allowedInactivePeriodSlotIds?: ReadonlySet<string> } = {},
 ): Promise<void> {
   if (input.periodSlotId) {
     const slot = await prisma.periodSlot.findFirst({
       where: { id: input.periodSlotId, schoolId },
-      select: { id: true },
+      select: { id: true, isActive: true },
     })
     if (!slot) throw badRequestError("Period slot not found in this school")
+    const allowed = options.allowedInactivePeriodSlotIds?.has(slot.id) ?? false
+    if (!slot.isActive && !allowed) {
+      throw badRequestError("Cannot use an inactive period slot in a timetable entry")
+    }
   }
 
   if (input.classId) {

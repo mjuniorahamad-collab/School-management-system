@@ -1,6 +1,7 @@
 import { api } from "@/lib/apiClient"
 import type {
   TimetableEntryCopyDayPayload,
+  TimetableEntryCopyDayResult,
   TimetableEntryDetail,
   TimetableEntryFormPayload,
   TimetableEntryListResult,
@@ -33,7 +34,7 @@ export const timetableService = {
   remove(id: string): Promise<{ deleted: boolean }> {
     return api.delete<{ deleted: boolean }>(`/timetable/${id}`)
   },
-  copyDay(payload: TimetableEntryCopyDayPayload): Promise<{ copied: number }> {
-    return api.post<{ copied: number }>("/timetable/copy-day", payload)
+  copyDay(payload: TimetableEntryCopyDayPayload): Promise<TimetableEntryCopyDayResult> {
+    return api.post<TimetableEntryCopyDayResult>("/timetable/copy-day", payload)
   },
 }

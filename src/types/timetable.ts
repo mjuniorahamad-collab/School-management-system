@@ -52,6 +52,12 @@ export interface TimetableEntryCopyDayPayload {
   targetDay: TimetableDay
 }
 
+/** Result of a copy-day run: how many lessons were copied and how many were skipped. */
+export interface TimetableEntryCopyDayResult {
+  copied: number
+  skipped: number
+}
+
 export const TIMETABLE_DAYS: TimetableDay[] = [
   "MONDAY",
   "TUESDAY",

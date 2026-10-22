@@ -67,7 +67,14 @@ export function useCopyTimetableDay() {
     mutationFn: (payload: TimetableEntryCopyDayPayload) => timetableService.copyDay(payload),
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: TIMETABLE_GROUP })
-      toast.success(`Copied ${result.copied} entries`)
+      // Lessons whose target slot was already occupied are reported explicitly:
+      // a silent skip would look like a successful whole-day copy.
+      toast.success(`Copied ${result.copied} entries`, {
+        description:
+          result.skipped > 0
+            ? `${result.skipped} skipped — the target slot was already occupied`
+            : undefined,
+      })
     },
     onError: (e: Error) => toast.error("Could not copy day", { description: e.message }),
   })

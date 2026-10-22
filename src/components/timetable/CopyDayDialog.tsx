@@ -1,5 +1,7 @@
 import { useState } from "react"
 import { toast } from "sonner"
+import { useAuth } from "@/auth/useAuth"
+import { isAdminRole } from "@/auth/roles"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -37,6 +39,10 @@ export function CopyDayDialog({ open, onOpenChange, academicSessionId }: CopyDay
   const [form, setForm] = useState<CopyDayFormValue>(defaultCopyDayForm())
   const copyMutation = useCopyTimetableDay()
   const isSaving = copyMutation.isPending
+  const { user } = useAuth()
+  // Administrators copy the whole day; a teacher copies only their own
+  // lessons (the server enforces exactly this scope).
+  const copiesWholeDay = isAdminRole(user?.roles)
 
   const setField = (field: keyof CopyDayFormValue, value: TimetableDay) => {
     setForm((previous) => ({ ...previous, [field]: value }))
@@ -70,7 +76,9 @@ export function CopyDayDialog({ open, onOpenChange, academicSessionId }: CopyDay
         <DialogHeader>
           <DialogTitle>Copy timetable day</DialogTitle>
           <DialogDescription>
-            Copy all scheduled entries from one day to another for the selected session.
+            {copiesWholeDay
+              ? "Copy all scheduled entries from one day to another for the selected session."
+              : "Copy your scheduled entries from one day to another for the selected session. Lessons of other teachers are left untouched."}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">

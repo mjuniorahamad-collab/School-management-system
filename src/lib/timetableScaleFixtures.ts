@@ -34,6 +34,7 @@ export function makeScalePeriodSlots(count = SCALE_PERIOD_COUNT): PeriodSlotList
     startTime: minutesToTime(8 * 60 + index * 45),
     endTime: minutesToTime(8 * 60 + (index + 1) * 45),
     sortOrder: index + 1,
+    isActive: true,
     createdAt: "2026-04-01T00:00:00.000Z",
     updatedAt: "2026-04-01T00:00:00.000Z",
   }))

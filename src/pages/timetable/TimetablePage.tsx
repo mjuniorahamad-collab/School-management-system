@@ -57,9 +57,12 @@ export function TimetablePage() {
     { enabled: sessionSelected },
   )
 
+  // The grid and the printed sheet must LABEL every period slot that an
+  // existing entry uses — including a slot that was retired afterwards. The
+  // create-form picker (TimetableFormDialog) keeps the active-only default.
   const { data: periodSlots } = useQuery({
-    queryKey: ["period-slots", "options"],
-    queryFn: () => periodSlotsService.list({}),
+    queryKey: ["period-slots", "options", { includeInactive: true }],
+    queryFn: () => periodSlotsService.list({ includeInactive: true }),
   })
 
   // Same query keys the toolbar uses, so these resolve from the shared cache
