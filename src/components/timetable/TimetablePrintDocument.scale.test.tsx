@@ -29,6 +29,12 @@ afterEach(() => {
 
 const scope = { academicSession: "2026-27", className: "6", sectionName: "A" }
 
+// Compares the detailed schedule's ROWS, not the whole document. The document
+// footer prints the current minute, so two renders can legitimately differ there;
+// the order guarantee is about the lesson rows.
+const detailedRowTexts = (container: HTMLElement): string[] =>
+  Array.from(container.querySelectorAll("tbody tr"), (row) => row.textContent ?? "")
+
 // DB-free scale coverage: neither print layout may drop or clamp lessons at a real
 // school's per-session load. The complete selected-session scope is what gets
 // printed — there is no pagination to reconcile on this endpoint.
@@ -71,7 +77,7 @@ describe("TimetablePrintDocument at scale", () => {
     const forward = render(
       <TimetablePrintDocument entries={entries} periodSlots={slots} scope={scope} layout="detailed" />,
     )
-    const forwardText = forward.container.textContent ?? ""
+    const forwardRows = detailedRowTexts(forward.container)
     cleanup()
 
     const reversed = render(
@@ -82,8 +88,10 @@ describe("TimetablePrintDocument at scale", () => {
         layout="detailed"
       />,
     )
+    const reversedRows = detailedRowTexts(reversed.container)
 
-    expect(reversed.container.textContent).toBe(forwardText)
+    expect(forwardRows).toHaveLength(entries.length)
+    expect(reversedRows).toEqual(forwardRows)
   })
 })
 
