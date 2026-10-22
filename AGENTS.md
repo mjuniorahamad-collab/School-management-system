@@ -99,7 +99,57 @@ Implemented policy decisions worth keeping (details in the module docs):
   `concessions:approve`, and a self-approval requires a reason and is marked
   `selfApproved` in the audit metadata. `concessions:override` stays SUPER_ADMIN
   and is never self. Both a missing and a corrupt stored value read through to
-  the strict default. Never branch on school name to decide this.
+  the   strict default. Never branch on school name to decide this.
+
+- **Master-data deactivate/reactivate** (`GradingBand`, `ExamType`, `FeeHead`,
+  `PeriodSlot`)
+  - `isActive` is a soft-retire flag, not a delete. A retired row is never
+    removed: history (results, invoices, timetables, report cards) must keep
+    resolving it.
+  - Lists are active-only by default; `includeInactive=true` is a deliberate,
+    explicit opt-in used by editors that must label a retired reference.
+  - A retired row cannot be chosen for something new, but an EXISTING record
+    that already points at it stays editable — the server compares the
+    submitted reference with the stored one and only rejects a NEW choice.
+  - Reactivating a grading band re-runs the active-overlap check.
+  - The migration is additive (`isActive` columns + indexes); never rewrite
+    history to "fix" retired rows.
+
+- **Grade history in Results** (`server/src/modules/results/grading.ts`)
+  - A grade is a HISTORICAL fact: it records what the mark was worth when it
+    was written. Retiring a grading band or re-routing a range must never
+    silently rewrite a grade that was already awarded.
+  - The rule is expressed on the PERCENTAGE, because the percentage is derived
+    from the marks alone: an unchanged percentage proves the score did not
+    change.
+    - Unchanged percentage → the stored grade is preserved.
+    - Changed percentage → the grade is recomputed from the CURRENT active
+      bands. That is the explicit regrade.
+  - `isPass` is deliberately NOT preserved: it follows the subject's pass mark
+    (a subject rule), so it always reflects the current pass mark.
+  - The rule applies to the per-subject mark AND to the student-level
+    aggregate, in marks entry and in finalisation.
+
+- **Grading-band overlap under concurrency**
+  - The active-overlap check is a read-then-write sequence, so two concurrent
+    writes could both see a free range and both commit. The service therefore
+    takes a school-scoped transaction-level advisory lock
+    (`server/src/modules/grading-bands/grading-band.lock.ts`) BEFORE the
+    overlap query. Never "optimise" that check by dropping the lock.
+
+- **Exam type is immutable** (`server/src/modules/exams/`)
+  - An exam's exam type cannot be changed after the exam was created; the API
+    rejects a different `examTypeId` with `BAD_REQUEST`. Re-sending the same id
+    is a no-op and stays allowed even when that type was retired.
+
+- **Timetable ownership and copy-day scope**
+  - A teacher may only manage their OWN timetable entries (update, reassign,
+    delete); the check lives in the service, and the controller passes the
+    authenticated actor.
+  - Copying a day copies the WHOLE day for administrators and only the
+    teacher's OWN lessons for teachers. Lessons whose target slot was already
+    occupied are SKIPPED and reported (`copied` + `skipped`); a silent skip
+    would look like a successful whole-day copy.
 
 ## 3. Current technology stack
 
@@ -271,6 +321,19 @@ Canonical validation before claiming anything works:
 
 Never claim success without actually running the checks.
 
+DB-backed suite rules (the suites share ONE disposable test database):
+
+- `vitest.config.ts` runs the files serially (`fileParallelism: false`); a suite
+  therefore sees the rows the PREVIOUS suite left behind.
+- Every suite resets the database in `beforeAll` with
+  `TRUNCATE TABLE "School" CASCADE` plus `permission.deleteMany()` and
+  `role.deleteMany()`. Do NOT replace that with an ordered list of DELETEs:
+  several relations RESTRICT a delete (payments, receipts, adjustments,
+  enrolments, fee-structure items), so an ordered list aborts as soon as an
+  earlier suite left a Restrict child behind.
+- A suite that only owns its own fixtures (for example the scale suite) may
+  scope its cleanup — but it must still delete the rows it created.
+
 Fresh-clone setup:
 1. `npm install`
 2. Prepare a local database (one of): Docker (`docker compose up -d`) or
@@ -417,7 +480,7 @@ Design decisions — follow these when extending auth:
   Errors: unauthenticated → `UNAUTHORIZED` (401); missing permission →
   `FORBIDDEN` (403).
 - **RBAC models.** `User` ↔ `UserRole` ↔ `Role` ↔ `RolePermission` ↔ `Permission`.
-  `server/src/permissions/permissions.ts` is the canonical catalog: 119 permission
+  `server/src/permissions/permissions.ts` is the canonical catalog: 120 permission
   codes across 10 roles (`SUPER_ADMIN` bypasses checks by role, never by email).
   `requirePermission(code)` enforces server-side as route middleware — never inside
   controllers. Frontend `can()` mirrors checks for UI hiding only; it is not a

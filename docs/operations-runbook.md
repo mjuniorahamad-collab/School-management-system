@@ -168,7 +168,7 @@ in a maintenance window, and verify with the checks below.
 
 After the first migration is applied to a **blank** production database, run
 the bootstrap script to create the structural/master records: school, current
-academic session, the full permission catalog (119 codes), 10 roles with their
+academic session, the full permission catalog (120 codes), 10 roles with their
 grants, and the initial super admin identity.
 
 The script requires `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` to be set in
@@ -262,3 +262,39 @@ After a deploy, restore, config change, or container rebuild:
   same or a newer minor/major that pg_dump/restore of that version supports.
 - The scripts need the PostgreSQL client tools — they do not use node or the
   Prisma client.
+
+## Permission reconciliation workflow
+
+Use `bootstrap:production` to reconcile the permission catalog, role grants,
+and structural records without reseeding business data.
+
+### Safe workflow (production)
+1. **Preflight (read-only):**
+   ```sh
+   npm run bootstrap:production -- --check
+   ```
+   Review the output for missing roles/permissions/grants or an existing admin
+   email. If the admin already exists, the script will abort on write (by design).
+
+2. **Apply reconciliation (transactional, idempotent):**
+   ```sh
+   npm run bootstrap:production
+   ```
+   - Upserts the permission catalog from `server/src/permissions/permissions.ts`
+     (adds/removes grants via reconciliation; structural rows only).
+   - Never overwrites an existing admin password/hash or promotes existing users.
+   - If `SEED_ADMIN_EMAIL` already exists, the script aborts with no changes.
+
+3. **Verify (read-only):**
+   ```sh
+   npm run bootstrap:production -- --verify
+   ```
+   Confirm counts match: all 120 permissions, 10 roles, expected grants, and
+   an ACTIVE SUPER_ADMIN with membership.
+
+### Notes
+- **Do not run `npm run db:seed` against an existing production database.** `db:seed`
+  is for local/dev bootstrap only. Use `bootstrap:production` for production reconciliation.
+- Always run after `prisma migrate deploy`.
+- The reconciliation compares against the code catalog — if permissions changed in
+  code, run the workflow above to bring the database in sync.
