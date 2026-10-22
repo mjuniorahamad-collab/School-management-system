@@ -8,12 +8,19 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 
-interface ConfirmDialogProps {
+export interface ConfirmDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   title: string
   description: string
   confirmLabel: string
+  /**
+   * Label shown on the confirm button while the action is in flight. Defaults
+   * to "Deleting…" so every existing destructive confirmation keeps its
+   * current wording; pass an action-appropriate label ("Deactivating…",
+   * "Reactivating…") for non-delete confirmations.
+   */
+  pendingLabel?: string
   isPending: boolean
   onConfirm: () => void
 }
@@ -24,6 +31,7 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel,
+  pendingLabel,
   isPending,
   onConfirm,
 }: ConfirmDialogProps) {
@@ -49,7 +57,7 @@ export function ConfirmDialog({
             onClick={onConfirm}
             disabled={isPending}
           >
-            {isPending ? "Deleting…" : confirmLabel}
+            {isPending ? (pendingLabel ?? "Deleting…") : confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>
