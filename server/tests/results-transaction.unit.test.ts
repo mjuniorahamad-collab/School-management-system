@@ -95,7 +95,17 @@ function makeHarness(studentCount: number, options: { existingResults?: boolean 
   }
 
   // Marks already stored, used to answer the single aggregate read.
-  const storedMarks = new Map<string, Array<{ examResultId: string; examSubjectId: string; obtainedMarks: Prisma.Decimal | null; isAbsent: boolean }>>()
+  const storedMarks = new Map<
+    string,
+    Array<{
+      examResultId: string
+      examSubjectId: string
+      obtainedMarks: Prisma.Decimal | null
+      isAbsent: boolean
+      percentage: Prisma.Decimal | null
+      grade: string | null
+    }>
+  >()
 
   const record = (scope: "root" | "tx", label: string) => {
     recorder.calls.push(label)
@@ -109,7 +119,13 @@ function makeHarness(studentCount: number, options: { existingResults?: boolean 
         const ids = args.where?.enrollmentId?.in ?? []
         return ids
           .filter((id) => existing.has(id))
-          .map((id) => ({ id: existing.get(id) as string, enrollmentId: id }))
+          .map((id) => ({
+            id: existing.get(id) as string,
+            enrollmentId: id,
+            // Stored aggregate values (grade-history rule reads them).
+            grade: null,
+            totalPercentage: null,
+          }))
       }),
       createMany: vi.fn(async () => {
         record("tx", "examResult.createMany")
@@ -250,12 +266,17 @@ describe("putSubjectMarks — transaction round-trip cardinality (database-free)
     // Exactly the seven statements the batched implementation performs, and
     // never a multiple of the class size. Under the old per-student loop this
     // was 3N+2 = 302 at N=100.
+    //
+    // The single `examMark.findMany` reads the touched results' marks BEFORE
+    // the upsert: it carries both the base marks for the aggregate and the
+    // STORED grade/percentage of every mark (the history the grade-history
+    // rule preserves).
     expect(recorder.txCalls).toEqual([
       "examResult.findMany",
       "examResult.createMany",
       "examResult.findMany",
-      "$executeRaw",
       "examMark.findMany",
+      "$executeRaw",
       "$executeRaw",
       "auditLog.create",
     ])

@@ -14,6 +14,8 @@ import { toResultSheetExamMeta, toResultMarkCell, toResultSheetSubject } from ".
 import {
   computeResultAggregate,
   deriveSubjectMark,
+  resolveAggregateGrade,
+  resolveMarkGrade,
   toNumber,
   type GradedMark,
   type GradingBandRule,
@@ -55,7 +57,7 @@ type BandDb = Pick<TransactionClient, "gradingBand">
 
 async function loadGradingBands(db: BandDb, schoolId: string): Promise<GradingBandRule[]> {
   const rows = await db.gradingBand.findMany({
-    where: { schoolId },
+    where: { schoolId, isActive: true },
     orderBy: { sortOrder: "asc" },
     select: { minPercent: true, maxPercent: true, grade: true },
   })
@@ -79,6 +81,12 @@ function subjectConfigMaps(rows: SubjectConfig[]): {
 
 function decimalOrNull(value: number | null): Prisma.Decimal | null {
   return value === null ? null : new Prisma.Decimal(value)
+}
+
+/** Reads a nullable Decimal column into a plain number (null stays null). */
+function decimalToNumberOrNull(value: Prisma.Decimal | null | undefined): number | null {
+  if (value === null || value === undefined) return null
+  return toNumber(value)
 }
 
 /**
@@ -327,9 +335,25 @@ export async function putSubjectMarks(
     async (tx) => {
       const existingResults = await tx.examResult.findMany({
         where: { examId, enrollmentId: { in: enrollmentIds } },
-        select: { id: true, enrollmentId: true },
+        select: {
+          id: true,
+          enrollmentId: true,
+          // The stored aggregate grade is read BEFORE the save so an unchanged
+          // total keeps its historical grade (grade-history rule).
+          grade: true,
+          totalPercentage: true,
+        },
       })
       const resultByEnrollment = new Map(existingResults.map((row) => [row.enrollmentId, row.id]))
+      const storedAggregateByResultId = new Map(
+        existingResults.map((row) => [
+          row.id,
+          {
+            percentage: decimalToNumberOrNull(row.totalPercentage),
+            grade: row.grade,
+          },
+        ]),
+      )
 
       // One statement for every missing result instead of one per student. The
       // unique index on (examId, enrollmentId) makes skipDuplicates idempotent
@@ -355,6 +379,49 @@ export async function putSubjectMarks(
           select: { id: true, enrollmentId: true },
         })
         for (const row of created) resultByEnrollment.set(row.enrollmentId, row.id)
+      }
+
+      // The marks of the touched results are read BEFORE the upsert: the read
+      // carries two jobs — the base marks for the aggregate, and the STORED
+      // grade/percentage of every mark (the history that must survive a
+      // re-save). Reading afterwards would only see the values this save is
+      // about to write.
+      const targetResultIds = [
+        ...new Set(
+          enrollmentIds
+            .map((id) => resultByEnrollment.get(id))
+            .filter((id): id is string => typeof id === "string"),
+        ),
+      ]
+      const marksForTouched = await tx.examMark.findMany({
+        where: { examResultId: { in: targetResultIds } },
+        select: {
+          examResultId: true,
+          examSubjectId: true,
+          obtainedMarks: true,
+          isAbsent: true,
+          percentage: true,
+          grade: true,
+        },
+      })
+      const storedMarkByKey = new Map(
+        marksForTouched.map((mark) => [
+          `${mark.examResultId}:${mark.examSubjectId}`,
+          {
+            percentage: decimalToNumberOrNull(mark.percentage),
+            grade: mark.grade,
+          },
+        ]),
+      )
+      const marksByResult = new Map<string, GradedMark[]>()
+      for (const mark of marksForTouched) {
+        const bucket = marksByResult.get(mark.examResultId) ?? []
+        bucket.push({
+          examSubjectId: mark.examSubjectId,
+          obtainedMarks: mark.obtainedMarks === null ? null : toNumber(mark.obtainedMarks),
+          isAbsent: mark.isAbsent,
+        })
+        marksByResult.set(mark.examResultId, bucket)
       }
 
       const markRows: ExamMarkBulkRow[] = []
@@ -383,6 +450,12 @@ export async function putSubjectMarks(
           passMarks: passBy.get(examSubjectId) ?? 0,
           bands,
         })
+        // Grade-history rule: a mark whose score did not change keeps the grade
+        // it was awarded, even when the active bands changed in the meantime.
+        const grade = resolveMarkGrade({
+          derived: derivation,
+          stored: storedMarkByKey.get(`${resultId}:${examSubjectId}`) ?? null,
+        })
         markRows.push({
           examResultId: resultId,
           examSubjectId,
@@ -390,7 +463,7 @@ export async function putSubjectMarks(
           isAbsent,
           status,
           percentage: decimalOrNull(derivation.percentage),
-          grade: derivation.grade,
+          grade,
           isPass: derivation.isPass,
           remarks: row.remarks,
         })
@@ -404,22 +477,20 @@ export async function putSubjectMarks(
       })
 
       const touchedUnique = [...new Set(touched)]
-      // Single read of every mark belonging to the touched results, replacing the
-      // previous per-result `findFirst({ include: { marks: true } })`. Only the
-      // four columns the aggregate needs are selected.
-      const marksForTouched = await tx.examMark.findMany({
-        where: { examResultId: { in: touchedUnique } },
-        select: { examResultId: true, examSubjectId: true, obtainedMarks: true, isAbsent: true },
-      })
-      const marksByResult = new Map<string, GradedMark[]>()
-      for (const mark of marksForTouched) {
-        const bucket = marksByResult.get(mark.examResultId) ?? []
-        bucket.push({
-          examSubjectId: mark.examSubjectId,
-          obtainedMarks: mark.obtainedMarks === null ? null : toNumber(mark.obtainedMarks),
-          isAbsent: mark.isAbsent,
-        })
-        marksByResult.set(mark.examResultId, bucket)
+      // The aggregate is computed from the marks as they are AFTER this save:
+      // the base marks read above, with the written pairs replaced by the
+      // values in `markRows`.
+      for (const row of markRows) {
+        const bucket = marksByResult.get(row.examResultId) ?? []
+        const graded: GradedMark = {
+          examSubjectId: row.examSubjectId,
+          obtainedMarks: row.obtainedMarks === null ? null : toNumber(row.obtainedMarks),
+          isAbsent: row.isAbsent,
+        }
+        const index = bucket.findIndex((mark) => mark.examSubjectId === row.examSubjectId)
+        if (index >= 0) bucket[index] = graded
+        else bucket.push(graded)
+        marksByResult.set(row.examResultId, bucket)
       }
 
       const aggregateRows: ResultAggregateBulkRow[] = touchedUnique.map((resultId) => {
@@ -435,7 +506,13 @@ export async function putSubjectMarks(
           totalObtained: decimalOrNull(aggregate.totalObtained),
           totalMaxMarks: decimalOrNull(aggregate.totalMaxMarks),
           totalPercentage: decimalOrNull(aggregate.totalPercentage),
-          grade: aggregate.grade,
+          // Grade-history rule: the aggregate grade is preserved while the
+          // aggregate percentage is unchanged; a changed total is an explicit
+          // regrade against the current active bands.
+          grade: resolveAggregateGrade({
+            aggregate,
+            stored: storedAggregateByResultId.get(resultId) ?? null,
+          }),
           isPass: aggregate.isPass,
           isComplete: aggregate.isComplete,
         }
@@ -530,7 +607,9 @@ export async function finalizeExam(
 
     const resultIds = await tx.examResult.findMany({
       where: { examId },
-      select: { id: true },
+      // The stored aggregate grade is read so finalization keeps the grade a
+      // result was awarded when its total did not change (grade-history rule).
+      select: { id: true, grade: true, totalPercentage: true },
     })
     const aggregateRows: ResultAggregateBulkRow[] = resultIds.map((row) => {
       const aggregate = computeResultAggregate({
@@ -545,7 +624,16 @@ export async function finalizeExam(
         totalObtained: decimalOrNull(aggregate.totalObtained),
         totalMaxMarks: decimalOrNull(aggregate.totalMaxMarks),
         totalPercentage: decimalOrNull(aggregate.totalPercentage),
-        grade: aggregate.grade,
+        // Grade-history rule: the aggregate grade is preserved while the
+        // aggregate percentage is unchanged; a changed total is an explicit
+        // regrade against the current active bands.
+        grade: resolveAggregateGrade({
+          aggregate,
+          stored: {
+            percentage: decimalToNumberOrNull(row.totalPercentage),
+            grade: row.grade,
+          },
+        }),
         isPass: aggregate.isPass,
         isComplete: aggregate.isComplete,
       }

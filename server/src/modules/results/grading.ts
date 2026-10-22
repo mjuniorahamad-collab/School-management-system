@@ -37,6 +37,66 @@ export interface MarkDerivation {
 }
 
 /**
+ * The grade-related columns of a row as they were last written.
+ */
+export interface StoredGradeSnapshot {
+  /** Percentage stored with the row when it was last written. */
+  percentage: number | null
+  /** Grade stored with the row when it was last written. */
+  grade: string | null
+}
+
+/**
+ * Grade-history rule (single source of truth for both the per-subject mark and
+ * the student-level aggregate).
+ *
+ * A grade is a HISTORICAL fact: it records what the mark was worth when it was
+ * written. Retiring a grading band or re-routing a range must therefore never
+ * silently rewrite a grade that was already awarded — otherwise saving an
+ * unrelated remark would re-map published results.
+ *
+ * The rule is deliberately expressed on the PERCENTAGE and not on the marks:
+ * the percentage is derived from the marks alone, so an unchanged percentage
+ * proves the score itself did not change. When the percentage is unchanged the
+ * stored grade is kept; when it changed, the grade is recomputed from the
+ * CURRENT active bands — that is the explicit regrade.
+ *
+ * `isPass` is deliberately NOT preserved: it is derived from the subject's pass
+ * mark (a subject rule), not from a band, so it always reflects the current
+ * pass mark.
+ */
+export function resolveMarkGrade(opts: {
+  derived: MarkDerivation
+  stored: StoredGradeSnapshot | null
+}): string | null {
+  const { derived, stored } = opts
+  if (!stored) return derived.grade
+  // A row without a recorded percentage (absent, not applicable, never
+  // scored) carries no historical grade to preserve.
+  if (stored.percentage === null) return derived.grade
+  if (derived.percentage === null) return derived.grade
+  if (derived.percentage === stored.percentage) return stored.grade
+  return derived.grade
+}
+
+/**
+ * The student-level counterpart of `resolveMarkGrade`: the aggregate grade is
+ * preserved while the aggregate percentage is unchanged, and recomputed from
+ * the current active bands once the total moves.
+ */
+export function resolveAggregateGrade(opts: {
+  aggregate: ResultAggregate
+  stored: StoredGradeSnapshot | null
+}): string | null {
+  const { aggregate, stored } = opts
+  if (!stored) return aggregate.grade
+  if (stored.percentage === null) return aggregate.grade
+  if (aggregate.totalPercentage === null) return aggregate.grade
+  if (aggregate.totalPercentage === stored.percentage) return stored.grade
+  return aggregate.grade
+}
+
+/**
  * Per-subject mark derivation. Absent works and cleared cells (no marks) yield
  * null derivations — an absent subject is never recorded as a zero.
  */
