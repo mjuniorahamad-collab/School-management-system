@@ -54,6 +54,7 @@ async function assertReferences(
   tx: Prisma.TransactionClient,
   schoolId: string,
   scheme: NormalizedScheme,
+  allowedInactiveExamTypeIds: ReadonlySet<string> = new Set(),
 ): Promise<void> {
   const session = await tx.academicSession.findFirst({
     where: { id: scheme.academicSessionId, schoolId },
@@ -78,10 +79,20 @@ async function assertReferences(
   const examTypeIds = scheme.exams.map((exam) => exam.examTypeId)
   const examTypes = await tx.examType.findMany({
     where: { id: { in: examTypeIds }, schoolId },
-    select: { id: true },
+    select: { id: true, isActive: true },
   })
   if (examTypes.length !== examTypeIds.length) {
     throw badRequestError("One or more exam types do not belong to this school")
+  }
+  // A NEW scheme row may only bind an ACTIVE exam type. An exam type that is
+  // already bound by the scheme being edited stays usable even if it was
+  // retired afterwards — otherwise retiring an exam type would silently
+  // freeze every scheme that references it.
+  const newlyBound = examTypes.filter(
+    (examType) => !examType.isActive && !allowedInactiveExamTypeIds.has(examType.id),
+  )
+  if (newlyBound.length > 0) {
+    throw badRequestError("Cannot use an inactive exam type in a report card scheme")
   }
 
   if (scheme.coreSubjectIds.length > 0) {
@@ -255,8 +266,6 @@ export async function upsertReportCardScheme(
         scopeKey: scheme.scopeKey,
       })
 
-      await assertReferences(tx, schoolId, scheme)
-
       const existing = await tx.reportCardScheme.findFirst({
         where: {
           schoolId,
@@ -266,6 +275,13 @@ export async function upsertReportCardScheme(
         },
         include: REPORT_CARD_SCHEME_INCLUDE,
       })
+
+      // Exam types the scheme already binds stay usable even if they were
+      // retired afterwards; only a NEW binding requires an active exam type.
+      const alreadyBoundExamTypeIds = new Set(
+        (existing?.exams ?? []).map((exam) => exam.examTypeId),
+      )
+      await assertReferences(tx, schoolId, scheme, alreadyBoundExamTypeIds)
 
       if (existing) {
         const updated = await tx.reportCardScheme.update({

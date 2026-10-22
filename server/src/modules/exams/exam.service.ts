@@ -90,9 +90,9 @@ function buildListOrder(query: ListExamQuery): Prisma.ExamOrderByWithRelationInp
  */
 async function validateExamTargeting(
   prisma: PrismaClient,
-  opts: { schoolId: string; targeting: ExamTargeting },
+  opts: { schoolId: string; targeting: ExamTargeting; allowInactiveExamType?: boolean },
 ): Promise<{ sectionId: string | null }> {
-  const { schoolId, targeting } = opts
+  const { schoolId, targeting, allowInactiveExamType } = opts
 
   const academicSession = await prisma.academicSession.findFirst({
     where: { id: targeting.academicSessionId, schoolId },
@@ -102,9 +102,10 @@ async function validateExamTargeting(
 
   const examType = await prisma.examType.findFirst({
     where: { id: targeting.examTypeId, schoolId },
-    select: { id: true },
+    select: { id: true, isActive: true },
   })
   if (!examType) throw badRequestError("Exam type not found in this school")
+  if (!examType.isActive && !allowInactiveExamType) throw badRequestError("Cannot create an exam with an inactive exam type")
 
   const cls = await prisma.class.findFirst({
     where: { id: targeting.classId, schoolId },
@@ -392,6 +393,13 @@ export async function updateExam(
     throw badRequestError("Only draft exams can be edited")
   }
 
+  // The exam type of an exam is fixed at creation. Re-sending the SAME type id
+  // (even a retired one) is an explicit no-op; a DIFFERENT type id is rejected
+  // here so the rule holds for every caller, not only for the UI.
+  if (input.examTypeId !== undefined && input.examTypeId !== existing.examTypeId) {
+    throw badRequestError("An exam's exam type cannot be changed after the exam is created")
+  }
+
   await requireActingTeacherOnExam(prisma, actor, id)
 
   const mergedSectionId =
@@ -404,6 +412,9 @@ export async function updateExam(
       classId: existing.classId,
       sectionId: mergedSectionId,
     },
+    // The exam keeps its ORIGINAL exam type on edit; an exam type retired
+    // after the exam was created must not make the exam un-editable.
+    allowInactiveExamType: true,
   })
   if (sectionId !== (existing.sectionId ?? null)) {
     await assertActorSectionCoverage(prisma, actor, {
@@ -741,7 +752,7 @@ async function listExamTypeOptions(
   schoolId: string,
 ): Promise<{ id: string; code: string; name: string }[]> {
   return prisma.examType.findMany({
-    where: { schoolId },
+    where: { schoolId, isActive: true },
     select: { id: true, code: true, name: true },
     orderBy: { sortOrder: "asc" },
   })

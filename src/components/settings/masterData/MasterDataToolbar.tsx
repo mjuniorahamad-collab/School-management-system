@@ -6,16 +6,20 @@ interface MasterDataToolbarProps {
   search: string
   canEdit: boolean
   createLabel: string
+  includeInactive: boolean
   onSearchChange: (value: string) => void
   onCreateClick: () => void
+  onIncludeInactiveChange: (value: boolean) => void
 }
 
 export function MasterDataToolbar({
   search,
   canEdit,
   createLabel,
+  includeInactive,
   onSearchChange,
   onCreateClick,
+  onIncludeInactiveChange,
 }: MasterDataToolbarProps) {
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -33,12 +37,23 @@ export function MasterDataToolbar({
           className="pl-9"
         />
       </div>
-      {canEdit && (
-        <Button onClick={onCreateClick} className="shrink-0">
-          <Plus className="size-4" aria-hidden="true" />
-          {createLabel}
-        </Button>
-      )}
+      <div className="flex items-center gap-2">
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={includeInactive}
+            onChange={(event) => onIncludeInactiveChange(event.target.checked)}
+            className="size-4 rounded border border-input"
+          />
+          Show inactive
+        </label>
+        {canEdit && (
+          <Button onClick={onCreateClick} className="shrink-0">
+            <Plus className="size-4" aria-hidden="true" />
+            {createLabel}
+          </Button>
+        )}
+      </div>
     </div>
   )
 }

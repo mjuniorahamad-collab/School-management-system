@@ -199,6 +199,24 @@ describe("listGradingBandsQuerySchema boundaries (calculation)", () => {
   it("strips unknown query keys (this schema is not strict)", () => {
     const result = listGradingBandsQuerySchema.safeParse({ search: "a", page: 2 })
     expect(result.success).toBe(true)
-    if (result.success) expect(result.data).toEqual({ search: "a" })
+    if (result.success) expect(result.data).toEqual({ search: "a", includeInactive: false })
+  })
+
+  it("defaults to active-only (includeInactive is false unless asked for)", () => {
+    const result = listGradingBandsQuerySchema.safeParse({})
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.data.includeInactive).toBe(false)
+  })
+
+  it("accepts includeInactive as the query-string form", () => {
+    const result = listGradingBandsQuerySchema.safeParse({ includeInactive: "true" })
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.data.includeInactive).toBe(true)
+  })
+
+  it("treats an explicit includeInactive=false as active-only", () => {
+    const result = listGradingBandsQuerySchema.safeParse({ includeInactive: "false" })
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.data.includeInactive).toBe(false)
   })
 })

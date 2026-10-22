@@ -133,7 +133,11 @@ function FeeStructureForm({
   const [isActive, setIsActive] = useState(initial.isActive)
   const [items, setItems] = useState<ItemRow[]>(initial.items)
 
-  const feeHeads = useFeeHeads({})
+  // When editing, inactive fee heads are listed so a head that was retired
+  // after the structure was built stays visible; the ones that are not already
+  // used are disabled, so a new fee head can only be an active one.
+  const feeHeads = useFeeHeads({ includeInactive: Boolean(editingId) })
+  const boundFeeHeadIds = new Set(items.map((row) => row.feeHeadId).filter(Boolean))
   const createMutation = useCreateFeeStructure()
   const updateMutation = useUpdateFeeStructure(editingId)
 
@@ -258,11 +262,20 @@ function FeeStructureForm({
                     <SelectValue placeholder="Fee head" />
                   </SelectTrigger>
                   <SelectContent>
-                    {(feeHeads.data?.items ?? []).map((feeHead) => (
-                      <SelectItem key={feeHead.id} value={feeHead.id}>
-                        {feeHead.name} ({feeHead.code})
-                      </SelectItem>
-                    ))}
+                    {(feeHeads.data?.items ?? []).map((feeHead) => {
+                      const isInactive = feeHead.isActive === false
+                      const isBound = boundFeeHeadIds.has(feeHead.id)
+                      return (
+                        <SelectItem
+                          key={feeHead.id}
+                          value={feeHead.id}
+                          disabled={isInactive && !isBound}
+                        >
+                          {feeHead.name} ({feeHead.code})
+                          {isInactive ? " — inactive" : ""}
+                        </SelectItem>
+                      )
+                    })}
                   </SelectContent>
                 </Select>
                 <Input

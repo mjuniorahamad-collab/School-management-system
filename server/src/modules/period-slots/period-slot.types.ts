@@ -4,6 +4,7 @@ export interface PeriodSlotListItem {
   startTime: string
   endTime: string
   sortOrder: number
+  isActive: boolean
   createdAt: string
   updatedAt: string
 }
@@ -20,4 +21,5 @@ export interface PeriodSlotFormPayload {
   startTime: string
   endTime: string
   sortOrder?: number
+  isActive?: boolean
 }

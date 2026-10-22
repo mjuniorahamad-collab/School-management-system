@@ -5,10 +5,12 @@ import {
   validateFeeHeadForm,
   type FeeHeadFormValue,
 } from "@/lib/masterDataFormRules"
-import { useCreateFeeHead, useFeeHeads, useUpdateFeeHead } from "@/hooks/useMasterData"
+import { useCreateFeeHead, useFeeHeads, useSetFeeHeadActive, useUpdateFeeHead } from "@/hooks/useMasterData"
 import { DataTable, type Column } from "./DataTable"
 import { MasterDataToolbar } from "./MasterDataToolbar"
 import { MasterDataFormDialog, type FieldConfig } from "./MasterDataFormDialog"
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog"
+import { useLifecycleToggle } from "./useLifecycleToggle"
 
 interface EditingState {
   id: string
@@ -39,6 +41,21 @@ const COLUMNS: Column[] = [
       <span className="text-muted-foreground">{item.isRecurring ? "Yes" : "No"}</span>
     ),
   },
+  {
+    key: "status",
+    header: "Status",
+    render: (item) => (
+      <span
+        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+          item.isActive !== false
+            ? "bg-emerald-50 text-emerald-700"
+            : "bg-muted text-muted-foreground"
+        }`}
+      >
+        {item.isActive !== false ? "Active" : "Inactive"}
+      </span>
+    ),
+  },
 ]
 
 const FIELDS: FieldConfig[] = [
@@ -50,14 +67,22 @@ const FIELDS: FieldConfig[] = [
 export function FeeHeadsPanel() {
   const { can } = useAuth()
   const [search, setSearch] = useState("")
+  const [includeInactive, setIncludeInactive] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<EditingState | null>(null)
 
   const canEdit = can("fees:update")
-  const { data, isPending, isError, refetch } = useFeeHeads({ search: search || undefined })
+  const { data, isPending, isError, refetch } = useFeeHeads({
+    search: search || undefined,
+    includeInactive,
+  })
 
   const createMutation = useCreateFeeHead()
   const updateMutation = useUpdateFeeHead(editing?.id ?? "")
+  const toggleMutation = useSetFeeHeadActive()
+  const lifecycle = useLifecycleToggle({
+    toggleActive: toggleMutation.mutate,
+  })
 
   const openCreate = () => {
     setEditing(null)
@@ -97,8 +122,10 @@ export function FeeHeadsPanel() {
         search={search}
         canEdit={canEdit}
         createLabel="New Fee Head"
+        includeInactive={includeInactive}
         onSearchChange={setSearch}
         onCreateClick={openCreate}
+        onIncludeInactiveChange={setIncludeInactive}
       />
       <DataTable
         columns={COLUMNS}
@@ -110,6 +137,10 @@ export function FeeHeadsPanel() {
         errorText="Could not load fee heads."
         onRetry={() => void refetch()}
         onEdit={openEdit}
+        onToggleActive={(item, nextActive) => lifecycle.openToggle(item, nextActive)}
+        isTogglingActive={(item) =>
+          toggleMutation.isPending && toggleMutation.variables?.id === String(item.id)
+        }
       />
       <MasterDataFormDialog
         open={dialogOpen}
@@ -131,6 +162,18 @@ export function FeeHeadsPanel() {
         }}
         onSubmit={handleSubmit}
         isSubmitting={createMutation.isPending || updateMutation.isPending}
+      />
+      <ConfirmDialog
+        open={lifecycle.open}
+        onOpenChange={(open) => {
+          if (!open) lifecycle.close()
+        }}
+        title={lifecycle.dialogProps.title}
+        description={lifecycle.dialogProps.description}
+        confirmLabel={lifecycle.dialogProps.confirmLabel}
+        pendingLabel={lifecycle.dialogProps.pendingLabel}
+        isPending={lifecycle.isPending || toggleMutation.isPending}
+        onConfirm={lifecycle.dialogProps.onConfirm}
       />
     </div>
   )

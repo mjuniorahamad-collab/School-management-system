@@ -412,7 +412,7 @@ async function generateInTransaction(
     .sort((a, b) => byString(a.subjectId, b.subjectId))
 
   const gradingBands = await tx.gradingBand.findMany({
-    where: { schoolId },
+    where: { schoolId, isActive: true },
     select: { minPercent: true, maxPercent: true, grade: true },
     orderBy: { minPercent: "asc" },
   })

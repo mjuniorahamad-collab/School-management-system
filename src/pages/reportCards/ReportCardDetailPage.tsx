@@ -29,7 +29,9 @@ export function ReportCardDetailPage() {
   const classesQuery = useClassesOptions()
   const sectionsQuery = useSections({})
   const subjectsQuery = useSubjects({})
-  const examTypesQuery = useExamTypes({})
+  // Report cards are historical documents: they must still be able to NAME an
+  // exam type that was retired after the report card was generated.
+  const examTypesQuery = useExamTypes({ includeInactive: true })
 
   const maps = useMemo(
     () =>

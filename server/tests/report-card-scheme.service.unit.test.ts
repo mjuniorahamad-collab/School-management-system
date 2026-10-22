@@ -182,7 +182,9 @@ function makeHarness(options: HarnessOptions = {}): { calls: Call[] } {
       findMany: vi.fn(async (args: Record<string, unknown>) => {
         rec("examType.findMany", args)
         const ids = ((args.where as Record<string, unknown>).id as { in: string[] }).in
-        return found(refs.examTypes ?? ids.map((id) => ({ id })))
+        // `isActive` is a non-nullable column: every real row carries it, so the
+        // mock rows must too (an active exam type by default).
+        return found(refs.examTypes ?? ids.map((id) => ({ id, isActive: true })))
       }),
     },
     subject: {

@@ -26,6 +26,9 @@ export async function listPeriodSlots(
   const prisma = await requirePrisma()
 
   const where: Prisma.PeriodSlotWhereInput = { schoolId }
+  if (!query.includeInactive) {
+    where.isActive = true
+  }
   if (query.search) {
     where.name = { contains: query.search, mode: "insensitive" }
   }
@@ -61,6 +64,7 @@ export async function createPeriodSlot(
           startTime: input.startTime,
           endTime: input.endTime,
           sortOrder: input.sortOrder ?? 0,
+          isActive: input.isActive ?? true,
         },
       })
 
@@ -74,6 +78,7 @@ export async function createPeriodSlot(
         entityType: "PERIOD_SLOT",
         entityId: row.id,
         summary: `Created period ${row.name}`,
+        metadata: { isActive: row.isActive },
       })
 
       return row
@@ -96,7 +101,7 @@ export async function updatePeriodSlot(
   const prisma = await requirePrisma()
   const existing = await prisma.periodSlot.findFirst({
     where: { id, schoolId },
-    select: { id: true, name: true, startTime: true, endTime: true, sortOrder: true },
+    select: { id: true, name: true, startTime: true, endTime: true, sortOrder: true, isActive: true },
   })
   if (!existing) throw notFoundError("Period not found")
 
@@ -105,6 +110,7 @@ export async function updatePeriodSlot(
   if (input.startTime !== undefined) data.startTime = input.startTime
   if (input.endTime !== undefined) data.endTime = input.endTime
   if (input.sortOrder !== undefined) data.sortOrder = input.sortOrder
+  if (input.isActive !== undefined) data.isActive = input.isActive
 
   const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
@@ -125,6 +131,9 @@ export async function updatePeriodSlot(
       if (input.sortOrder !== undefined && existing.sortOrder !== input.sortOrder) {
         diffFields.push({ field: "sortOrder", before: existing.sortOrder, after: input.sortOrder })
       }
+      if (input.isActive !== undefined && existing.isActive !== input.isActive) {
+        diffFields.push({ field: "isActive", before: existing.isActive, after: input.isActive })
+      }
 
       await recordAudit(tx, {
         schoolId,
@@ -137,6 +146,7 @@ export async function updatePeriodSlot(
         entityId: id,
         summary: `Updated period ${existing.name}`,
         diff: diffFields.length > 0 ? { fields: diffFields } : null,
+        metadata: { isActive: row.isActive },
       })
 
       return row

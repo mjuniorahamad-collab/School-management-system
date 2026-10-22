@@ -631,37 +631,12 @@ describe.skipIf(!TEST_DATABASE_URL)("Report-card foundation concurrency (integra
 })
 
 async function resetAllTables(prisma: PrismaClient): Promise<void> {
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "AuditLog" CASCADE')
-  await prisma.attendanceRegister.deleteMany()
-  await prisma.attendanceRecord.deleteMany()
-  await prisma.calendarDay.deleteMany()
-  await prisma.academicCalendar.deleteMany()
-  await prisma.reportCardArtifact.deleteMany()
-  await prisma.reportCardSubject.deleteMany()
-  await prisma.reportCardExamResolution.deleteMany()
-  await prisma.reportCard.deleteMany()
-  await prisma.reportCardSchemeExam.deleteMany()
-  await prisma.reportCardScheme.deleteMany()
-  await prisma.examMark.deleteMany()
-  await prisma.examResult.deleteMany()
-  await prisma.examSubject.deleteMany()
-  await prisma.exam.deleteMany()
-  await prisma.examType.deleteMany()
-  await prisma.gradingBand.deleteMany()
-  await prisma.subject.deleteMany()
-  await prisma.teacher.deleteMany()
-  await prisma.studentEnrollmentPeriod.deleteMany()
-  await prisma.studentEnrollment.deleteMany()
-  await prisma.student.deleteMany()
-  await prisma.guardian.deleteMany()
-  await prisma.section.deleteMany()
-  await prisma.class.deleteMany()
-  await prisma.userRole.deleteMany()
-  await prisma.tenantMembership.deleteMany()
-  await prisma.academicSession.deleteMany()
-  await prisma.user.deleteMany()
-  await prisma.rolePermission.deleteMany()
+  // One TRUNCATE ... CASCADE clears every school-scoped table AND the rows that
+  // RESTRICT a delete (payments, receipts, adjustments, enrolments, ...). An
+  // ordered list of DELETEs aborts as soon as a previously run suite left a
+  // Restrict child behind: the DB-backed suites share ONE test database and
+  // run one after another.
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "School" CASCADE')
   await prisma.permission.deleteMany()
   await prisma.role.deleteMany()
-  await prisma.school.deleteMany()
 }

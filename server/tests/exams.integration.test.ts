@@ -606,6 +606,50 @@ describe.skipIf(!TEST_DATABASE_URL)("Exams API (integration)", () => {
       const res = await teacherAgent.patch(`/api/v1/exams/${createdId(created)}`).send({ name: "Hijack" })
       expect(res.status).toBe(403)
     })
+
+    it("refuses to change the exam type after the exam was created", async () => {
+      const created = await adminAgent.post("/api/v1/exams").send(examPayload())
+      const res = await adminAgent
+        .patch(`/api/v1/exams/${createdId(created)}`)
+        .send({ examTypeId: fixtures.otherExamTypeId })
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe("BAD_REQUEST")
+      expect(res.body.error.message).toMatch(/exam type cannot be changed/i)
+
+      const stored = await prisma.exam.findUniqueOrThrow({ where: { id: createdId(created) } })
+      expect(stored.examTypeId).toBe(fixtures.examTypeId)
+    })
+
+    it("accepts re-sending the same exam type", async () => {
+      const created = await adminAgent.post("/api/v1/exams").send(examPayload())
+      const res = await adminAgent
+        .patch(`/api/v1/exams/${createdId(created)}`)
+        .send({ examTypeId: fixtures.examTypeId, name: "Same type" })
+      expect(res.status).toBe(200)
+      expect(res.body.data.name).toBe("Same type")
+    })
+
+    it("accepts re-sending the exam type after that type was retired", async () => {
+      const created = await adminAgent.post("/api/v1/exams").send(examPayload())
+      const id = createdId(created)
+
+      await prisma.examType.update({
+        where: { id: fixtures.examTypeId },
+        data: { isActive: false },
+      })
+      try {
+        const res = await adminAgent
+          .patch(`/api/v1/exams/${id}`)
+          .send({ examTypeId: fixtures.examTypeId, name: "Retired type" })
+        expect(res.status).toBe(200)
+        expect(res.body.data.name).toBe("Retired type")
+      } finally {
+        await prisma.examType.update({
+          where: { id: fixtures.examTypeId },
+          data: { isActive: true },
+        })
+      }
+    })
   })
 
   describe("status", () => {
@@ -743,47 +787,14 @@ describe.skipIf(!TEST_DATABASE_URL)("Exams API (integration)", () => {
 })
 
 async function resetAllTables(prisma: PrismaClient): Promise<void> {
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "AuditLog" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Message" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "ConversationParticipant" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Conversation" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "ExamMark" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "ExamResult" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "ExamSubject" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Exam" CASCADE')
-  await prisma.homeworkSubmission.deleteMany()
-  await prisma.assignmentSubmission.deleteMany()
-  await prisma.homework.deleteMany()
-  await prisma.assignment.deleteMany()
-  await prisma.timetableEntry.deleteMany()
-  await prisma.attendanceRecord.deleteMany()
-  await prisma.periodSlot.deleteMany()
-  await prisma.studentGuardian.deleteMany()
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeInvoice" CASCADE')
-  await prisma.studentEnrollment.deleteMany()
-  await prisma.student.deleteMany()
-  await prisma.guardian.deleteMany()
-  await prisma.teacherSubject.deleteMany()
-  await prisma.teacherClass.deleteMany()
-  await prisma.staff.deleteMany()
-  await prisma.teacher.deleteMany()
-  await prisma.subject.deleteMany()
-  // Section deletes SET NULL AttendanceRegister.sectionId, but the scopeKey DB
-  // CHECK requires '__CLASS__' on NULL-section rows — registers must go first.
-  await prisma.attendanceRegister.deleteMany()
-  await prisma.section.deleteMany()
-  await prisma.class.deleteMany()
-  await prisma.session.deleteMany()
-  await prisma.userRole.deleteMany()
-  await prisma.tenantMembership.deleteMany()
-  await prisma.academicSession.deleteMany()
-  await prisma.examType.deleteMany()
-  await prisma.gradingBand.deleteMany()
-  await prisma.user.deleteMany()
-  await prisma.rolePermission.deleteMany()
+  // One TRUNCATE ... CASCADE clears every school-scoped table AND the rows that
+  // RESTRICT a delete (payments, receipts, adjustments, enrolments, ...). An
+  // ordered list of DELETEs aborts as soon as a previously run suite left a
+  // Restrict child behind: the DB-backed suites share ONE test database and
+  // run one after another.
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "School" CASCADE')
   await prisma.permission.deleteMany()
   await prisma.role.deleteMany()
-  await prisma.school.deleteMany()
 }
 
 async function login(

@@ -15,13 +15,17 @@ import type { ExamContext, ExamListItem } from "@/types/exams"
 // `@/lib/examFormRules` is deliberately NOT mocked: the payload assertions
 // traverse the real validation and mapping code.
 
-const { useExamContext, useCreateExam, useUpdateExam } = vi.hoisted(() => ({
+const { useExamContext, useCreateExam, useUpdateExam, useExamTypes } = vi.hoisted(() => ({
   useExamContext: vi.fn(),
   useCreateExam: vi.fn(),
   useUpdateExam: vi.fn(),
+  useExamTypes: vi.fn(),
 }))
 
 vi.mock("@/hooks/useExams", () => ({ useExamContext, useCreateExam, useUpdateExam }))
+// The edit form resolves a retired exam type from the full (active + retired)
+// list, which is a separate query from the exam context.
+vi.mock("@/hooks/useMasterData", () => ({ useExamTypes }))
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 // Radix Select drives a scrollable listbox and measures the viewport. jsdom
@@ -56,6 +60,7 @@ const CLASS_SIX = "00000000-0000-4000-8000-0000000000c1"
 const SECTION_A = "00000000-0000-4000-8000-0000000000c2"
 const SUBJECT_MAT = "00000000-0000-4000-8000-0000000000d1"
 const TEACHER_TARA = "00000000-0000-4000-8000-0000000000e1"
+const TYPE_RETIRED = "00000000-0000-4000-8000-0000000000b3"
 
 function context(overrides: Partial<ExamContext> = {}): ExamContext {
   return {
@@ -177,6 +182,16 @@ beforeEach(() => {
   useExamContext.mockReset()
   useCreateExam.mockReturnValue({ mutate: createMutate, isPending: false })
   useUpdateExam.mockReturnValue({ mutate: updateMutate, isPending: false })
+  // The full exam-type list (active + retired) used to label a retired type.
+  useExamTypes.mockReturnValue({
+    data: {
+      items: [
+        { id: TYPE_TERM_1, code: "TERM_1", name: "Term 1", isActive: true },
+        { id: "00000000-0000-4000-8000-0000000000b2", code: "FINAL", name: "Final", isActive: true },
+        { id: TYPE_RETIRED, code: "MIDTERM", name: "Midterm", isActive: false },
+      ],
+    },
+  })
   mockContext(context())
 })
 
@@ -362,6 +377,13 @@ describe("ExaminationFormDialog edit — identity stays read-only", () => {
   it("keeps the section editable, since the update contract allows it", () => {
     renderEdit()
     expect(sectionPicker()).not.toBeNull()
+  })
+
+  // An exam created with an exam type that was retired afterwards must still be
+  // labelled with the retired type's name instead of an em dash.
+  it("labels a retired exam type with its name", () => {
+    renderEdit(exam({ examTypeId: TYPE_RETIRED }))
+    expect(screen.getByDisplayValue("Midterm")).toBeDefined()
   })
 })
 

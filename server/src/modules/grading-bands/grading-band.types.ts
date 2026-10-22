@@ -5,6 +5,7 @@ export interface GradingBandListItem {
   grade: string
   description?: string
   sortOrder: number
+  isActive: boolean
   createdAt: string
   updatedAt: string
 }

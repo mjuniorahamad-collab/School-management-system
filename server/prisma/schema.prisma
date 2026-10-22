@@ -819,6 +819,10 @@ model PeriodSlot {
   startTime String // "HH:MM" (24h)
   endTime   String // "HH:MM" (24h)
   sortOrder Int      @default(0)
+  // Soft-delete marker. An inactive slot is kept for every historical
+  // timetable entry that referenced it, but can no longer be picked for NEW
+  // timetable entries.
+  isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -828,6 +832,7 @@ model PeriodSlot {
 
   @@unique([schoolId, name])
   @@index([schoolId])
+  @@index([schoolId, isActive])
 }
 
 // A fee head/category of a fee (e.g. tuition, transport, admission).
@@ -837,6 +842,10 @@ model FeeHead {
   code        String
   name        String
   isRecurring Boolean  @default(false)
+  // Soft-delete marker. An inactive fee head is kept for every historical fee
+  // structure and invoice that referenced it, but can no longer be selected
+  // for NEW fee structures.
+  isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -845,6 +854,7 @@ model FeeHead {
 
   @@unique([schoolId, code])
   @@index([schoolId])
+  @@index([schoolId, isActive])
 }
 
 // A named set of fee items configured for a class within an academic session.
@@ -1183,6 +1193,10 @@ model ExamType {
   code      String
   name      String
   sortOrder Int      @default(0)
+  // Soft-delete marker. An inactive exam type is kept for every historical
+  // exam and report-card scheme that referenced it, but can no longer be
+  // selected for NEW exams.
+  isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1194,6 +1208,7 @@ model ExamType {
 
   @@unique([schoolId, code])
   @@index([schoolId])
+  @@index([schoolId, isActive])
 }
 
 // Configurable percentage → letter grade bands used for Results. Tenant-scoped.
@@ -1205,6 +1220,11 @@ model GradingBand {
   grade       String
   description String?
   sortOrder   Int      @default(0)
+  // Soft-delete marker. An inactive band is kept for the historical record
+  // (grades are stored denormalised on marks and report cards) and is
+  // excluded from every NEW grading lookup, so a retired band can never
+  // decide a fresh grade.
+  isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -1212,6 +1232,7 @@ model GradingBand {
 
   @@unique([schoolId, minPercent])
   @@index([schoolId])
+  @@index([schoolId, isActive])
 }
 
 // Generic key/value store for tenant-scoped school configuration.

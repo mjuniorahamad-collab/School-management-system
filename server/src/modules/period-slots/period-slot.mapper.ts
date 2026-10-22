@@ -8,6 +8,7 @@ export function toPeriodSlotListItem(periodSlot: PeriodSlot): PeriodSlotListItem
     startTime: periodSlot.startTime,
     endTime: periodSlot.endTime,
     sortOrder: periodSlot.sortOrder,
+    isActive: periodSlot.isActive,
     createdAt: periodSlot.createdAt.toISOString(),
     updatedAt: periodSlot.updatedAt.toISOString(),
   }

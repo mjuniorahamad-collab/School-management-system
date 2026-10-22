@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useCreateExam, useExamContext, useUpdateExam } from "@/hooks/useExams"
+import { useExamTypes } from "@/hooks/useMasterData"
 import {
   defaultExamForm,
   emptySubjectRow,
@@ -79,6 +80,10 @@ function ExaminationFormInner({
   const { data: context } = useExamContext()
   const sessions = context?.academicSessions ?? []
   const examTypes = context?.examTypes ?? []
+  // The context only offers ACTIVE exam types. An exam that was created with a
+  // now-retired exam type must still be labelled correctly when edited, so the
+  // retired type is resolved from the full list.
+  const allExamTypes = useExamTypes({ includeInactive: true }).data?.items ?? []
   const subjects = context?.subjects ?? []
   const classes = context?.classes ?? []
   const teachers = context?.teachers ?? []
@@ -196,7 +201,10 @@ function ExaminationFormInner({
             </Select>
           ) : (
             <Input
-              value={examTypes.find((t) => t.id === form.examTypeId)?.name ?? "—"}
+              value={
+                (allExamTypes.find((t) => t.id === form.examTypeId) ??
+                  examTypes.find((t) => t.id === form.examTypeId))?.name ?? "—"
+              }
               disabled
             />
           )}

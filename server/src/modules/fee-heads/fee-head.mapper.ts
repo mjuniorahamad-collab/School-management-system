@@ -7,6 +7,7 @@ export function toFeeHeadListItem(feeHead: FeeHead): FeeHeadListItem {
     code: feeHead.code,
     name: feeHead.name,
     isRecurring: feeHead.isRecurring,
+    isActive: feeHead.isActive,
     createdAt: feeHead.createdAt.toISOString(),
     updatedAt: feeHead.updatedAt.toISOString(),
   }

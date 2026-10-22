@@ -3,6 +3,7 @@ export interface FeeHeadListItem {
   code: string
   name: string
   isRecurring: boolean
+  isActive: boolean
   createdAt: string
   updatedAt: string
 }
@@ -18,4 +19,5 @@ export interface FeeHeadFormPayload {
   code: string
   name: string
   isRecurring?: boolean
+  isActive?: boolean
 }

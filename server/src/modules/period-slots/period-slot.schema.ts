@@ -13,6 +13,7 @@ export const createPeriodSlotSchema = z
     startTime: timeOfDaySchema,
     endTime: timeOfDaySchema,
     sortOrder: z.number().int().min(0).optional(),
+    isActive: z.boolean().optional(),
   })
   .strict()
   .refine((value) => value.startTime < value.endTime, {
@@ -26,6 +27,7 @@ export const updatePeriodSlotSchema = z
     startTime: timeOfDaySchema.optional(),
     endTime: timeOfDaySchema.optional(),
     sortOrder: z.number().int().min(0).optional(),
+    isActive: z.boolean().optional(),
   })
   .strict()
   .refine(
@@ -38,6 +40,11 @@ export const updatePeriodSlotSchema = z
 
 export const listPeriodSlotsQuerySchema = z.object({
   search: z.string().trim().min(1).max(100).optional(),
+  // When true the list returns inactive period slots as well. Defaults to false.
+  includeInactive: z
+    .union([z.literal("true"), z.literal("false")])
+    .optional()
+    .transform((value) => value === "true"),
 })
 
 export type CreatePeriodSlotInput = z.infer<typeof createPeriodSlotSchema>

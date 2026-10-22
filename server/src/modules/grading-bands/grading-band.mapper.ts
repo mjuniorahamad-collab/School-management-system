@@ -9,6 +9,7 @@ export function toGradingBandListItem(band: GradingBand): GradingBandListItem {
     grade: band.grade,
     description: band.description ?? undefined,
     sortOrder: band.sortOrder,
+    isActive: band.isActive,
     createdAt: band.createdAt.toISOString(),
     updatedAt: band.updatedAt.toISOString(),
   }

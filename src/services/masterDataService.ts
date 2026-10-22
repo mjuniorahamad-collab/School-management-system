@@ -18,20 +18,17 @@ import type {
   PeriodSlotsQuery,
 } from "@/types/masterData"
 
-interface SearchQuery {
-  search?: string
-}
-
-function withSearch(q: SearchQuery): string {
+function buildQuery(q: { search?: string; includeInactive?: boolean }): string {
   const params = new URLSearchParams()
   if (q.search) params.set("search", q.search)
+  if (q.includeInactive) params.set("includeInactive", "true")
   return params.toString()
 }
 
 // Fee heads.
 export const feeHeadsService = {
   list(query: FeeHeadsQuery): Promise<FeeHeadListResult> {
-    return api.get<FeeHeadListResult>(`/fee-heads?${withSearch(query)}`)
+    return api.get<FeeHeadListResult>(`/fee-heads?${buildQuery(query)}`)
   },
   create(payload: FeeHeadFormPayload): Promise<FeeHeadDetail> {
     return api.post<FeeHeadDetail>("/fee-heads", payload)
@@ -44,7 +41,7 @@ export const feeHeadsService = {
 // Exam types.
 export const examTypesService = {
   list(query: ExamTypesQuery): Promise<ExamTypeListResult> {
-    return api.get<ExamTypeListResult>(`/exam-types?${withSearch(query)}`)
+    return api.get<ExamTypeListResult>(`/exam-types?${buildQuery(query)}`)
   },
   create(payload: ExamTypeFormPayload): Promise<ExamTypeDetail> {
     return api.post<ExamTypeDetail>("/exam-types", payload)
@@ -57,7 +54,7 @@ export const examTypesService = {
 // Grading bands.
 export const gradingBandsService = {
   list(query: GradingBandsQuery): Promise<GradingBandListResult> {
-    return api.get<GradingBandListResult>(`/grading-bands?${withSearch(query)}`)
+    return api.get<GradingBandListResult>(`/grading-bands?${buildQuery(query)}`)
   },
   create(payload: GradingBandFormPayload): Promise<GradingBandDetail> {
     return api.post<GradingBandDetail>("/grading-bands", payload)
@@ -70,7 +67,7 @@ export const gradingBandsService = {
 // Period slots.
 export const periodSlotsService = {
   list(query: PeriodSlotsQuery): Promise<PeriodSlotListResult> {
-    return api.get<PeriodSlotListResult>(`/period-slots?${withSearch(query)}`)
+    return api.get<PeriodSlotListResult>(`/period-slots?${buildQuery(query)}`)
   },
   create(payload: PeriodSlotFormPayload): Promise<PeriodSlotDetail> {
     return api.post<PeriodSlotDetail>("/period-slots", payload)

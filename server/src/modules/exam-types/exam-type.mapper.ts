@@ -7,6 +7,7 @@ export function toExamTypeListItem(examType: ExamType): ExamTypeListItem {
     code: examType.code,
     name: examType.name,
     sortOrder: examType.sortOrder,
+    isActive: examType.isActive,
     createdAt: examType.createdAt.toISOString(),
     updatedAt: examType.updatedAt.toISOString(),
   }

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
-import { Pencil } from "lucide-react"
+import { Pencil, Power, RotateCcw } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
+import { cn } from "@/lib/utils"
 
 export interface Column {
   key: string
@@ -19,6 +20,8 @@ interface DataTableProps {
   errorText: string
   onRetry: () => void
   onEdit: (item: Record<string, unknown>) => void
+  onToggleActive?: (item: Record<string, unknown>, nextActive: boolean) => void
+  isTogglingActive?: (item: Record<string, unknown>) => boolean
 }
 
 export function DataTable({
@@ -31,6 +34,8 @@ export function DataTable({
   errorText,
   onRetry,
   onEdit,
+  onToggleActive,
+  isTogglingActive,
 }: DataTableProps) {
   if (isPending) return <TableSkeleton />
   if (isError) {
@@ -66,34 +71,58 @@ export function DataTable({
                   {column.header}
                 </th>
               ))}
-              {canEdit && <th scope="col" className="w-10 px-4 py-3" />}
+              {canEdit && <th scope="col" className="w-20 px-4 py-3" />}
             </tr>
           </thead>
           <tbody className="divide-y">
-            {items.map((item) => (
-              <tr key={String(item.id)} className="transition-colors hover:bg-muted/40">
-                {columns.map((column) => (
-                  <td
-                    key={column.key}
-                    className={`px-4 py-3 text-foreground ${column.cellClassName ?? ""}`}
-                  >
-                    {column.render(item)}
-                  </td>
-                ))}
-                {canEdit && (
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      type="button"
-                      onClick={() => onEdit(item)}
-                      aria-label="Edit row"
-                      className="inline-flex items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            {items.map((item) => {
+              const isActive = item.isActive !== false
+              const toggling = isTogglingActive?.(item) ?? false
+              return (
+                <tr key={String(item.id)} className="transition-colors hover:bg-muted/40">
+                  {columns.map((column) => (
+                    <td
+                      key={column.key}
+                      className={`px-4 py-3 text-foreground ${column.cellClassName ?? ""}`}
                     >
-                      <Pencil className="size-4" aria-hidden="true" />
-                    </button>
-                  </td>
-                )}
-              </tr>
-            ))}
+                      {column.render(item)}
+                    </td>
+                  ))}
+                  {canEdit && (
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        {onToggleActive && (
+                          <button
+                            type="button"
+                            onClick={() => onToggleActive(item, !isActive)}
+                            disabled={toggling}
+                            aria-label={isActive ? "Deactivate" : "Reactivate"}
+                            className={cn(
+                              "inline-flex items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-50",
+                              isActive ? "text-rose-600 hover:text-rose-700" : "text-emerald-600 hover:text-emerald-700",
+                            )}
+                          >
+                            {isActive ? (
+                              <Power className="size-4" aria-hidden="true" />
+                            ) : (
+                              <RotateCcw className="size-4" aria-hidden="true" />
+                            )}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => onEdit(item)}
+                          aria-label="Edit row"
+                          className="inline-flex items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                        >
+                          <Pencil className="size-4" aria-hidden="true" />
+                        </button>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>

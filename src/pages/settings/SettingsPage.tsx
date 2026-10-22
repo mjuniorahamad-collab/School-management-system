@@ -1,4 +1,5 @@
 import { useAuth } from "@/auth/useAuth"
+import type { PermissionCode } from "@/types/permissions"
 import { PageContainer } from "@/components/layout/PageContainer"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { SectionForm, SignatoriesForm, type SectionField } from "@/components/settings/SettingsSectionForm"
@@ -250,7 +251,7 @@ export function SettingsPage() {
 
 function MasterDataTabs() {
   const { can } = useAuth()
-  const canView = (perm: string) => can(perm)
+  const canView = (perm: PermissionCode) => can(perm)
   return (
     <Tabs defaultValue="feeHeads">
       <TabsList className="flex w-full justify-start overflow-x-auto sm:w-auto">

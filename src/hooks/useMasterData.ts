@@ -150,3 +150,65 @@ export function useUpdatePeriodSlot(id: string) {
     onError: (e: Error) => toast.error("Could not update period slot", { description: e.message }),
   })
 }
+
+// Lifecycle (deactivate / reactivate) mutations. Each targets the row id passed
+// at call time, so a table row can toggle itself without rebuilding hooks.
+export function useSetFeeHeadActive() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) =>
+      feeHeadsService.update(id, { isActive }),
+    onSuccess: (fh) => {
+      qc.invalidateQueries({ queryKey: GROUPS.feeHeads })
+      toast.success(fh.isActive ? "Fee head activated" : "Fee head deactivated", {
+        description: fh.name,
+      })
+    },
+    onError: (e: Error) => toast.error("Could not update fee head status", { description: e.message }),
+  })
+}
+
+export function useSetExamTypeActive() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) =>
+      examTypesService.update(id, { isActive }),
+    onSuccess: (et) => {
+      qc.invalidateQueries({ queryKey: GROUPS.examTypes })
+      toast.success(et.isActive ? "Exam type activated" : "Exam type deactivated", {
+        description: et.name,
+      })
+    },
+    onError: (e: Error) => toast.error("Could not update exam type status", { description: e.message }),
+  })
+}
+
+export function useSetGradingBandActive() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) =>
+      gradingBandsService.update(id, { isActive }),
+    onSuccess: (gb) => {
+      qc.invalidateQueries({ queryKey: GROUPS.gradingBands })
+      toast.success(gb.isActive ? "Grading band activated" : "Grading band deactivated", {
+        description: `Grade ${gb.grade}`,
+      })
+    },
+    onError: (e: Error) => toast.error("Could not update grading band status", { description: e.message }),
+  })
+}
+
+export function useSetPeriodSlotActive() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) =>
+      periodSlotsService.update(id, { isActive }),
+    onSuccess: (ps) => {
+      qc.invalidateQueries({ queryKey: GROUPS.periodSlots })
+      toast.success(ps.isActive ? "Period slot activated" : "Period slot deactivated", {
+        description: ps.name,
+      })
+    },
+    onError: (e: Error) => toast.error("Could not update period slot status", { description: e.message }),
+  })
+}

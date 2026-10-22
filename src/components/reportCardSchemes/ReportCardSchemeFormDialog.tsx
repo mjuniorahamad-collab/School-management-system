@@ -253,7 +253,9 @@ function EditSchemeEditor({
   const sessions = useAcademicSessions({}).data?.items ?? []
   const classes = useClassesOptions().data?.items ?? []
   const sections = useSections({ classId: detail.classId }).data?.items ?? []
-  const examTypes = useExamTypes({}).data?.items ?? []
+  // Inactive exam types are listed so an already-bound one stays visible; the
+  // editor disables the ones that are not already bound.
+  const examTypes = useExamTypes({ includeInactive: true }).data?.items ?? []
   const subjects = useSubjects({}).data?.items ?? []
 
   const [form, setForm] = useState<ReportCardSchemeFormValue>(() => schemeDetailToFormValue(detail))

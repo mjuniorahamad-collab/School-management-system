@@ -62,6 +62,10 @@ export const updateExamSchema = z
     startDate: dateString.optional(),
     endDate: dateString.optional(),
     sectionId: updateSectionIdSchema,
+    // The exam type of an exam is fixed at creation. The field is accepted so
+    // the service can answer explicitly: re-sending the SAME type (including a
+    // retired one) is a no-op, sending a DIFFERENT type is rejected.
+    examTypeId: uuid.optional(),
   })
   .strict()
   .refine((data) => data.endDate === undefined || data.startDate === undefined || data.endDate >= data.startDate, {

@@ -27,6 +27,9 @@ export async function listExamTypes(
   const prisma = await requirePrisma()
 
   const where: Prisma.ExamTypeWhereInput = { schoolId }
+  if (!query.includeInactive) {
+    where.isActive = true
+  }
   if (query.search) {
     where.OR = [
       { name: { contains: query.search, mode: "insensitive" } },
@@ -64,6 +67,7 @@ export async function createExamType(
           code: normalizeExamTypeCode(input.code),
           name: input.name,
           sortOrder: input.sortOrder ?? 0,
+          isActive: input.isActive ?? true,
         },
       })
 
@@ -77,6 +81,7 @@ export async function createExamType(
         entityType: "EXAM_TYPE",
         entityId: row.id,
         summary: `Created exam type ${row.name}`,
+        metadata: { isActive: row.isActive },
       })
 
       return row
@@ -99,7 +104,7 @@ export async function updateExamType(
   const prisma = await requirePrisma()
   const existing = await prisma.examType.findFirst({
     where: { id, schoolId },
-    select: { id: true, name: true, code: true, sortOrder: true },
+    select: { id: true, name: true, code: true, sortOrder: true, isActive: true },
   })
   if (!existing) throw notFoundError("Exam type not found")
 
@@ -107,6 +112,7 @@ export async function updateExamType(
   if (input.name !== undefined) data.name = input.name
   if (input.code !== undefined) data.code = normalizeExamTypeCode(input.code)
   if (input.sortOrder !== undefined) data.sortOrder = input.sortOrder
+  if (input.isActive !== undefined) data.isActive = input.isActive
 
   const auditActor = await resolveAuditActor(prisma, schoolId, actor)
 
@@ -124,6 +130,9 @@ export async function updateExamType(
       if (input.sortOrder !== undefined && existing.sortOrder !== input.sortOrder) {
         diffFields.push({ field: "sortOrder", before: existing.sortOrder, after: input.sortOrder })
       }
+      if (input.isActive !== undefined && existing.isActive !== input.isActive) {
+        diffFields.push({ field: "isActive", before: existing.isActive, after: input.isActive })
+      }
 
       await recordAudit(tx, {
         schoolId,
@@ -136,6 +145,7 @@ export async function updateExamType(
         entityId: id,
         summary: `Updated exam type ${existing.name}`,
         diff: diffFields.length > 0 ? { fields: diffFields } : null,
+        metadata: { isActive: row.isActive },
       })
 
       return row

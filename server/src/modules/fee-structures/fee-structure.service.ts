@@ -60,14 +60,24 @@ async function assertFeeHeadsBelongToSchool(
   prisma: PrismaClient,
   schoolId: string,
   items: readonly FeeStructureItemInput[],
+  allowedInactiveFeeHeadIds: ReadonlySet<string> = new Set(),
 ): Promise<void> {
   const feeHeadIds = items.map((item) => item.feeHeadId)
   assertUniqueFeeHeadIds(feeHeadIds)
   assertItemsNonEmpty(feeHeadIds.length)
 
-  const found = await prisma.feeHead.count({ where: { schoolId, id: { in: feeHeadIds } } })
-  if (found !== feeHeadIds.length) {
+  const feeHeads = await prisma.feeHead.findMany({
+    where: { schoolId, id: { in: feeHeadIds } },
+    select: { id: true, isActive: true },
+  })
+  if (feeHeads.length !== feeHeadIds.length) {
     throw badRequestError("One or more fee heads are not valid for this school")
+  }
+  const inactive = feeHeads
+    .filter((head) => !head.isActive && !allowedInactiveFeeHeadIds.has(head.id))
+    .map((head) => head.id)
+  if (inactive.length > 0) {
+    throw badRequestError("Cannot use an inactive fee head in a fee structure")
   }
 }
 
@@ -223,7 +233,18 @@ export async function updateFeeStructure(
   const data = toUncheckedInput(input)
 
   if (input.items) {
-    await assertFeeHeadsBelongToSchool(prisma, schoolId, input.items)
+    // The structure keeps the fee heads it already had unless the caller
+    // replaces them. A fee head retired after the structure was built stays
+    // usable; only a NEWLY added fee head must be active.
+    const existingFeeHeadIds = new Set(
+      (
+        await prisma.feeStructureItem.findMany({
+          where: { feeStructureId: id },
+          select: { feeHeadId: true },
+        })
+      ).map((item) => item.feeHeadId),
+    )
+    await assertFeeHeadsBelongToSchool(prisma, schoolId, input.items, existingFeeHeadIds)
     const resolved = await resolveSessionAndClass(prisma, schoolId, nextSessionId, nextClassId)
     data.sessionId = resolved.sessionId
     data.classId = resolved.classId

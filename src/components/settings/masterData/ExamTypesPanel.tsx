@@ -5,10 +5,12 @@ import {
   validateExamTypeForm,
   type ExamTypeFormValue,
 } from "@/lib/masterDataFormRules"
-import { useExamTypes, useCreateExamType, useUpdateExamType } from "@/hooks/useMasterData"
+import { useCreateExamType, useExamTypes, useSetExamTypeActive, useUpdateExamType } from "@/hooks/useMasterData"
 import { DataTable, type Column } from "./DataTable"
 import { MasterDataToolbar } from "./MasterDataToolbar"
 import { MasterDataFormDialog, type FieldConfig } from "./MasterDataFormDialog"
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog"
+import { useLifecycleToggle } from "./useLifecycleToggle"
 
 interface EditingState {
   id: string
@@ -20,7 +22,7 @@ interface EditingState {
 const COLUMNS: Column[] = [
   {
     key: "name",
-    header: "Exam type",
+    header: "Name",
     render: (item) => (
       <span className="font-medium text-foreground">{String(item.name ?? "")}</span>
     ),
@@ -34,9 +36,22 @@ const COLUMNS: Column[] = [
   },
   {
     key: "sortOrder",
-    header: "Order",
+    header: "Sort order",
+    render: (item) => <span className="text-muted-foreground">{String(item.sortOrder ?? 0)}</span>,
+  },
+  {
+    key: "status",
+    header: "Status",
     render: (item) => (
-      <span className="text-muted-foreground tabular-nums">{String(item.sortOrder ?? "")}</span>
+      <span
+        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+          item.isActive !== false
+            ? "bg-emerald-50 text-emerald-700"
+            : "bg-muted text-muted-foreground"
+        }`}
+      >
+        {item.isActive !== false ? "Active" : "Inactive"}
+      </span>
     ),
   },
 ]
@@ -50,14 +65,22 @@ const FIELDS: FieldConfig[] = [
 export function ExamTypesPanel() {
   const { can } = useAuth()
   const [search, setSearch] = useState("")
+  const [includeInactive, setIncludeInactive] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<EditingState | null>(null)
 
   const canEdit = can("exams:update")
-  const { data, isPending, isError, refetch } = useExamTypes({ search: search || undefined })
+  const { data, isPending, isError, refetch } = useExamTypes({
+    search: search || undefined,
+    includeInactive,
+  })
 
   const createMutation = useCreateExamType()
   const updateMutation = useUpdateExamType(editing?.id ?? "")
+  const toggleMutation = useSetExamTypeActive()
+  const lifecycle = useLifecycleToggle({
+    toggleActive: toggleMutation.mutate,
+  })
 
   const openCreate = () => {
     setEditing(null)
@@ -97,8 +120,10 @@ export function ExamTypesPanel() {
         search={search}
         canEdit={canEdit}
         createLabel="New Exam Type"
+        includeInactive={includeInactive}
         onSearchChange={setSearch}
         onCreateClick={openCreate}
+        onIncludeInactiveChange={setIncludeInactive}
       />
       <DataTable
         columns={COLUMNS}
@@ -110,6 +135,22 @@ export function ExamTypesPanel() {
         errorText="Could not load exam types."
         onRetry={() => void refetch()}
         onEdit={openEdit}
+        onToggleActive={(item, nextActive) => lifecycle.openToggle(item, nextActive)}
+        isTogglingActive={(item) =>
+          toggleMutation.isPending && toggleMutation.variables?.id === String(item.id)
+        }
+      />
+      <ConfirmDialog
+        open={lifecycle.open}
+        onOpenChange={(open) => {
+          if (!open) lifecycle.close()
+        }}
+        title={lifecycle.dialogProps.title}
+        description={lifecycle.dialogProps.description}
+        confirmLabel={lifecycle.dialogProps.confirmLabel}
+        pendingLabel={lifecycle.dialogProps.pendingLabel}
+        isPending={lifecycle.isPending || toggleMutation.isPending}
+        onConfirm={lifecycle.dialogProps.onConfirm}
       />
       <MasterDataFormDialog
         open={dialogOpen}

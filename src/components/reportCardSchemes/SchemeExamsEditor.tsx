@@ -24,6 +24,11 @@ export function SchemeExamsEditor({
   onAddRow,
   onRemoveRow,
 }: SchemeExamsEditorProps) {
+  // An exam type the scheme already binds stays visible (and marked inactive)
+  // even after it was retired, so editing the scheme never silently drops a
+  // configured exam. Retired types cannot be newly chosen.
+  const boundExamTypeIds = new Set(rows.map((row) => row.examTypeId).filter(Boolean))
+
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs text-muted-foreground">
@@ -51,11 +56,20 @@ export function SchemeExamsEditor({
                     <SelectValue placeholder="Select…" />
                   </SelectTrigger>
                   <SelectContent>
-                    {examTypes.map((examType) => (
-                      <SelectItem key={examType.id} value={examType.id}>
-                        {examType.name} ({examType.code})
-                      </SelectItem>
-                    ))}
+                    {examTypes.map((examType) => {
+                      const isInactive = examType.isActive === false
+                      const isBound = boundExamTypeIds.has(examType.id)
+                      return (
+                        <SelectItem
+                          key={examType.id}
+                          value={examType.id}
+                          disabled={isInactive && !isBound}
+                        >
+                          {examType.name} ({examType.code})
+                          {isInactive ? " — inactive" : ""}
+                        </SelectItem>
+                      )
+                    })}
                   </SelectContent>
                 </Select>
               </div>

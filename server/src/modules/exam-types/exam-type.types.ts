@@ -3,6 +3,7 @@ export interface ExamTypeListItem {
   code: string
   name: string
   sortOrder: number
+  isActive: boolean
   createdAt: string
   updatedAt: string
 }
@@ -18,4 +19,5 @@ export interface ExamTypeFormPayload {
   code: string
   name: string
   sortOrder?: number
+  isActive?: boolean
 }

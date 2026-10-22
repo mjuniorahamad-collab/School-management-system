@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react"
+import type { PermissionCode } from "@/types/permissions"
 
 export type AttendanceStatus = "present" | "late" | "absent"
 
@@ -119,7 +120,7 @@ export interface NavItem {
   icon: LucideIcon
   keywords?: string[]
   /** Permission code (resource:action) required to see this item. UI-hint only. */
-  requiredPermission?: string
+  requiredPermission?: PermissionCode
 }
 
 export interface NavSection {

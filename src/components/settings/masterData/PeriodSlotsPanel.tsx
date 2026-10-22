@@ -5,10 +5,12 @@ import {
   validatePeriodSlotForm,
   type PeriodSlotFormValue,
 } from "@/lib/masterDataFormRules"
-import { useCreatePeriodSlot, usePeriodSlots, useUpdatePeriodSlot } from "@/hooks/useMasterData"
+import { useCreatePeriodSlot, usePeriodSlots, useSetPeriodSlotActive, useUpdatePeriodSlot } from "@/hooks/useMasterData"
 import { DataTable, type Column } from "./DataTable"
 import { MasterDataToolbar } from "./MasterDataToolbar"
 import { MasterDataFormDialog, type FieldConfig } from "./MasterDataFormDialog"
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog"
+import { useLifecycleToggle } from "./useLifecycleToggle"
 
 interface EditingState {
   id: string
@@ -42,6 +44,21 @@ const COLUMNS: Column[] = [
       <span className="text-muted-foreground tabular-nums">{String(item.sortOrder ?? "")}</span>
     ),
   },
+  {
+    key: "status",
+    header: "Status",
+    render: (item) => (
+      <span
+        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+          item.isActive !== false
+            ? "bg-emerald-50 text-emerald-700"
+            : "bg-muted text-muted-foreground"
+        }`}
+      >
+        {item.isActive !== false ? "Active" : "Inactive"}
+      </span>
+    ),
+  },
 ]
 
 const FIELDS: FieldConfig[] = [
@@ -54,14 +71,22 @@ const FIELDS: FieldConfig[] = [
 export function PeriodSlotsPanel() {
   const { can } = useAuth()
   const [search, setSearch] = useState("")
+  const [includeInactive, setIncludeInactive] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<EditingState | null>(null)
 
   const canEdit = can("timetable:update")
-  const { data, isPending, isError, refetch } = usePeriodSlots({ search: search || undefined })
+  const { data, isPending, isError, refetch } = usePeriodSlots({
+    search: search || undefined,
+    includeInactive,
+  })
 
   const createMutation = useCreatePeriodSlot()
   const updateMutation = useUpdatePeriodSlot(editing?.id ?? "")
+  const toggleMutation = useSetPeriodSlotActive()
+  const lifecycle = useLifecycleToggle({
+    toggleActive: toggleMutation.mutate,
+  })
 
   const openCreate = () => {
     setEditing(null)
@@ -108,8 +133,10 @@ export function PeriodSlotsPanel() {
         search={search}
         canEdit={canEdit}
         createLabel="New Period Slot"
+        includeInactive={includeInactive}
         onSearchChange={setSearch}
         onCreateClick={openCreate}
+        onIncludeInactiveChange={setIncludeInactive}
       />
       <DataTable
         columns={COLUMNS}
@@ -121,6 +148,22 @@ export function PeriodSlotsPanel() {
         errorText="Could not load period slots."
         onRetry={() => void refetch()}
         onEdit={openEdit}
+        onToggleActive={(item, nextActive) => lifecycle.openToggle(item, nextActive)}
+        isTogglingActive={(item) =>
+          toggleMutation.isPending && toggleMutation.variables?.id === String(item.id)
+        }
+      />
+      <ConfirmDialog
+        open={lifecycle.open}
+        onOpenChange={(open) => {
+          if (!open) lifecycle.close()
+        }}
+        title={lifecycle.dialogProps.title}
+        description={lifecycle.dialogProps.description}
+        confirmLabel={lifecycle.dialogProps.confirmLabel}
+        pendingLabel={lifecycle.dialogProps.pendingLabel}
+        isPending={lifecycle.isPending || toggleMutation.isPending}
+        onConfirm={lifecycle.dialogProps.onConfirm}
       />
       <MasterDataFormDialog
         open={dialogOpen}

@@ -5,6 +5,7 @@ export interface FeeHeadListItem {
   code: string
   name: string
   isRecurring: boolean
+  isActive: boolean
   createdAt: string
   updatedAt: string
 }
@@ -18,12 +19,14 @@ export interface FeeHeadListResult {
 
 export interface FeeHeadsQuery {
   search?: string
+  includeInactive?: boolean
 }
 
 export interface FeeHeadFormPayload {
   code: string
   name: string
   isRecurring?: boolean
+  isActive?: boolean
 }
 
 export interface ExamTypeListItem {
@@ -31,6 +34,7 @@ export interface ExamTypeListItem {
   code: string
   name: string
   sortOrder: number
+  isActive: boolean
   createdAt: string
   updatedAt: string
 }
@@ -44,12 +48,14 @@ export interface ExamTypeListResult {
 
 export interface ExamTypesQuery {
   search?: string
+  includeInactive?: boolean
 }
 
 export interface ExamTypeFormPayload {
   code: string
   name: string
   sortOrder?: number
+  isActive?: boolean
 }
 
 export interface GradingBandListItem {
@@ -59,6 +65,7 @@ export interface GradingBandListItem {
   grade: string
   description?: string
   sortOrder: number
+  isActive: boolean
   createdAt: string
   updatedAt: string
 }
@@ -72,6 +79,7 @@ export interface GradingBandListResult {
 
 export interface GradingBandsQuery {
   search?: string
+  includeInactive?: boolean
 }
 
 export interface GradingBandFormPayload {
@@ -80,6 +88,7 @@ export interface GradingBandFormPayload {
   grade: string
   description?: string
   sortOrder?: number
+  isActive?: boolean
 }
 
 export interface PeriodSlotListItem {
@@ -88,6 +97,7 @@ export interface PeriodSlotListItem {
   startTime: string
   endTime: string
   sortOrder: number
+  isActive: boolean
   createdAt: string
   updatedAt: string
 }
@@ -101,6 +111,7 @@ export interface PeriodSlotListResult {
 
 export interface PeriodSlotsQuery {
   search?: string
+  includeInactive?: boolean
 }
 
 export interface PeriodSlotFormPayload {
@@ -108,4 +119,5 @@ export interface PeriodSlotFormPayload {
   startTime: string
   endTime: string
   sortOrder?: number
+  isActive?: boolean
 }
