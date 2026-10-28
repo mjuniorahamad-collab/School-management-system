@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
   assertProductionTarget,
-  displayTargetUrl,
   type ProductionTargetGuardInput,
 } from "../prisma/production-target-guard.js"
 
@@ -38,18 +37,7 @@ function input(overrides: Partial<ProductionTargetGuardInput> = {}): ProductionT
   }
 }
 
-function refusal(candidate: ProductionTargetGuardInput): string {
-  try {
-    assertProductionTarget(candidate)
-  } catch (caught) {
-    const message = caught instanceof Error ? caught.message : String(caught)
-    expect(message).not.toContain(PASSWORD)
-    expect(message).not.toContain(USER)
-    expect(message).not.toContain("@")
-    return message
-  }
-  throw new Error("expected the guard to refuse this target")
-}
+
 
 describe("assertProductionTarget", () => {
   it("accepts the pinned production endpoint and returns a printable target", () => {
