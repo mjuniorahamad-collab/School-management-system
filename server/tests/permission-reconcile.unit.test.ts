@@ -292,6 +292,7 @@ describe("reconciliation source contract", () => {
   it("the command requires an explicit mode and a verified target", () => {
     expect(script).toMatch(/parseMode\(/)
     expect(script).toMatch(/assertProductionTarget\(/)
+    expect(script).toContain("productionDatabaseName: process.env.PRODUCTION_DATABASE_NAME")
     expect(script).toMatch(/--check/)
     expect(script).toMatch(/--apply/)
   })
@@ -315,5 +316,26 @@ describe("reconciliation source contract", () => {
   it("the planner stays database-free", () => {
     expect(planner).not.toContain("@prisma/client")
     expect(planner).not.toMatch(/\.(deleteMany|delete|updateMany|update|upsert)\s*\(/)
+  })
+})
+
+
+describe("parseReconcileArgs", () => {
+  it("requires exactly one mode flag", async () => {
+    const { parseReconcileArgs } = await import("../prisma/reconcile-permissions.js")
+    expect(() => parseReconcileArgs([])).toThrow(/expected exactly one of --check/)
+    expect(() => parseReconcileArgs(["--check", "--apply"])).toThrow(/received 2 mode flags/)
+    expect(() => parseReconcileArgs(["--force"])).toThrow(/unknown argument/)
+  })
+
+  it("accepts confirmations with mode", async () => {
+    const { parseReconcileArgs } = await import("../prisma/reconcile-permissions.js")
+    expect(parseReconcileArgs(["--check", "--confirm-host", "example.com", "--confirm-port", "5432", "--confirm-database", "db"])).toMatchObject({
+      mode: "check",
+      confirmHost: "example.com",
+      confirmPort: "5432",
+      confirmDatabase: "db",
+    })
+    expect(parseReconcileArgs(["--apply"])).toMatchObject({ mode: "apply" })
   })
 })

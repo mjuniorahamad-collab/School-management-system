@@ -49,15 +49,23 @@ COPY --from=builder /app/package.json /app/package-lock.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/server/dist ./server/dist
-# Schema + migrations ship with the image so the deploy step can run
-# `prisma migrate deploy` against the container (never on app boot).
+# Schema + migrations and the compiled guarded migration wrapper ship with the
+# image. The wrapper is the deployment entry point, never the app boot path.
 COPY --from=builder /app/server/prisma ./server/prisma
+# The production bootstrap/seed commands run their TypeScript entry points with
+# tsx, so keep the server source next to the Prisma scripts. The compiled app
+# itself still boots from server/dist.
+COPY --from=builder /app/server/src ./server/src
 COPY --from=builder /app/.env.example ./.env.example
 
 USER node
 
 EXPOSE 4000
 
-# Migrations are applied as an explicit deployment step (prisma migrate deploy),
-# not on boot, so a failed migration never half-starts a healthy-looking server.
+# Migrations are an explicit deployment step, not app boot:
+#   node server/dist/scripts/guarded-migrate.js deploy \
+#     --confirm-host <host> --confirm-port <port> --confirm-database <db>
+# (production-equivalent also requires --allow-production). The wrapper rejects
+# pooled URLs unless MIGRATION_DATABASE_URL supplies the direct endpoint.
+# A failed migration never half-starts a healthy-looking server.
 CMD ["node", "server/dist/server.js"]

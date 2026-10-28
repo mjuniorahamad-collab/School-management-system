@@ -43,6 +43,15 @@ services:
       NODE_ENV: production
       PORT: ${PORT:-4000}
       DATABASE_URL: postgresql://${POSTGRES_USER:-school}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:-school_management}
+      # Identity of this stack's database. It is not approval: a guarded
+      # migration still needs the CLI confirmations and --allow-production.
+      # Both names use the same expression so the app and identity cannot drift.
+      PRODUCTION_DATABASE_HOST: ${PRODUCTION_DATABASE_HOST:-postgres}
+      PRODUCTION_DATABASE_NAME: ${POSTGRES_DB:-school_management}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173,http://localhost:4173}
+      # One-time bootstrap credentials are deliberately not part of the
+      # long-running API environment. Inject them only into `docker compose run`
+      # for that command; see the operations runbook.
       HEALTH_READINESS_TIMEOUT_MS: ${HEALTH_READINESS_TIMEOUT_MS:-2000}
       TRUST_PROXY: ${TRUST_PROXY:-true}
       SESSION_ACCESS_TTL_MINUTES: ${SESSION_ACCESS_TTL_MINUTES:-15}

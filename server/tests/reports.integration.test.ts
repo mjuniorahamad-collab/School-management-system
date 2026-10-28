@@ -1,8 +1,8 @@
-import { execFileSync } from "node:child_process"
 import { PrismaClient } from "@prisma/client"
 import request from "supertest"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 import { createApp } from "../src/app.js"
+import { resetTestDatabase } from "./helpers/reset-test-database.js"
 import { hashPassword } from "../src/auth/password.js"
 import { SUPER_ADMIN_ROLE } from "../src/permissions/permissions.js"
 
@@ -78,14 +78,8 @@ describe.skipIf(!TEST_DATABASE_URL)("Reports API (integration)", () => {
   beforeAll(async () => {
     if (!TEST_DATABASE_URL) throw new Error("TEST_DATABASE_URL is required for this suite")
 
-    execFileSync(
-      process.execPath,
-      ["node_modules/prisma/build/index.js", "migrate", "deploy", "--schema", "server/prisma/schema.prisma"],
-      { env: { ...process.env, DATABASE_URL: TEST_DATABASE_URL }, stdio: "pipe" },
-    )
-
     prisma = new PrismaClient()
-    await resetAllTables(prisma)
+    await resetTestDatabase(prisma)
 
     // ── Schools ──────────────────────────────────────────────────────────────
     const school = await prisma.school.create({ data: { name: "Reports School" } })
@@ -606,7 +600,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Reports API (integration)", () => {
     if (!prisma) return
     // Leave the shared test database exactly as it was found so the other DB
     // suites (whose resets predate the fee/exam tables) see a clean tenant.
-    await resetAllTables(prisma)
+    await resetTestDatabase(prisma)
     await prisma.$disconnect()
   })
 
@@ -922,17 +916,6 @@ describe.skipIf(!TEST_DATABASE_URL)("Reports API (integration)", () => {
     })
   })
 })
-
-async function resetAllTables(prisma: PrismaClient): Promise<void> {
-  // One TRUNCATE ... CASCADE clears every school-scoped table AND the rows that
-  // RESTRICT a delete (payments, receipts, adjustments, enrolments, ...). An
-  // ordered list of DELETEs aborts as soon as a previously run suite left a
-  // Restrict child behind: the DB-backed suites share ONE test database and
-  // run one after another.
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "School" CASCADE')
-  await prisma.permission.deleteMany()
-  await prisma.role.deleteMany()
-}
 
 async function login(
   agent: ReturnType<typeof request.agent>,

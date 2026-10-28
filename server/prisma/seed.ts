@@ -8,6 +8,7 @@
 
 import { PrismaClient } from "@prisma/client"
 import { hashPassword } from "../src/auth/password.js"
+import { assertSeedTarget } from "../src/lib/seed-target.js"
 import { createInitialPeriod } from "../src/modules/enrollment-history/enrollment-history.service.js"
 import { buildAdmissionNumber } from "../src/modules/students/admission-number.js"
 import {
@@ -26,6 +27,8 @@ try {
   const code = (error as NodeJS.ErrnoException).code
   if (code !== "ENOENT") throw error
 }
+
+assertSeedTarget()
 
 const prisma = new PrismaClient()
 

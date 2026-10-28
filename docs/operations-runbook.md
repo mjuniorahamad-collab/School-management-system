@@ -19,14 +19,22 @@ host.
 
 | Setting | Where | Purpose |
 | --- | --- | --- |
-| `DATABASE_URL` | `.env` or environment | Target server/database for backup and restore |
+| `DATABASE_URL` | environment; backup also accepts root `.env` | Target server/database for backup and restore |
+| `RESTORE_DATABASE_URL` | environment/secret store | Direct, unpooled URL for the SAME database when `DATABASE_URL` is pooled |
+| `MIGRATION_DATABASE_URL` | environment/secret store | Direct, unpooled URL for the SAME database when guarded migrations see a pooled `DATABASE_URL` |
+| `PRODUCTION_DATABASE_HOST` / `PRODUCTION_DATABASE_NAME` | environment | Production identity required before remote migrations, remote test DBs, remote seeds, or production bootstrap |
 | `TRUST_PROXY` | `.env` or environment | Set `true` when the API runs behind a reverse proxy so logs/rate-limit see the real client IP |
 | `AUTH_RATE_LIMIT_MAX` / `AUTH_RATE_LIMIT_WINDOW_MINUTES` | `.env` | Auth brute-force protection window |
 
-Backup/restore scripts read `DATABASE_URL` from the environment first, then the
-first non-comment `DATABASE_URL=` line in the root `.env`. Passwords are only
-injected via the `PGPASSWORD` environment variable scoped to the child
-`pg_dump`/`pg_restore` process and are **never printed**.
+The restore scripts read **only the environment** — there is no `.env` fallback,
+and they never accept a connection string on the command line. Backups still
+support the root `.env` fallback. Passwords are injected only via `PGPASSWORD`
+scoped to the child `pg_dump`/`pg_restore` process and are **never printed**.
+Restore requires the exact target identity (`-ConfirmHost`/`--confirm-host`,
+port and database) plus `-Yes`/`--yes` for a non-interactive destructive run;
+`-ValidateOnly`/`--validate-only` checks everything and exits before touching
+the database. Pooled app URLs must be paired with a direct
+`RESTORE_DATABASE_URL` that canonicalizes to the same host, port and database.
 
 ## Database backups
 
@@ -92,33 +100,42 @@ in each entity's `photoUrl` column (e.g. `photos/<schoolId>/students/<uuid>.jpg`
 ## Database restore
 
 **Restoring destroys the current contents** of the target database. The scripts
-apply the dump with `--clean --if-exists` and refuse to run without explicit
-confirmation:
+apply the dump with `--clean --if-exists --single-transaction` and refuse to run
+without exact identity confirmations:
 
 ```sh
-# PowerShell — prompts for "YES"
-./scripts/db-restore.ps1 -File backups/school-management-school-20260901-013000.dump
+# PowerShell — validate only (no database writes), then prompt for "YES"
+./scripts/db-restore.ps1 -File backups/school-management-school-20260901-013000.dump `
+  -ConfirmHost <host> -ConfirmPort <port> -ConfirmDatabase <db> -ValidateOnly
+
+./scripts/db-restore.ps1 -File backups/school-management-school-20260901-013000.dump `
+  -ConfirmHost <host> -ConfirmPort <port> -ConfirmDatabase <db>
 
 # PowerShell — non-interactive (CI / drills)
-./scripts/db-restore.ps1 -File backups/school-management-school-20260901-013000.dump -Yes
+./scripts/db-restore.ps1 -File backups/school-management-school-20260901-013000.dump `
+  -ConfirmHost <host> -ConfirmPort <port> -ConfirmDatabase <db> -Yes
 
 # bash
-./scripts/db-restore.sh backups/school-management-school-20260901-013000.dump
-./scripts/db-restore.sh --yes backups/school-management-school-20260901-013000.dump
+./scripts/db-restore.sh <backup.dump> \
+  --confirm-host <host> --confirm-port <port> --confirm-database <db> --validate-only
+
+./scripts/db-restore.sh <backup.dump> \
+  --confirm-host <host> --confirm-port <port> --confirm-database <db> --yes
 ```
 
-Post-restore, the API reads the database from `DATABASE_URL`; no server restart
-data is cached, so the next request sees the restored data immediately (see
-[Verification checks](#verification-checks) for the smoke list).
+Host confirmation uses the canonical, unpooled host. Passwords are read from the
+environment and never from the command line. Post-restore, the API reads the
+database from `DATABASE_URL`; no server restart is required.
 
 ### Disaster-recovery procedure
 
 1. **Stop writes** (scale API down, or accept a short window for small installs).
 2. `./scripts/db-backup.sh` — snapshot the current state *before* any restore.
-3. `./scripts/db-restore.sh --yes <selected.dump>` — restore the target dump.
-4. **Apply any migrations** created since the dump:
-   `npm run generate:prisma && npx prisma migrate deploy`. (The repo never runs
-   migrations automatically.)
+3. Restore the selected dump with the exact identity confirmations above.
+4. **Apply any migrations** created since the dump with the guarded deploy
+   wrapper (production-equivalent needs `--allow-production`):
+   `npm run db:migrate -- --confirm-host <host> --confirm-port <port> --confirm-database <db>`.
+   The repo never runs migrations automatically.
 5. Re-run the verification checks below, including the auth smoke — a restored
    DB must still sign in an existing active user.
 6. Write down the successful restore timestamp and dump file.
@@ -131,10 +148,13 @@ procedure is routine before an incident.
 Build and start the production stack (API + PostgreSQL):
 
 ```sh
-cp .env.example .env   # set DATABASE_URL, SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD
+cp .env.example .env   # set POSTGRES_PASSWORD and CORS_ORIGIN
 docker compose -f docker-compose.prod.yml up -d --build
 docker compose -f docker-compose.prod.yml logs -f api
 ```
+
+Compose constructs the API container's `DATABASE_URL` from the `POSTGRES_*`
+values; the `DATABASE_URL` in the root `.env` is for host-run commands only.
 
 The API container serves both the API (`/api/v1`) and the built frontend
 (`/`), so a single published port fronts the whole app. Health checks:
@@ -158,11 +178,20 @@ assume it too.
 **Migrations run as an explicit deploy step**, never on boot:
 
 ```sh
-docker compose -f docker-compose.prod.yml exec api npx prisma migrate deploy
+docker compose -f docker-compose.prod.yml exec api \
+  node server/dist/scripts/guarded-migrate.js deploy \
+  --allow-production \
+  --confirm-host postgres --confirm-port 5432 --confirm-database school_management
 ```
 
-Run `prisma migrate deploy` after deploying a release that changes the schema,
-in a maintenance window, and verify with the checks below.
+The compose defaults make the bundled `postgres` service production-equivalent,
+hence `--allow-production`; adjust the values if `POSTGRES_DB` or
+`PRODUCTION_DATABASE_HOST` differ. If `DATABASE_URL` is pooled, inject
+`MIGRATION_DATABASE_URL` (direct endpoint for the same database) through the
+environment before running the command. `db:migrate:dev` is loopback/socket-only
+and must never be used for deployment. Run the guarded deploy after a release
+that changes the schema, in a maintenance window, and verify with the checks
+below.
 
 ## Production bootstrap
 
@@ -171,30 +200,53 @@ the bootstrap script to create the structural/master records: school, current
 academic session, the full permission catalog (120 codes), 10 roles with their
 grants, and the initial super admin identity.
 
-The script requires `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` to be set in
-the environment (same as local development). It is safe to run multiple times:
-structural rows are upserted idempotently; if the admin email already exists
-the script **aborts** (never overwrites a password hash).
+The script requires `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` in the
+environment of the one-off command (same as local development). They are not
+part of the long-running API container environment. It is safe to run multiple
+times: structural rows are upserted idempotently; if the admin email already
+exists the script **aborts** (never overwrites a password hash).
 
 ```sh
 # Read-only preflight — reports what would be created/reconciled
 npm run bootstrap:production -- --check
 
-# Transactional write — idempotent, safe to re-run
-npm run bootstrap:production
+# Transactional write — idempotent, safe to re-run; exact identity confirmations
+npm run bootstrap:production -- \
+  --confirm-host <host> --confirm-port <port> --confirm-database <db>
 
 # Read-only post-run report — confirms everything is in place
 npm run bootstrap:production -- --verify
 ```
 
 The script is in `server/prisma/bootstrap-production.ts` and runs via `tsx`. It
-must be executed **after** `prisma migrate deploy` so the schema tables exist.
+must be executed **after** the guarded migration deploy so the schema tables
+exist. A non-interactive write always requires all three confirmations; a remote
+target also requires valid `PRODUCTION_DATABASE_HOST`/`PRODUCTION_DATABASE_NAME`.
 In a container workflow:
 
 ```sh
-docker compose -f docker-compose.prod.yml exec api npx prisma migrate deploy
-docker compose -f docker-compose.prod.yml exec api npm run bootstrap:production -- --verify
+docker compose -f docker-compose.prod.yml exec api \
+  node server/dist/scripts/guarded-migrate.js deploy \
+  --allow-production \
+  --confirm-host postgres --confirm-port 5432 --confirm-database school_management
+
+# Export the admin credentials in the invoking shell only (do not add them to
+# the API service). `-e NAME` forwards the value without putting it on the
+# command line or in the Compose file.
+set +x
+export SEED_ADMIN_EMAIL="<admin email>"
+read -rsp "SEED_ADMIN_PASSWORD: " SEED_ADMIN_PASSWORD && export SEED_ADMIN_PASSWORD
+docker compose -f docker-compose.prod.yml run --rm \
+  -e SEED_ADMIN_EMAIL -e SEED_ADMIN_PASSWORD \
+  api npm run bootstrap:production -- \
+  --confirm-host postgres --confirm-port 5432 --confirm-database school_management
+unset SEED_ADMIN_EMAIL SEED_ADMIN_PASSWORD
 ```
+
+On PowerShell, use `$env:SEED_ADMIN_EMAIL` and `$env:SEED_ADMIN_PASSWORD`
+instead of `export`, then run the same `docker compose ... run` command with
+`-e SEED_ADMIN_EMAIL -e SEED_ADMIN_PASSWORD`. The API service itself has no
+bootstrap credentials, so `docker compose exec api` is not the right command.
 
 ## Request tracing and operational logging
 
@@ -248,9 +300,11 @@ After a deploy, restore, config change, or container rebuild:
 
 - Dumps contain the full database (PII included). Encrypt at rest, restrict
   access, and never commit them (`.gitignore` covers `backups/` and `*.dump`).
-- The scripts never print connection credentials.
+- The scripts never print connection credentials. Guarded migrations and restore
+  scripts reject pooled URLs unless the direct counterpart is supplied through
+  the environment.
 - `DATABASE_URL` in `.env` is git-ignored; only `.env.example` (which carries no
-  secrets) is committed.
+  secrets) is committed. Restore scripts intentionally ignore `.env`.
 - Rotate the DB password if a dump file or `.env` is ever exposed.
 
 ## Limitations
@@ -278,7 +332,8 @@ and structural records without reseeding business data.
 
 2. **Apply reconciliation (transactional, idempotent):**
    ```sh
-   npm run bootstrap:production
+   npm run bootstrap:production -- \
+     --confirm-host <host> --confirm-port <port> --confirm-database <db>
    ```
    - Upserts the permission catalog from `server/src/permissions/permissions.ts`
      (adds/removes grants via reconciliation; structural rows only).
@@ -295,6 +350,47 @@ and structural records without reseeding business data.
 ### Notes
 - **Do not run `npm run db:seed` against an existing production database.** `db:seed`
   is for local/dev bootstrap only. Use `bootstrap:production` for production reconciliation.
-- Always run after `prisma migrate deploy`.
+- Always run after the guarded migration deploy.
 - The reconciliation compares against the code catalog — if permissions changed in
   code, run the workflow above to bring the database in sync.
+
+## Permissions reconciliation
+
+Reconcile the production permission catalogue additively (insert missing permissions and grants only). This targets the production database and is fail-closed.
+
+Read-only check:
+
+`sh
+npm run permissions:reconcile -- --check
+`
+
+Apply (additive):
+
+`sh
+npm run permissions:reconcile -- --apply
+`
+
+### Docker / Compose invocation (when env comes from the container)
+
+If the runtime injects DATABASE_URL via the container environment (e.g. docker compose run/exec), the guard requires explicit target confirmation to avoid treating container-provided env as an unintended shell override. Pass the exact production target identity:
+
+`sh
+docker compose -f docker-compose.prod.yml run --rm \
+  -e DATABASE_URL -e PRODUCTION_DATABASE_HOST -e PRODUCTION_DATABASE_NAME \
+  api npm run permissions:reconcile -- --apply \
+  --confirm-host <host> --confirm-port 5432 --confirm-database <db>
+`
+
+Or with exec against a running api container (ensure the env vars are present in that environment):
+
+`sh
+docker compose -f docker-compose.prod.yml exec api \
+  npm run permissions:reconcile -- --check \
+  --confirm-host <host> --confirm-port 5432 --confirm-database <db>
+`
+
+Notes:
+- DATABASE_URL must be the direct (unpooled), sslmode=require and channel_binding=require production endpoint on port 5432.
+- PRODUCTION_DATABASE_HOST and PRODUCTION_DATABASE_NAME must match the target.
+- Confirmations must match exactly or the command fails before connecting.
+- --check is read-only (exit non-zero if differences/blockers); --apply only inserts missing permissions/grants additively.

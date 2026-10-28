@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process"
 import os from "node:os"
 import { PrismaClient } from "@prisma/client"
 import request from "supertest"
@@ -94,23 +93,11 @@ async function cleanupOwnFixtures(): Promise<void> {
   await prisma.school.deleteMany({ where: { id: { in: schoolIds } } })
 }
 
-describe.skipIf(!TEST_DATABASE_URL)("Timetable scale & integrity (integration)", () => {
+describe.skipIf(!TEST_DATABASE_URL)("Timetable scale & integrity (integration)", { timeout: 300_000 }, () => {
   const adminAgent = request.agent(app)
 
   beforeAll(async () => {
     if (!TEST_DATABASE_URL) throw new Error("TEST_DATABASE_URL is required for this suite")
-
-    execFileSync(
-      process.execPath,
-      [
-        "node_modules/prisma/build/index.js",
-        "migrate",
-        "deploy",
-        "--schema",
-        "server/prisma/schema.prisma",
-      ],
-      { env: { ...process.env, DATABASE_URL: TEST_DATABASE_URL }, stdio: "pipe" },
-    )
 
     prisma = new PrismaClient()
     await cleanupOwnFixtures()
@@ -261,7 +248,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Timetable scale & integrity (integration)",
       .post("/api/v1/auth/login")
       .send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD })
     expect(login.status).toBe(200)
-  })
+  }, 300_000)
 
   afterAll(async () => {
     await cleanupOwnFixtures()
