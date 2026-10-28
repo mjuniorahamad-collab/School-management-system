@@ -10,8 +10,8 @@ $backup = [IO.Path]::GetTempFileName()
 $argsFile = [IO.Path]::GetTempFileName()
 $fakeBin = Join-Path ([IO.Path]::GetTempPath()) ("sms-fake-pg-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $fakeBin | Out-Null
-$isWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
-if ($isWindows) {
+$runningOnWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+if ($runningOnWindows) {
   $fakePgRestore = Join-Path $fakeBin "pg_restore.cmd"
   $fakeScript = "@echo off`r`n:loop`r`nif `"%~1`"==`"`" goto end`r`necho %~1>>`"%PG_RESTORE_ARGS_FILE%`"`r`nshift`r`ngoto loop`r`n:end`r`n"
 } else {
@@ -19,7 +19,7 @@ if ($isWindows) {
   $fakeScript = "#!/usr/bin/env bash`nprintf '%s\n' `"`$@`" > `"`$PG_RESTORE_ARGS_FILE`"`nexit 0`n"
 }
 [IO.File]::WriteAllText($fakePgRestore, $fakeScript)
-if (-not $isWindows) {
+if (-not $runningOnWindows) {
   & chmod +x $fakePgRestore
   if ($LASTEXITCODE -ne 0) { throw "failed to make the fake pg_restore executable" }
 }
