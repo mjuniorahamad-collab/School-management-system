@@ -126,6 +126,8 @@ describe("assertSafeTestDatabaseUrl", () => {
       assertSafeTestDatabaseUrl("postgresql://u:p@ep-quiet-lab.neon.tech/neondb", {
         ALLOW_REMOTE_TEST_DATABASE: "1",
         PRODUCTION_DATABASE_HOST: "ep-prod-neon.neon.tech",
+
+        PRODUCTION_DATABASE_NAME: "neondb",
       }),
     ).toThrow(/EXPECTED_TEST_DATABASE_HOST/)
   })
@@ -139,12 +141,24 @@ describe("assertSafeTestDatabaseUrl", () => {
     ).toThrow(/PRODUCTION_DATABASE_HOST/)
   })
 
+  it("requires PRODUCTION_DATABASE_NAME for a remote target", () => {
+    expect(() =>
+      assertSafeTestDatabaseUrl("postgresql://u:p@ep-quiet-lab.neon.tech/neondb", {
+        ALLOW_REMOTE_TEST_DATABASE: "1",
+        EXPECTED_TEST_DATABASE_HOST: "ep-quiet-lab.neon.tech",
+        PRODUCTION_DATABASE_HOST: "ep-prod-neon.neon.tech",
+      }),
+    ).toThrow(/PRODUCTION_DATABASE_NAME/)
+  })
+
   it("refuses a remote target that is the production host", () => {
     expect(() =>
       assertSafeTestDatabaseUrl("postgresql://u:p@ep-prod-neon.neon.tech/neondb", {
         ALLOW_REMOTE_TEST_DATABASE: "1",
         EXPECTED_TEST_DATABASE_HOST: "ep-quiet-lab.neon.tech",
         PRODUCTION_DATABASE_HOST: "ep-prod-neon.neon.tech",
+
+        PRODUCTION_DATABASE_NAME: "neondb",
       }),
     ).toThrow(/production host/i)
   })
@@ -155,6 +169,8 @@ describe("assertSafeTestDatabaseUrl", () => {
         ALLOW_REMOTE_TEST_DATABASE: "1",
         EXPECTED_TEST_DATABASE_HOST: "ep-prod-neon.neon.tech",
         PRODUCTION_DATABASE_HOST: "ep-prod-neon.neon.tech",
+
+        PRODUCTION_DATABASE_NAME: "neondb",
       }),
     ).toThrow(/identical/i)
   })
@@ -165,6 +181,8 @@ describe("assertSafeTestDatabaseUrl", () => {
         ALLOW_REMOTE_TEST_DATABASE: "1",
         EXPECTED_TEST_DATABASE_HOST: "ep-quiet-lab.neon.tech",
         PRODUCTION_DATABASE_HOST: "ep-prod-neon.neon.tech",
+
+        PRODUCTION_DATABASE_NAME: "neondb",
       }),
     ).toThrow(/does not match EXPECTED_TEST_DATABASE_HOST/i)
   })
@@ -177,6 +195,8 @@ describe("assertSafeTestDatabaseUrl", () => {
         ALLOW_REMOTE_TEST_DATABASE: "1",
         EXPECTED_TEST_DATABASE_HOST: "ep-quiet-lab.neon.tech",
         PRODUCTION_DATABASE_HOST: "ep-prod-neon.neon.tech",
+
+        PRODUCTION_DATABASE_NAME: "neondb",
       }),
     ).not.toThrow()
   })
@@ -187,6 +207,8 @@ describe("assertSafeTestDatabaseUrl", () => {
         ALLOW_REMOTE_TEST_DATABASE: "1",
         EXPECTED_TEST_DATABASE_HOST: "ep-quiet-lab.neon.tech",
         PRODUCTION_DATABASE_HOST: "ep-prod-neon.neon.tech",
+
+        PRODUCTION_DATABASE_NAME: "neondb",
       }),
     ).not.toThrow()
   })
@@ -209,6 +231,8 @@ describe("assertSafeTestDatabaseUrl", () => {
           ALLOW_REMOTE_TEST_DATABASE: value,
           EXPECTED_TEST_DATABASE_HOST: "db",
           PRODUCTION_DATABASE_HOST: "prod.example",
+
+          PRODUCTION_DATABASE_NAME: "neondb",
         }),
       ).not.toThrow()
     }

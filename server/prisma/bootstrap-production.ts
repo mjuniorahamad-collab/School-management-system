@@ -20,8 +20,15 @@
 //   npm run bootstrap:production              transactional write
 //   npm run bootstrap:production -- --verify  read-only post-run report
 
+import { createInterface } from "node:readline/promises"
 import { PrismaClient } from "@prisma/client"
 import { hashPassword } from "../src/auth/password.js"
+import {
+  assertBootstrapTarget,
+  parseBootstrapArgs,
+  type BootstrapArgs,
+} from "../src/lib/bootstrap-target.js"
+import { assertDirectDatabaseUrl, canonicalizeHost } from "../src/lib/database-target.js"
 import {
   PERMISSION_CODES,
   ROLE_DESCRIPTIONS,
@@ -37,9 +44,7 @@ const SCHOOL_NAME = "Bright Future International School"
 const SUPER_ADMIN_ROLE = ROLE_NAMES.SUPER_ADMIN
 const ADMIN_NAME = "System Administrator"
 
-const args = new Set(process.argv.slice(2))
-const runCheck = args.has("--check")
-const runVerify = args.has("--verify")
+const args: BootstrapArgs = parseBootstrapArgs(process.argv.slice(2))
 
 try {
   process.loadEnvFile()
@@ -79,6 +84,41 @@ function requireEnv(): { email: string; password: string } {
 
 function expectedGrantsCount(): number {
   return Object.values(ROLE_PERMISSIONS).reduce((sum, codes) => sum + codes.length, 0)
+}
+
+async function assertWriteTarget(): Promise<void> {
+  const databaseUrl = process.env.DATABASE_URL
+  if (!databaseUrl) {
+    throw new Error("Refusing to bootstrap: DATABASE_URL is not set.")
+  }
+  const target = assertDirectDatabaseUrl(databaseUrl, "to bootstrap")
+
+  const host = canonicalizeHost(target.host)
+  const prompt = !args.confirmHost || !args.confirmPort || !args.confirmDatabase
+  if (prompt) {
+    if (!process.stdin.isTTY) {
+      throw new Error(
+        "Refusing to bootstrap: a non-interactive write requires --confirm-host, --confirm-port and " +
+          "--confirm-database with the exact target identity.",
+      )
+    }
+    const rl = createInterface({ input: process.stdin, output: process.stdout })
+    try {
+      if (!args.confirmHost) {
+        args.confirmHost = await rl.question(`Confirm target host (${host}): `)
+      }
+      if (!args.confirmPort) {
+        args.confirmPort = await rl.question(`Confirm target port (${target.port}): `)
+      }
+      if (!args.confirmDatabase) {
+        args.confirmDatabase = await rl.question(`Confirm target database (${target.database}): `)
+      }
+    } finally {
+      rl.close()
+    }
+  }
+
+  assertBootstrapTarget(process.env, args)
 }
 
 async function preflight(email: string): Promise<void> {
@@ -122,15 +162,29 @@ async function verify(email: string): Promise<void> {
   const permissionCount = await prisma.permission.count()
   const roleCount = await prisma.role.count()
   const grantCount = await prisma.rolePermission.count()
+  const superAdminRole = await prisma.role.findUnique({ where: { name: SUPER_ADMIN_ROLE } })
   const user = await prisma.user.findUnique({ where: { email } })
-  const userRoleCount = user
-    ? await prisma.userRole.count({ where: { userId: user.id } })
-    : 0
+  const userRole = user && superAdminRole
+    ? await prisma.userRole.findUnique({
+        where: { userId_roleId: { userId: user.id, roleId: superAdminRole.id } },
+      })
+    : null
   const membership = user && school
     ? await prisma.tenantMembership.findUnique({
         where: { userId_schoolId: { userId: user.id, schoolId: school.id } },
       })
     : null
+  const hasSuperAdminMembership = Boolean(
+    membership &&
+      superAdminRole &&
+      membership.roleId === superAdminRole.id &&
+      membership.status === "ACTIVE",
+  )
+  const membershipDetail = membership
+    ? `present (status=${membership.status}, role=${
+        membership.roleId === superAdminRole?.id ? SUPER_ADMIN_ROLE : "wrong role"
+      })`
+    : "missing"
 
   const line = (label: string, ok: boolean, detail: string): void =>
     console.log(`  ${ok ? "[ok ]" : "[bad]"} ${label}: ${detail}`)
@@ -142,8 +196,8 @@ async function verify(email: string): Promise<void> {
   line("Roles", roleCount === Object.keys(ROLE_NAMES).length, `${roleCount}/${Object.keys(ROLE_NAMES).length}`)
   line("RolePermission grants", grantCount === expectedGrantsCount(), `${grantCount}/${expectedGrantsCount()}`)
   line("Admin user", Boolean(user && user.status === "ACTIVE"), user ? `present (${user.status})` : "missing")
-  line("Admin SUPER_ADMIN UserRole", userRoleCount >= 1, `count=${userRoleCount}`)
-  line("Admin ACTIVE TenantMembership", Boolean(membership && membership.status === "ACTIVE"), membership ? `present (${membership.status})` : "missing")
+  line("Admin SUPER_ADMIN UserRole", Boolean(userRole), userRole ? "present" : "missing")
+  line("Admin ACTIVE SUPER_ADMIN TenantMembership", hasSuperAdminMembership, membershipDetail)
 }
 
 async function bootstrap(): Promise<void> {
@@ -257,14 +311,15 @@ async function bootstrap(): Promise<void> {
 
 async function main(): Promise<void> {
   const { email } = requireEnv()
-  if (runCheck) {
+  if (args.check) {
     await preflight(email)
     return
   }
-  if (runVerify) {
+  if (args.verify) {
     await verify(email)
     return
   }
+  await assertWriteTarget()
   await bootstrap()
 }
 

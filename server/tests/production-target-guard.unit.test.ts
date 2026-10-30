@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import {
-  PRODUCTION_DATABASE_NAME,
   assertProductionTarget,
   displayTargetUrl,
   type ProductionTargetGuardInput,
@@ -11,13 +10,14 @@ import {
 // error message, so a failed run cannot leak the connection string into a log.
 
 const HOST = "ep-sweet-boat-b1kevdey.c-5.eu-central-1.aws.neon.tech"
+const DATABASE = "neondb"
 const USER = "neondb_owner"
 const PASSWORD = "sup3rs3cr3t"
 
 function urlFor(options: { host?: string; port?: string; database?: string; params?: string } = {}): string {
   const host = options.host ?? HOST
   const port = options.port ?? "5432"
-  const database = options.database ?? PRODUCTION_DATABASE_NAME
+  const database = options.database ?? DATABASE
   const params = options.params ?? "sslmode=require&channel_binding=require"
   const authority = port === "" ? host : `${host}:${port}`
   const query = params === "" ? "" : `?${params}`
@@ -33,6 +33,7 @@ function input(overrides: Partial<ProductionTargetGuardInput> = {}): ProductionT
     databaseUrl: PRODUCTION_URL,
     testDatabaseUrl: TEST_URL,
     productionDatabaseHost: HOST,
+    productionDatabaseName: DATABASE,
     ...overrides,
   }
 }
@@ -54,9 +55,9 @@ describe("assertProductionTarget", () => {
   it("accepts the pinned production endpoint and returns a printable target", () => {
     const target = assertProductionTarget(input())
     expect(target.host).toBe(HOST)
-    expect(target.database).toBe(PRODUCTION_DATABASE_NAME)
+    expect(target.database).toBe(DATABASE)
     expect(target.port).toBe("5432")
-    expect(target.displayUrl).toBe(`postgresql://***:***@${HOST}:5432/${PRODUCTION_DATABASE_NAME}?sslmode=require&channel_binding=require`)
+    expect(target.displayUrl).toBe(`postgresql://***:***@${HOST}:5432/${DATABASE}?sslmode=require&channel_binding=require`)
     expect(target.displayUrl).not.toContain(PASSWORD)
     expect(target.displayUrl).not.toContain(USER)
   })
@@ -85,7 +86,9 @@ describe("assertProductionTarget", () => {
     expect(refusal(input({ databaseUrl: urlFor({ port: "5433" }) }))).toMatch(/port 5433/)
   })
 
-  it("refuses the wrong database name", () => {
+  it("refuses an unset or wrong production database name", () => {
+    expect(refusal(input({ productionDatabaseName: undefined }))).toMatch(/PRODUCTION_DATABASE_NAME is not set/)
+    expect(refusal(input({ productionDatabaseName: "  " }))).toMatch(/PRODUCTION_DATABASE_NAME is not set/)
     expect(refusal(input({ databaseUrl: urlFor({ database: "staging" }) }))).toMatch(/the production database is "neondb"/)
     expect(refusal(input({ databaseUrl: urlFor({ database: "neondb_test" }) }))).toMatch(/the production database is "neondb"/)
   })
@@ -127,14 +130,34 @@ describe("assertProductionTarget", () => {
     expect(refusal(input({ shellEnv: { PGHOST: HOST, PGPASSWORD: PASSWORD } }))).toMatch(/libpq environment overrides are set \(PGHOST, PGPASSWORD\)/)
     expect(assertProductionTarget(input({ shellEnv: { PATH: "C:\\Windows", NODE_ENV: "production" } })).host).toBe(HOST)
   })
+
+  it("allows a shell-injected connection string only with exact target confirmations", () => {
+    const container = input({
+      shellEnv: { DATABASE_URL: PRODUCTION_URL },
+      confirmHost: HOST,
+      confirmPort: "5432",
+      confirmDatabase: DATABASE,
+    })
+    expect(assertProductionTarget(container).host).toBe(HOST)
+
+    expect(refusal({ ...container, confirmHost: "ep-elsewhere.neon.tech" })).toMatch(/does not match DATABASE_URL host/)
+    expect(refusal({ ...container, confirmPort: "5433" })).toMatch(/does not match DATABASE_URL port/)
+    expect(refusal({ ...container, confirmDatabase: "staging" })).toMatch(/does not match DATABASE_URL database/)
+  })
 })
 
 describe("displayTargetUrl", () => {
   it("masks both halves of the credential", () => {
     const display = displayTargetUrl(PRODUCTION_URL)
-    expect(display).toBe(`postgresql://***:***@${HOST}:5432/${PRODUCTION_DATABASE_NAME}?sslmode=require&channel_binding=require`)
+    expect(display).toBe(`postgresql://***:***@${HOST}:5432/${DATABASE}?sslmode=require&channel_binding=require`)
     expect(display).not.toContain(USER)
     expect(display).not.toContain(PASSWORD)
+  })
+
+  it("masks query-string credentials", () => {
+    const display = displayTargetUrl(`${PRODUCTION_URL}&sslpassword=query-secret`)
+    expect(display).toContain("sslpassword=***")
+    expect(display).not.toContain("query-secret")
   })
 
   it("keeps credential-free URLs readable", () => {

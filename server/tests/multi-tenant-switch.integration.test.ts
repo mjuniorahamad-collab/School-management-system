@@ -1,8 +1,8 @@
-import { execFileSync } from "node:child_process"
 import { PrismaClient } from "@prisma/client"
 import request from "supertest"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createApp } from "../src/app.js"
+import { resetTestDatabase } from "./helpers/reset-test-database.js"
 import { hashPassword } from "../src/auth/password.js"
 
 // Multi-tenant switching. One account, ACTIVE memberships in two schools with
@@ -52,20 +52,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Multi-tenant switching (integration)", () =
   beforeAll(async () => {
     if (!TEST_DATABASE_URL) throw new Error("TEST_DATABASE_URL is required for this suite")
 
-    execFileSync(
-      process.execPath,
-      [
-        "node_modules/prisma/build/index.js",
-        "migrate",
-        "deploy",
-        "--schema",
-        "server/prisma/schema.prisma",
-      ],
-      { env: { ...process.env, DATABASE_URL: TEST_DATABASE_URL }, stdio: "pipe" },
-    )
 
     prisma = new PrismaClient()
-    await resetAllTables(prisma)
+    await resetTestDatabase(prisma)
 
     // Permission catalog subset used by this suite.
     const permissionIds: Record<string, string> = {}
@@ -141,7 +130,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Multi-tenant switching (integration)", () =
   })
 
   afterAll(async () => {
-    await resetAllTables(prisma)
+    await resetTestDatabase(prisma)
     await prisma?.$disconnect()
   })
 
@@ -360,38 +349,4 @@ async function seedSchoolData(
   } finally {
     await prisma.$disconnect()
   }
-}
-
-async function resetAllTables(prisma: PrismaClient): Promise<void> {
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "AuditLog" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Message" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "ConversationParticipant" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Conversation" CASCADE')
-  await prisma.timetableEntry.deleteMany()
-  await prisma.attendanceRecord.deleteMany()
-  await prisma.periodSlot.deleteMany()
-  await prisma.teacherSubject.deleteMany()
-  await prisma.teacherClass.deleteMany()
-  await prisma.staff.deleteMany()
-  await prisma.studentGuardian.deleteMany()
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "FeeInvoice" CASCADE')
-  await prisma.studentEnrollment.deleteMany()
-  await prisma.student.deleteMany()
-  await prisma.guardian.deleteMany()
-  await prisma.teacher.deleteMany()
-  await prisma.subject.deleteMany()
-  // Section deletes SET NULL AttendanceRegister.sectionId, but the scopeKey DB
-  // CHECK requires '__CLASS__' on NULL-section rows — registers must go first.
-  await prisma.attendanceRegister.deleteMany()
-  await prisma.section.deleteMany()
-  await prisma.class.deleteMany()
-  await prisma.session.deleteMany()
-  await prisma.userRole.deleteMany()
-  await prisma.tenantMembership.deleteMany()
-  await prisma.academicSession.deleteMany()
-  await prisma.user.deleteMany()
-  await prisma.rolePermission.deleteMany()
-  await prisma.permission.deleteMany()
-  await prisma.role.deleteMany()
-  await prisma.school.deleteMany()
 }

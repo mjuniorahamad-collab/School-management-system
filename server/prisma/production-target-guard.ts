@@ -2,15 +2,16 @@
 //
 // That command writes to the production database by design, so before it opens
 // a connection it must prove that DATABASE_URL is exactly the production
-// endpoint: host equal to PRODUCTION_DATABASE_HOST, the production database
-// name, the direct (unpooled) address, port 5432, the expected TLS parameters,
-// and no shell-level connection overrides. Every failure message names the
+// endpoint: host equal to PRODUCTION_DATABASE_HOST, database equal to
+// PRODUCTION_DATABASE_NAME, the direct (unpooled) address, port 5432, the
+// expected TLS parameters, and no shell-level connection overrides. Every failure message names the
 // offending key or host only — never a credential, never a connection string.
 
-import { isDisposableTestDatabase, isLoopbackHost } from "../tests/helpers/test-database-guard.js"
-
-/** The production database name, part of the endpoint identity this command pins. */
-export const PRODUCTION_DATABASE_NAME = "neondb"
+import {
+  isDisposableTestDatabase,
+  isLoopbackHost,
+  redactSensitiveSearchParams,
+} from "../src/lib/database-target.js"
 
 const PRODUCTION_PORT = "5432"
 
@@ -19,7 +20,6 @@ const REQUIRED_PARAMS: Record<string, string> = {
   channel_binding: "require",
 }
 
-/** Connection parameters accepted on the production endpoint; everything else fails closed. */
 const ALLOWED_PARAMS = new Set<string>([
   "sslmode",
   "channel_binding",
@@ -37,6 +37,10 @@ export interface ProductionTargetGuardInput {
   databaseUrl: string | undefined
   testDatabaseUrl: string | undefined
   productionDatabaseHost: string | undefined
+  productionDatabaseName: string | undefined
+  confirmHost?: string | null
+  confirmPort?: string | null
+  confirmDatabase?: string | null
 }
 
 export interface ProductionTarget {
@@ -60,7 +64,7 @@ export function displayTargetUrl(raw: string): string {
   }
   const hasCredentials = url.username !== "" || url.password !== ""
   const auth = hasCredentials ? "***:***@" : ""
-  return `${url.protocol}//${auth}${url.host}${url.pathname}${url.search}`
+  return `${url.protocol}//${auth}${url.host}${url.pathname}${redactSensitiveSearchParams(url)}`
 }
 
 function databaseName(url: URL): string {
@@ -68,17 +72,46 @@ function databaseName(url: URL): string {
 }
 
 export function assertProductionTarget(input: ProductionTargetGuardInput): ProductionTarget {
-  const { shellEnv, databaseUrl, testDatabaseUrl, productionDatabaseHost } = input
+  const {
+    shellEnv,
+    databaseUrl,
+    testDatabaseUrl,
+    productionDatabaseHost,
+    productionDatabaseName,
+    confirmHost,
+    confirmPort,
+    confirmDatabase,
+  } = input
 
-  const shellOverrides = (["DATABASE_URL", "TEST_DATABASE_URL"] as const).filter((key) => {
+  const shellTestDatabaseUrl = shellEnv.TEST_DATABASE_URL
+  if (shellTestDatabaseUrl !== undefined && shellTestDatabaseUrl.trim() !== "") {
+    fail(
+      "connection strings are set in the shell environment (TEST_DATABASE_URL); " +
+        "this command takes its target from the repository .env only — unset them and rerun.",
+    )
+  }
+
+  const shellOverrides = (["DATABASE_URL"] as const).filter((key) => {
     const value = shellEnv[key]
     return value !== undefined && value.trim() !== ""
   })
+
   if (shellOverrides.length > 0) {
-    fail(
-      `connection strings are set in the shell environment (${shellOverrides.join(", ")}); ` +
-        "this command takes its target from the repository .env only — unset them and rerun.",
-    )
+    const hasAllConfirmations =
+      confirmHost !== undefined &&
+      confirmHost !== null &&
+      confirmPort !== undefined &&
+      confirmPort !== null &&
+      confirmDatabase !== undefined &&
+      confirmDatabase !== null
+
+    if (!hasAllConfirmations) {
+      fail(
+        `connection strings are set in the shell environment (${shellOverrides.join(", ")}); ` +
+          "this command takes its target from the repository .env only — unset them and rerun. " +
+          "For an intentional container invocation, pass --confirm-host, --confirm-port and --confirm-database to confirm the target identity.",
+      )
+    }
   }
 
   const pgOverrides = Object.keys(shellEnv).filter((key) => /^PG[A-Z0-9_]*$/.test(key))
@@ -111,17 +144,52 @@ export function assertProductionTarget(input: ProductionTargetGuardInput): Produ
   for (const [key, expected] of Object.entries(REQUIRED_PARAMS)) {
     const actual = url.searchParams.get(key)
     if (actual === null || actual.trim().toLowerCase() !== expected) {
-      fail(`DATABASE_URL must carry ${key}=${expected} (observed: ${actual === null ? "absent" : actual}).`)
+      fail(`DATABASE_URL must carry ${key}=${expected} (observed: ${actual === null ? "absent" : actual }).`)
     }
   }
 
   const host = url.hostname.trim().toLowerCase()
   const productionHost = (productionDatabaseHost ?? "").trim().toLowerCase()
+  const expectedDatabase = (productionDatabaseName ?? "").trim()
 
   if (host === "") fail("DATABASE_URL has no hostname.")
   if (productionHost === "") {
     fail("PRODUCTION_DATABASE_HOST is not set; the production endpoint host is required to verify the target.")
   }
+  if (expectedDatabase === "") {
+    fail("PRODUCTION_DATABASE_NAME is not set; the production database name is required to verify the target.")
+  }
+
+  const hasAllConfirmations =
+    confirmHost !== undefined &&
+    confirmHost !== null &&
+    confirmPort !== undefined &&
+    confirmPort !== null &&
+    confirmDatabase !== undefined &&
+    confirmDatabase !== null
+
+  if (shellOverrides.length > 0 && hasAllConfirmations) {
+    const confirmedHost = String(confirmHost).trim().toLowerCase()
+    const confirmedPort = String(confirmPort).trim()
+    const confirmedDatabase = String(confirmDatabase).trim()
+
+    if (confirmedHost !== host) {
+      fail(`confirmed host (${confirmedHost}) does not match DATABASE_URL host (${host}).`)
+    }
+    if (confirmedPort !== (url.port === "" ? PRODUCTION_PORT : url.port)) {
+      fail(`confirmed port (${confirmedPort}) does not match DATABASE_URL port (${url.port === "" ? PRODUCTION_PORT : url.port}).`)
+    }
+    if (confirmedDatabase.toLowerCase() !== databaseName(url).toLowerCase()) {
+      fail(`confirmed database (${confirmedDatabase}) does not match DATABASE_URL database (${databaseName(url)}).`)
+    }
+    if (confirmedHost !== productionHost) {
+      fail(`confirmed host (${confirmedHost}) does not match PRODUCTION_DATABASE_HOST (${productionHost}).`)
+    }
+    if (confirmedDatabase.toLowerCase() !== expectedDatabase.toLowerCase()) {
+      fail(`confirmed database (${confirmedDatabase}) does not match PRODUCTION_DATABASE_NAME (${expectedDatabase}).`)
+    }
+  }
+
   if (isLoopbackHost(host)) {
     fail(`DATABASE_URL points at the loopback host ${host}; this command reconciles the production database only.`)
   }
@@ -133,8 +201,8 @@ export function assertProductionTarget(input: ProductionTargetGuardInput): Produ
   }
 
   const database = databaseName(url)
-  if (database !== PRODUCTION_DATABASE_NAME) {
-    fail(`DATABASE_URL names database "${database}" but the production database is "${PRODUCTION_DATABASE_NAME}".`)
+  if (database.toLowerCase() !== expectedDatabase.toLowerCase()) {
+    fail(`DATABASE_URL names database "${database}" but the production database is "${expectedDatabase}".`)
   }
 
   const port = url.port === "" ? PRODUCTION_PORT : url.port

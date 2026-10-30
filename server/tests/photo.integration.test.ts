@@ -1,8 +1,8 @@
-import { execFileSync } from "node:child_process"
 import { PrismaClient } from "@prisma/client"
 import request from "supertest"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createApp } from "../src/app.js"
+import { resetTestDatabase } from "./helpers/reset-test-database.js"
 import { hashPassword } from "../src/auth/password.js"
 import { env } from "../src/config/env.js"
 import { getStorage } from "../src/lib/storage/index.js"
@@ -63,16 +63,8 @@ describe.skipIf(!TEST_DATABASE_URL)("profile photos (integration)", () => {
   beforeAll(async () => {
     if (!TEST_DATABASE_URL) throw new Error("TEST_DATABASE_URL is required for this suite")
 
-    execFileSync(process.execPath, [
-      "node_modules/prisma/build/index.js",
-      "migrate",
-      "deploy",
-      "--schema",
-      "server/prisma/schema.prisma",
-    ], { env: { ...process.env, DATABASE_URL: TEST_DATABASE_URL }, stdio: "pipe" })
-
     prisma = new PrismaClient()
-    await resetAllTables(prisma)
+    await resetTestDatabase(prisma)
 
     const adminRole = await prisma.role.create({
       data: { name: "SCHOOL_ADMIN", description: "Test tenant admin" },
@@ -175,7 +167,7 @@ describe.skipIf(!TEST_DATABASE_URL)("profile photos (integration)", () => {
         }
       }
     } finally {
-      await resetAllTables(prisma)
+      await resetTestDatabase(prisma)
       await prisma?.$disconnect()
     }
   })
@@ -325,25 +317,6 @@ describe.skipIf(!TEST_DATABASE_URL)("profile photos (integration)", () => {
     })
   })
 })
-
-async function resetAllTables(prisma: PrismaClient): Promise<void> {
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "AuditLog" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Message" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "ConversationParticipant" CASCADE')
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Conversation" CASCADE')
-  await prisma.staff.deleteMany()
-  await prisma.teacherSubject.deleteMany()
-  await prisma.teacherClass.deleteMany()
-  await prisma.student.deleteMany()
-  await prisma.teacher.deleteMany()
-  await prisma.userRole.deleteMany()
-  await prisma.tenantMembership.deleteMany()
-  await prisma.user.deleteMany()
-  await prisma.rolePermission.deleteMany()
-  await prisma.permission.deleteMany()
-  await prisma.role.deleteMany()
-  await prisma.school.deleteMany()
-}
 
 async function login(
   agent: ReturnType<typeof request.agent>,

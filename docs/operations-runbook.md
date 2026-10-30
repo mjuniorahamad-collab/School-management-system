@@ -20,13 +20,18 @@ host.
 | Setting | Where | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | `.env` or environment | Target server/database for backup and restore |
+| `RESTORE_DATABASE_URL` | Environment only | Direct, unpooled URL for the same database; required when `DATABASE_URL` is pooled during restore |
+| `MIGRATION_DATABASE_URL` | Environment, root `.env`, or secret store | Direct, unpooled URL for the same database; required when `DATABASE_URL` is pooled during migration |
+| `PRODUCTION_DATABASE_HOST` / `PRODUCTION_DATABASE_NAME` | `.env` or environment | Production endpoint identity used by guarded remote migrations and seeds |
 | `TRUST_PROXY` | `.env` or environment | Set `true` when the API runs behind a reverse proxy so logs/rate-limit see the real client IP |
 | `AUTH_RATE_LIMIT_MAX` / `AUTH_RATE_LIMIT_WINDOW_MINUTES` | `.env` | Auth brute-force protection window |
 
-Backup/restore scripts read `DATABASE_URL` from the environment first, then the
-first non-comment `DATABASE_URL=` line in the root `.env`. Passwords are only
-injected via the `PGPASSWORD` environment variable scoped to the child
-`pg_dump`/`pg_restore` process and are **never printed**.
+Backup scripts read `DATABASE_URL` from the environment first, then the first
+non-comment `DATABASE_URL=` line in the root `.env`. Restore scripts read
+`DATABASE_URL` (and `RESTORE_DATABASE_URL` when needed) from the environment
+only — they have **no `.env` fallback**. Passwords are only injected via the
+`PGPASSWORD` environment variable scoped to the child `pg_dump`/`pg_restore`
+process and are **never printed**.
 
 ## Database backups
 
@@ -92,20 +97,43 @@ in each entity's `photoUrl` column (e.g. `photos/<schoolId>/students/<uuid>.jpg`
 ## Database restore
 
 **Restoring destroys the current contents** of the target database. The scripts
-apply the dump with `--clean --if-exists` and refuse to run without explicit
-confirmation:
+apply the dump with `--clean --if-exists --single-transaction` and require the
+exact target identity: host, port and database must be confirmed explicitly.
+`-Yes`/`--yes` only skips the final destructive-command prompt; it never
+replaces the identity confirmations. Non-interactive runs require all three
+confirmations plus `-Yes`/`--yes`.
 
-```sh
-# PowerShell — prompts for "YES"
-./scripts/db-restore.ps1 -File backups/school-management-school-20260901-013000.dump
+```powershell
+# PowerShell — prompts for "YES" after the identity is confirmed
+./scripts/db-restore.ps1 -File backups/school-management-school-20260901-013000.dump `
+  -ConfirmHost ep-example.neon.tech -ConfirmPort 5432 -ConfirmDatabase neondb
 
 # PowerShell — non-interactive (CI / drills)
-./scripts/db-restore.ps1 -File backups/school-management-school-20260901-013000.dump -Yes
-
-# bash
-./scripts/db-restore.sh backups/school-management-school-20260901-013000.dump
-./scripts/db-restore.sh --yes backups/school-management-school-20260901-013000.dump
+./scripts/db-restore.ps1 -File backups/school-management-school-20260901-013000.dump `
+  -ConfirmHost ep-example.neon.tech -ConfirmPort 5432 -ConfirmDatabase neondb -Yes
 ```
+
+```sh
+# bash — prompts for "YES" after the identity is confirmed
+./scripts/db-restore.sh backups/school-management-school-20260901-013000.dump \
+  --confirm-host ep-example.neon.tech --confirm-port 5432 --confirm-database neondb
+
+# bash — non-interactive (CI / drills)
+./scripts/db-restore.sh backups/school-management-school-20260901-013000.dump \
+  --confirm-host ep-example.neon.tech --confirm-port 5432 --confirm-database neondb --yes
+
+# dry run: validate the target, confirmations and backup file without restoring
+./scripts/db-restore.sh backups/school-management-school-20260901-013000.dump \
+  --confirm-host ep-example.neon.tech --confirm-port 5432 --confirm-database neondb \
+  --validate-only
+```
+
+Replace the example host/port/database with the real target. `DATABASE_URL` must
+be exported in the environment before invoking either script. If it uses a
+pooled endpoint, export `RESTORE_DATABASE_URL` with the direct, unpooled URL for
+the same database; the script rejects a different host, port or database. Do
+not invoke `pg_restore` directly or omit the confirmations to bypass these
+checks.
 
 Post-restore, the API reads the database from `DATABASE_URL`; no server restart
 data is cached, so the next request sees the restored data immediately (see
@@ -115,10 +143,18 @@ data is cached, so the next request sees the restored data immediately (see
 
 1. **Stop writes** (scale API down, or accept a short window for small installs).
 2. `./scripts/db-backup.sh` — snapshot the current state *before* any restore.
-3. `./scripts/db-restore.sh --yes <selected.dump>` — restore the target dump.
-4. **Apply any migrations** created since the dump:
-   `npm run generate:prisma && npx prisma migrate deploy`. (The repo never runs
-   migrations automatically.)
+3. Export `DATABASE_URL` (and `RESTORE_DATABASE_URL` if it is pooled), then
+   restore with the exact target identity:
+   `./scripts/db-restore.sh <selected.dump> --confirm-host <host> --confirm-port <port> --confirm-database <database> --yes`
+   (PowerShell: `./scripts/db-restore.ps1 -File <selected.dump> -ConfirmHost <host> -ConfirmPort <port> -ConfirmDatabase <database> -Yes`).
+4. **Apply any migrations** created since the dump through the guarded wrapper:
+   `npm run generate:prisma && npm run db:migrate -- --confirm-host <host> --confirm-port <port> --confirm-database <database>`.
+   Add `--allow-production` when the target is production-equivalent. A remote
+   target also requires `PRODUCTION_DATABASE_HOST` and
+   `PRODUCTION_DATABASE_NAME`; a pooled `DATABASE_URL` requires a direct
+   `MIGRATION_DATABASE_URL` naming the same database. Never run
+   `npx prisma migrate deploy` directly for a remote target. (The repo never
+   runs migrations automatically.)
 5. Re-run the verification checks below, including the auth smoke — a restored
    DB must still sign in an existing active user.
 6. Write down the successful restore timestamp and dump file.
@@ -155,14 +191,42 @@ and `/auth/refresh` are intentionally public. Keep `TRUST_PROXY=true` when the
 container sits behind any reverse proxy; the terminal checks in this runbook
 assume it too.
 
-**Migrations run as an explicit deploy step**, never on boot:
+**Migrations run as an explicit guarded deploy step**, never on boot. The
+compiled wrapper ships in the image and validates the target identity before
+invoking Prisma:
 
 ```sh
-docker compose -f docker-compose.prod.yml exec api npx prisma migrate deploy
+docker compose -f docker-compose.prod.yml exec api \
+  node server/dist/scripts/guarded-migrate.js deploy \
+  --confirm-host postgres --confirm-port 5432 \
+  --confirm-database school_management --allow-production
 ```
 
-Run `prisma migrate deploy` after deploying a release that changes the schema,
-in a maintenance window, and verify with the checks below.
+Replace `school_management` with the actual `POSTGRES_DB` value. The default
+compose stack sets `PRODUCTION_DATABASE_HOST=postgres` and
+`PRODUCTION_DATABASE_NAME` to the same database, so the target is
+production-equivalent and `--allow-production` is required.
+
+From a host checkout targeting a remote staging or production database, use the
+same wrapper:
+
+```sh
+npm run db:migrate -- \
+  --confirm-host ep-example.neon.tech --confirm-port 5432 \
+  --confirm-database neondb
+# add --allow-production only when the target matches PRODUCTION_DATABASE_HOST
+# and PRODUCTION_DATABASE_NAME
+```
+
+A remote target requires `PRODUCTION_DATABASE_HOST` and
+`PRODUCTION_DATABASE_NAME`. If `DATABASE_URL` is pooled, set
+`MIGRATION_DATABASE_URL` to the direct, unpooled URL for the same database.
+Never bypass the wrapper with a direct `npx prisma migrate deploy`. Run the
+guarded migration after deploying a release that changes the schema, in a
+maintenance window, and verify with the checks below.
+
+For local development against a loopback or Unix-socket database, use
+`npm run db:migrate:dev`; it refuses non-local targets.
 
 ## Production bootstrap
 
@@ -188,11 +252,14 @@ npm run bootstrap:production -- --verify
 ```
 
 The script is in `server/prisma/bootstrap-production.ts` and runs via `tsx`. It
-must be executed **after** `prisma migrate deploy` so the schema tables exist.
-In a container workflow:
+must be executed **after** the guarded deploy migration so the schema tables
+exist. In a container workflow:
 
 ```sh
-docker compose -f docker-compose.prod.yml exec api npx prisma migrate deploy
+docker compose -f docker-compose.prod.yml exec api \
+  node server/dist/scripts/guarded-migrate.js deploy \
+  --confirm-host postgres --confirm-port 5432 \
+  --confirm-database school_management --allow-production
 docker compose -f docker-compose.prod.yml exec api npm run bootstrap:production -- --verify
 ```
 

@@ -200,11 +200,14 @@ createdb school_management_test   # your usual tooling
 $env:TEST_DATABASE_URL="postgresql://.../@127.0.0.1:5433/school_management_test"; npm test
 ```
 
-**This database is destroyed, not tidied.** The integration suites apply
-migrations on startup, and their teardown deletes every row in every core table
-— schools, users, roles, permissions, classes, students — rather than only the
-rows they created. There is no transaction and no rollback, so treat the target
-as disposable and never point it at a database you care about.
+**This database is destroyed, not tidied.** Global setup applies migrations on
+startup, and the shared reset helper
+(`server/tests/helpers/reset-test-database.ts`) deletes every row in every core
+table — schools, users, roles, permissions, classes, students — rather than only
+the rows they created. The shared guarded helper re-validates the target and
+runs the destructive reset inside a single transaction, so a failed reset rolls
+back; a successful reset still destroys all rows. Treat the target as
+disposable and never point it at a database you care about.
 
 Because of that, `npm test` refuses to start the integration suites unless
 `TEST_DATABASE_URL` satisfies one of two contracts:
@@ -213,29 +216,35 @@ Because of that, `npm test` refuses to start the integration suites unless
   whose database **name contains `test`**; or
 - **Remote** target, proven by exact endpoint identity rather than by name (a
   remote provider may use a database name that carries no `test` marker, e.g.
-  Neon's default `neondb`). This requires all five of
-  `ALLOW_REMOTE_TEST_DATABASE=1`, `EXPECTED_TEST_DATABASE_HOST`,
-  `PRODUCTION_DATABASE_HOST`, `EXPECTED_TEST_DATABASE_NAME`, and
-  `EXPECTED_TEST_DATABASE_USER`. The target host must equal
+  Neon's default `neondb`). This requires all six of
+  `ALLOW_REMOTE_TEST_DATABASE=1`, `EXPECTED_TEST_DATABASE_HOST` (the exact test
+  endpoint host), `EXPECTED_TEST_DATABASE_NAME` (the test database name),
+  `EXPECTED_TEST_DATABASE_USER` (the test database role),
+  `PRODUCTION_DATABASE_HOST`, and `PRODUCTION_DATABASE_NAME` (the production
+  endpoint host and database name). The target host must equal
   `EXPECTED_TEST_DATABASE_HOST` and must differ from `PRODUCTION_DATABASE_HOST`,
   and the identity the connected database reports (`current_database()` and
-  `current_user`) must match the two expected identity values; any missing or
-  mismatched value — including the two hosts being identical — fails closed.
+  `current_user`) must match the two expected test identity values; any missing
+  or mismatched value — including the two hosts being identical — fails closed.
 
 A mistyped value fails the run with an explanation instead of quietly deleting
 data. The check lives in `server/tests/helpers/test-database-guard.ts` and runs at
 vitest config load, before any worker can be given a `DATABASE_URL`. It reads
-these variables from the process environment (they are not forwarded to workers).
+these variables from the process environment; the non-secret remote identity
+values are forwarded to workers (`server/tests/helpers/test-database-env.ts`) so
+worker-side guards re-validate the same target, while unrelated secrets are not
+forwarded.
 
-On top of that static check, a read-only global setup
+On top of that static check, the global setup
 (`server/tests/helpers/test-database-identity.global-setup.ts`, registered in both
 `vitest.config.ts` and `vitest.timezone.config.ts`) connects with the exact
-`TEST_DATABASE_URL` and verifies the server-reported `current_database()` and
-`current_user` against the declared identity before any migration or other write.
-A worker setup file (`server/tests/helpers/verify-worker-db-url.setup.ts`) also
-fails the run if the `DATABASE_URL` injected into a worker does not equal
-`TEST_DATABASE_URL`. Both are no-ops when `TEST_DATABASE_URL` is unset, so the
-loopback/CI default is unchanged.
+`TEST_DATABASE_URL`, verifies the server-reported `current_database()` and
+`current_user` against the declared identity, and only then applies pending
+migrations once before any DB-backed suite runs. A worker setup file
+(`server/tests/helpers/verify-worker-db-url.setup.ts`) also fails the run if the
+`DATABASE_URL` injected into a worker does not equal `TEST_DATABASE_URL`. Both
+are no-ops when `TEST_DATABASE_URL` is unset, so the loopback/CI default is
+unchanged.
 
 If a test database is unavailable, leave `TEST_DATABASE_URL` unset — the unit
 tests still cover the rules.
@@ -254,8 +263,16 @@ architectural conversion.
 - `docker-compose.prod.yml` runs `api` + `postgres` on a private network; the
   database has **no published ports**. Set `POSTGRES_PASSWORD` (required) in the
   shell/environment before `docker compose -f docker-compose.prod.yml up -d --build`.
-- Deploy migrations explicitly (never on app boot):
-  `docker compose -f docker-compose.prod.yml exec api npm exec prisma migrate deploy -- --schema server/prisma/schema.prisma`
+- Deploy migrations explicitly through the guarded wrapper (never on app boot):
+  ```sh
+  docker compose -f docker-compose.prod.yml exec api \
+    node server/dist/scripts/guarded-migrate.js deploy \
+    --confirm-host postgres --confirm-port 5432 \
+    --confirm-database school_management --allow-production
+  ```
+  Replace `school_management` with the actual `POSTGRES_DB` value. The default
+  compose stack is production-equivalent, so `--allow-production` is required.
+  Do not run `npx prisma migrate deploy` directly in the container.
 - Run behind a TLS-terminating reverse proxy (nginx/caddy). Set `TRUST_PROXY=true`
   (see `.env.example`) so rate limiting sees real client IPs.
 - `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` seed the super admin only in

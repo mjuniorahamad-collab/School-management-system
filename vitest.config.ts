@@ -1,5 +1,6 @@
 import path from "node:path"
 import { configDefaults, defineConfig } from "vitest/config"
+import { buildIntegrationEnv } from "./server/tests/helpers/test-database-env.ts"
 import { assertSafeTestDatabaseUrl } from "./server/tests/helpers/test-database-guard.ts"
 
 // Load .env early so TEST_DATABASE_URL is available before vitest's env injection.
@@ -17,18 +18,18 @@ try {
 // than silently skipping coverage.
 //
 // A loopback target is validated by its "test" database name. A remote target
-// (e.g. a throwaway Neon project) additionally requires ALLOW_REMOTE_TEST_DATABASE=1,
-// EXPECTED_TEST_DATABASE_HOST and PRODUCTION_DATABASE_HOST. These are read from the
-// process env here; being main-process only, they are not forwarded to workers.
+// (e.g. a throwaway Neon project) additionally requires
+// ALLOW_REMOTE_TEST_DATABASE=1, EXPECTED_TEST_DATABASE_HOST,
+// PRODUCTION_DATABASE_HOST and PRODUCTION_DATABASE_NAME. The URL must be a
+// direct, unpooled endpoint because global setup migrates it. The non-secret
+// identity values are forwarded to workers so they can re-run the same guards.
 assertSafeTestDatabaseUrl(process.env.TEST_DATABASE_URL)
 
 // When a test database is configured (TEST_DATABASE_URL), the integration
 // suites run against it; otherwise they skip and only DB-free tests execute.
-const integrationEnv: Record<string, string> = {}
-if (process.env.TEST_DATABASE_URL) {
-  integrationEnv.DATABASE_URL = process.env.TEST_DATABASE_URL
-  integrationEnv.NODE_ENV = "test"
-}
+// Remote-target identity values are forwarded so worker-side reset guards see
+// the same validated target as global setup.
+const integrationEnv = buildIntegrationEnv(process.env)
 
 export default defineConfig({
   resolve: {
@@ -52,11 +53,15 @@ export default defineConfig({
     // runs via `vitest.timezone.config.ts` (npm run test:tz).
     exclude: [...configDefaults.exclude, "server/tests/dashboard.timezone.test.ts"],
     env: integrationEnv,
-    // The audit-logs suite runs `prisma migrate deploy` on a cold test DB in
-    // beforeAll, which can exceed the default 10s hook timeout.
+    // Ordinary tests should never hang forever; the default 5s is too tight for
+    // the DB-backed suites on a cold or slow machine. The timetable-scale suite
+    // raises this only for itself (below).
+    testTimeout: 30_000,
+    // Global setup applies migrations once after the identity probe. A cold test
+    // database can exceed the default 10s hook timeout.
     hookTimeout: 120_000,
     // The DB-backed integration suites share a single TEST_DATABASE_URL and each
-    // reset the tables in beforeAll; run files serially to avoid cross-file
+    // resets the tables in beforeAll; run files serially to avoid cross-file
     // races on the shared schema.
     fileParallelism: false,
     globalSetup: ["./server/tests/helpers/test-database-identity.global-setup.ts"],

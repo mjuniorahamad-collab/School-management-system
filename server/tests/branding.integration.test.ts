@@ -1,8 +1,8 @@
-import { execFileSync } from "node:child_process"
 import { PrismaClient } from "@prisma/client"
 import request from "supertest"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createApp } from "../src/app.js"
+import { resetTestDatabase } from "./helpers/reset-test-database.js"
 import { hashPassword } from "../src/auth/password.js"
 
 // Tenant branding projection suite. Verifies the chrome's `GET /branding` read
@@ -29,20 +29,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Tenant branding projection (integration)", 
   beforeAll(async () => {
     if (!TEST_DATABASE_URL) throw new Error("TEST_DATABASE_URL is required for this suite")
 
-    execFileSync(
-      process.execPath,
-      [
-        "node_modules/prisma/build/index.js",
-        "migrate",
-        "deploy",
-        "--schema",
-        "server/prisma/schema.prisma",
-      ],
-      { env: { ...process.env, DATABASE_URL: TEST_DATABASE_URL }, stdio: "pipe" },
-    )
 
     prisma = new PrismaClient()
-    await resetAllTables(prisma)
+    await resetTestDatabase(prisma)
 
     const portalPerm = await prisma.permission.create({
       data: { code: "portal:view", resource: "portal", action: "view" },
@@ -122,7 +111,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Tenant branding projection (integration)", 
   })
 
   afterAll(async () => {
-    await resetAllTables(prisma)
+    await resetTestDatabase(prisma)
     await prisma?.$disconnect()
   })
 
@@ -242,17 +231,6 @@ describe.skipIf(!TEST_DATABASE_URL)("Tenant branding projection (integration)", 
   })
 })
 
-async function resetAllTables(prisma: PrismaClient): Promise<void> {
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "AuditLog" CASCADE')
-  await prisma.schoolSetting.deleteMany()
-  await prisma.userRole.deleteMany()
-  await prisma.tenantMembership.deleteMany()
-  await prisma.user.deleteMany()
-  await prisma.rolePermission.deleteMany()
-  await prisma.permission.deleteMany()
-  await prisma.role.deleteMany()
-  await prisma.school.deleteMany()
-}
 
 async function login(
   agent: ReturnType<typeof request.agent>,

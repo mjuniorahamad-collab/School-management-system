@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, "fix/timetable-multi-entry-rendering"]
+    branches: [main, "fix/timetable-multi-entry-rendering", "recovery/p0-database-safety"]
   pull_request:
 
 jobs:
@@ -53,5 +53,18 @@ jobs:
       - name: Build server
         run: npm run build:server
 
+      - name: Restore script behavior
+        run: |
+          bash scripts/tests/db-restore.sh
+          pwsh -NoProfile -File scripts/tests/db-restore.ps1
+
+      - name: Test (DB-free)
+        run: npm test
+        env:
+          TEST_DATABASE_URL: ""
+
       - name: Test (unit + DB-backed integration)
         run: npm test
+
+      - name: Test (timezone regression)
+        run: npm run test:tz

@@ -5,7 +5,7 @@
 // network/database calls occur here; callers must perform the probe.
 // Error messages only echo the already-redacted `displayUrl` plus database
 // and role names, never credentials.
-import { isLoopbackHost } from "./test-database-guard.js"
+import { canonicalizeHost, isLoopbackHost } from "../../src/lib/database-target.js"
 
 const TRUTHY = new Set(["1", "true", "yes"])
 
@@ -19,7 +19,7 @@ function readString(env: Record<string, string | undefined>, key: string): strin
 function readHost(env: Record<string, string | undefined>, key: string): string | null {
   const raw = env[key]
   if (raw === undefined) return null
-  const value = raw.trim().toLowerCase()
+  const value = canonicalizeHost(raw)
   return value === "" ? null : value
 }
 
@@ -44,7 +44,7 @@ export interface RuntimeDatabaseIdentityOptions {
 
 export function assertRuntimeDatabaseIdentity(opts: RuntimeDatabaseIdentityOptions): void {
   const { urlHost, urlDatabase, connected, env, displayUrl } = opts
-  const host = urlHost.trim().toLowerCase()
+  const host = canonicalizeHost(urlHost)
   const local = isLoopbackHost(host) || host === "" // socket targets: host may be empty
 
   const connectedDb = (connected.database ?? "").trim().toLowerCase()

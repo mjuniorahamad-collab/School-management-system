@@ -21,6 +21,8 @@
 // indistinguishable from a shell-level DATABASE_URL override — and that check
 // is what stops this command from being silently pointed at the wrong database.
 
+import path from "node:path"
+import { pathToFileURL } from "node:url"
 import type { Prisma } from "@prisma/client"
 import { CATALOG_COUNTS, buildReconcilePlan, formatReconcilePlan, type DatabaseSnapshot } from "./permission-reconcile.js"
 import { assertProductionTarget } from "./production-target-guard.js"
@@ -29,17 +31,119 @@ type Mode = "check" | "apply"
 
 const MODE_FLAGS = ["--check", "--apply"] as const
 
-function parseMode(argv: readonly string[]): Mode {
-  const positional = argv.filter((arg) => !arg.startsWith("--"))
-  const flags = argv.filter((arg) => arg.startsWith("--"))
-  const unknown = flags.filter((flag) => !MODE_FLAGS.some((mode) => mode === flag))
+export function isDirectExecution(
+  entryPath: string | undefined = process.argv[1],
+  moduleUrl: string = import.meta.url,
+): boolean {
+  if (entryPath === undefined || entryPath.trim() === "") return false
+  try {
+    return pathToFileURL(path.resolve(entryPath)).href === moduleUrl
+  } catch {
+    return false
+  }
+}
+
+export interface ReconcileArgs {
+  mode: Mode
+  confirmHost?: string | null
+  confirmPort?: string | null
+  confirmDatabase?: string | null
+}
+
+export function parseReconcileArgs(argv: readonly string[]): ReconcileArgs {
   const expected = "expected exactly one of --check (read-only report) or --apply (additive write)"
+  const flags: string[] = []
+  const consumed = new Set<number>()
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    if (!arg) continue
+    if (arg.startsWith("--")) {
+      flags.push(arg)
+      if (
+        arg === "--confirm-host" ||
+        arg === "--confirm-port" ||
+        arg === "--confirm-database"
+      ) {
+        if (i + 1 < argv.length && !String(argv[i + 1]).startsWith("--")) {
+          consumed.add(i + 1)
+        }
+      }
+      continue
+    }
+  }
+
+  const positional = argv
+    .map((arg, idx) => ({ arg, idx }))
+    .filter(({ arg, idx }) => !arg.startsWith("--") && !consumed.has(idx))
+    .map(({ arg }) => arg)
+
+  const unknown = flags.filter((flag) => {
+    if (MODE_FLAGS.some((mode) => mode === flag)) return false
+    if (flag.startsWith("--confirm-host=") || flag === "--confirm-host") return false
+    if (flag.startsWith("--confirm-port=") || flag === "--confirm-port") return false
+    if (flag.startsWith("--confirm-database=") || flag === "--confirm-database") return false
+    return true
+  })
   if (unknown.length > 0) throw new Error(`unknown argument(s): ${unknown.join(", ")}; ${expected}`)
   if (positional.length > 0) throw new Error(`unexpected value(s): ${positional.join(", ")}; ${expected}`)
-  if (flags.length !== 1) throw new Error(`received ${flags.length} mode flags; ${expected}`)
-  const flag = flags[0]
+
+  const modeFlags = flags.filter((flag) => MODE_FLAGS.some((mode) => mode === flag))
+  if (modeFlags.length !== 1) throw new Error(`received ${modeFlags.length} mode flags; ${expected}`)
+  const flag = modeFlags[0]
   if (flag === undefined) throw new Error(`no mode flag received; ${expected}`)
-  return flag === "--apply" ? "apply" : "check"
+  const mode: Mode = flag === "--apply" ? "apply" : "check"
+
+  let confirmHost: string | null | undefined
+  let confirmPort: string | null | undefined
+  let confirmDatabase: string | null | undefined
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    if (!arg) continue
+    if (arg.startsWith("--confirm-host=")) {
+      confirmHost = arg.slice("--confirm-host=".length)
+      continue
+    }
+    if (arg === "--confirm-host") {
+      if (i + 1 >= argv.length) throw new Error("--confirm-host requires a value")
+      const val = argv[i + 1] ?? null
+      if (val !== null && val.startsWith("--")) throw new Error("--confirm-host requires a value")
+      confirmHost = val
+      i++
+      continue
+    }
+    if (arg.startsWith("--confirm-port=")) {
+      confirmPort = arg.slice("--confirm-port=".length)
+      continue
+    }
+    if (arg === "--confirm-port") {
+      if (i + 1 >= argv.length) throw new Error("--confirm-port requires a value")
+      const val = argv[i + 1] ?? null
+      if (val !== null && val.startsWith("--")) throw new Error("--confirm-port requires a value")
+      confirmPort = val
+      i++
+      continue
+    }
+    if (arg.startsWith("--confirm-database=")) {
+      confirmDatabase = arg.slice("--confirm-database=".length)
+      continue
+    }
+    if (arg === "--confirm-database") {
+      if (i + 1 >= argv.length) throw new Error("--confirm-database requires a value")
+      const val = argv[i + 1] ?? null
+      if (val !== null && val.startsWith("--")) throw new Error("--confirm-database requires a value")
+      confirmDatabase = val
+      i++
+      continue
+    }
+  }
+
+  return { mode, confirmHost, confirmPort, confirmDatabase }
+}
+
+function parseMode(argv: readonly string[]): Mode {
+  return parseReconcileArgs(argv).mode
 }
 
 async function loadSnapshot(client: Prisma.TransactionClient): Promise<DatabaseSnapshot> {
@@ -60,7 +164,9 @@ function sanitize(message: string): string {
 }
 
 async function main(): Promise<void> {
-  const mode = parseMode(process.argv.slice(2))
+  const argv = process.argv.slice(2)
+  const args = parseReconcileArgs(argv)
+  const mode = parseMode(argv)
   const shellEnv: Record<string, string | undefined> = { ...process.env }
 
   try {
@@ -74,6 +180,10 @@ async function main(): Promise<void> {
     databaseUrl: process.env.DATABASE_URL,
     testDatabaseUrl: process.env.TEST_DATABASE_URL,
     productionDatabaseHost: process.env.PRODUCTION_DATABASE_HOST,
+    productionDatabaseName: process.env.PRODUCTION_DATABASE_NAME,
+    confirmHost: args.confirmHost,
+    confirmPort: args.confirmPort,
+    confirmDatabase: args.confirmDatabase,
   })
 
   console.log(`permission reconciliation — mode: ${mode}`)
@@ -156,7 +266,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error: unknown) => {
-  console.error(sanitize(error instanceof Error ? error.message : String(error)))
-  process.exitCode = 1
-})
+if (isDirectExecution()) {
+  main().catch((error: unknown) => {
+    console.error(sanitize(error instanceof Error ? error.message : String(error)))
+    process.exitCode = 1
+  })
+}
