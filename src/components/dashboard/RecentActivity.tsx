@@ -12,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useAuth } from "@/auth/useAuth"
 import { useRecentActivities } from "@/hooks/useDashboardData"
 import { cn } from "@/lib/utils"
 import { timeAgo } from "@/lib/format"
@@ -29,7 +30,14 @@ interface RecentActivityProps {
 }
 
 export function RecentActivity({ className }: RecentActivityProps) {
-  const { data, isPending, isError } = useRecentActivities()
+  const { can } = useAuth()
+  const canViewDashboard = can("dashboard:view")
+  const canViewFees = can("fees:view")
+  const { data, isPending, isError } = useRecentActivities(canViewDashboard)
+
+  if (!canViewDashboard) return null
+
+  const activities = data?.filter((item) => canViewFees || item.source !== "fee")
 
   return (
     <Card className={cn("flex h-full flex-col", className)}>
@@ -55,9 +63,9 @@ export function RecentActivity({ className }: RecentActivityProps) {
           </div>
         )}
 
-        {data && (
+        {activities && (
           <ul className="divide-y">
-            {data.map((item) => {
+            {activities.map((item) => {
               const meta = toneIcon[item.tone]
               const Icon = meta.icon
               return (

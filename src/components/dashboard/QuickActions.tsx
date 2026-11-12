@@ -74,6 +74,8 @@ export function QuickActions({ className }: QuickActionsProps) {
 
   const actions = QUICK_ACTIONS.filter((action) => can(action.requiredPermission))
 
+  if (actions.length === 0) return null
+
   const handleActionClick = (id: string) => {
     switch (id) {
       case "add-student":

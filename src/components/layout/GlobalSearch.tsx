@@ -49,7 +49,10 @@ export function GlobalSearch() {
     staleTime: 30_000,
   })
 
-  const navigationItems = useMemo(() => getAllNavItems(), [])
+  const navigationItems = useMemo(
+    () => getAllNavItems().filter((item) => can(item.requiredPermission)),
+    [can],
+  )
 
   const run = (path: string) => {
     setOpen(false)

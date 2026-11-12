@@ -30,6 +30,18 @@ export const getTeacherHandler: RequestHandler = async (req, res) => {
   res.json(ok(await teacherService.getTeacherById(routeParam(req.params.id), schoolId)))
 }
 
+export const getTeacherMembershipHandler: RequestHandler = async (req, res) => {
+  const schoolId = requireAuth(req).school.id
+  res.json(
+    ok(
+      await teacherService.getTeacherMembership(
+        routeParam(req.params.teacherId),
+        schoolId,
+      ),
+    ),
+  )
+}
+
 export const createTeacherHandler: RequestHandler = async (req, res) => {
   const input = parseWithZod(createTeacherSchema, req.body, "Invalid teacher data")
   const auth = requireAuth(req)

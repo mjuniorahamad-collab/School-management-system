@@ -1,4 +1,5 @@
 import { Outlet } from "react-router-dom"
+import { RouteAccessGuard } from "@/routes/RouteAccessGuard"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { MobileSidebar } from "@/components/layout/MobileSidebar"
 import { TopHeader } from "@/components/layout/TopHeader"
@@ -14,7 +15,9 @@ export function AppShell() {
           <TopHeader />
           <main className="flex-1 overflow-y-auto [overflow-anchor:none]" id="main-content">
             <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-              <Outlet />
+              <RouteAccessGuard>
+                <Outlet />
+              </RouteAccessGuard>
             </div>
           </main>
         </div>

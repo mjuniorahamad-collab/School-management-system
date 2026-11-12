@@ -21,6 +21,7 @@ import { formatINR } from "@/lib/format"
 const { feeAnalyticsMock } = vi.hoisted(() => ({ feeAnalyticsMock: vi.fn() }))
 
 vi.mock("@/hooks/useDashboardData", () => ({ useFeeAnalytics: feeAnalyticsMock }))
+vi.mock("@/auth/useAuth", () => ({ useAuth: () => ({ can: () => true }) }))
 vi.mock("@/theme/useTheme", () => ({
   useTheme: () => ({ isDark: false }),
 }))

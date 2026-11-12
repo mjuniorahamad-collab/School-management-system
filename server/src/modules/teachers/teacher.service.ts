@@ -6,7 +6,12 @@ import type { AuthUser } from "../../types/auth.js"
 import { recordAudit, resolveAuditActor } from "../audit-logs/audit-log.service.js"
 import type { CreateTeacherInput, ListTeachersQuery, UpdateTeacherInput } from "./teacher.schema.js"
 import { DETAIL_INCLUDE, mapTeacherDetail, mapTeacherListItem } from "./teacher.mapper.js"
-import type { TeacherDetail, TeacherListResult, TeacherMeta } from "./teacher.types.js"
+import type {
+  TeacherDetail,
+  TeacherListResult,
+  TeacherMembershipLookup,
+  TeacherMeta,
+} from "./teacher.types.js"
 import { buildTeacherNumber } from "./teacher-number.js"
 
 type PrismaClient = NonNullable<Awaited<ReturnType<typeof getPrisma>>>
@@ -96,6 +101,33 @@ export async function getTeacherById(id: string, schoolId: string): Promise<Teac
   })
   if (!teacher) throw notFoundError("Teacher not found")
   return mapTeacherDetail(teacher)
+}
+
+export async function getTeacherMembership(
+  id: string,
+  schoolId: string,
+): Promise<TeacherMembershipLookup> {
+  const prisma = await requirePrisma()
+  const teacher = await prisma.teacher.findFirst({
+    where: { id, schoolId },
+    select: { userId: true },
+  })
+  if (!teacher) throw notFoundError("Teacher not found")
+  if (!teacher.userId) return { membershipId: null }
+
+  const membership = await prisma.tenantMembership.findFirst({
+    where: {
+      userId: teacher.userId,
+      schoolId,
+      status: "ACTIVE",
+      removedAt: null,
+      user: { is: { status: "ACTIVE" } },
+      role: { is: { name: ROLE_NAMES.TEACHER } },
+    },
+    select: { id: true },
+  })
+
+  return { membershipId: membership?.id ?? null }
 }
 
 export async function getTeacherMeta(schoolId: string): Promise<TeacherMeta> {

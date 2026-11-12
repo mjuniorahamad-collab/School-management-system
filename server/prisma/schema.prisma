@@ -88,6 +88,16 @@ enum MembershipStatus {
   INACTIVE
 }
 
+enum PermissionEffect {
+  ALLOW
+  DENY
+}
+
+enum MembershipPermissionEventType {
+  GRANTED
+  REVOKED
+}
+
 enum TimetableDay {
   MONDAY
   TUESDAY
@@ -271,13 +281,16 @@ model User {
   updatedNotices        Notice[]        @relation("NoticeUpdatedBy")
   createdEvents         Event[]         @relation("EventCreatedBy")
   updatedEvents         Event[]         @relation("EventUpdatedBy")
-  createdFeeInvoices    FeeInvoice[]    @relation("FeeInvoiceCreatedBy")
-  recordedPayments      FeePayment[]    @relation("PaymentRecordedBy")
-  issuedReceipts        FeeReceipt[]    @relation("ReceiptIssuedBy")
-  requestedAdjustments  FeeAdjustment[] @relation("FeeAdjustmentRequestedBy")
-  approvedAdjustments   FeeAdjustment[] @relation("FeeAdjustmentApprovedBy")
-  reversedAdjustments   FeeAdjustment[] @relation("FeeAdjustmentReversedBy")
-  overriddenAdjustments FeeAdjustment[] @relation("FeeAdjustmentOverriddenBy")
+  createdFeeInvoices      FeeInvoice[]                  @relation("FeeInvoiceCreatedBy")
+  recordedPayments        FeePayment[]                  @relation("PaymentRecordedBy")
+  issuedReceipts          FeeReceipt[]                  @relation("ReceiptIssuedBy")
+  requestedAdjustments    FeeAdjustment[]               @relation("FeeAdjustmentRequestedBy")
+  approvedAdjustments     FeeAdjustment[]               @relation("FeeAdjustmentApprovedBy")
+  reversedAdjustments     FeeAdjustment[]               @relation("FeeAdjustmentReversedBy")
+  overriddenAdjustments   FeeAdjustment[]               @relation("FeeAdjustmentOverriddenBy")
+  grantedMembershipPermissions TenantMembershipPermission[] @relation("MembershipPermissionGrantedBy")
+  revokedMembershipPermissions TenantMembershipPermission[] @relation("MembershipPermissionRevokedBy")
+  removedMemberships           TenantMembership[]             @relation("MembershipRemovedBy")
 
   createdApplications   AdmissionApplication[] @relation("ApplicationCreatedBy")
   updatedApplications   AdmissionApplication[] @relation("ApplicationUpdatedBy")
@@ -351,7 +364,8 @@ model Permission {
   description String?
   createdAt   DateTime @default(now())
 
-  rolePermissions RolePermission[]
+  rolePermissions      RolePermission[]
+  membershipPermissions TenantMembershipPermission[]
 
   @@index([resource])
 }
@@ -377,17 +391,67 @@ model TenantMembership {
   userId    String
   schoolId  String
   roleId    String
-  status    MembershipStatus @default(ACTIVE)
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
+  status      MembershipStatus @default(ACTIVE)
+  removedAt   DateTime?
+  removedById String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
 
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  role   Role   @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  school    School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  role      Role   @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  removedBy User?  @relation("MembershipRemovedBy", fields: [removedById], references: [id], onDelete: SetNull)
+
+  permissionOverrides TenantMembershipPermission[] @relation("MembershipPermissionOverrides")
 
   @@unique([userId, schoolId])
   @@index([schoolId])
   @@index([roleId])
+  @@index([removedById])
+}
+
+model TenantMembershipPermission {
+  id               String          @id @default(uuid())
+  membershipId     String
+  permissionId     String
+  effect           PermissionEffect
+  grantedById      String?
+  revokedAt        DateTime?
+  revokedById      String?
+  revocationReason String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  membership  TenantMembership @relation("MembershipPermissionOverrides", fields: [membershipId], references: [id], onDelete: Cascade)
+  permission  Permission       @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  grantedBy   User?            @relation("MembershipPermissionGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
+  revokedBy   User?            @relation("MembershipPermissionRevokedBy", fields: [revokedById], references: [id], onDelete: SetNull)
+
+  @@unique([membershipId, permissionId])
+  @@index([membershipId])
+  @@index([membershipId, revokedAt])
+  @@index([permissionId])
+  @@index([grantedById])
+  @@index([revokedById])
+}
+
+model MembershipPermissionHistory {
+  id             String                         @id @default(uuid())
+  schoolId       String
+  membershipId   String
+  targetUserId   String
+  roleName       String
+  permissionCode String
+  effect         PermissionEffect
+  eventType      MembershipPermissionEventType
+  actorId        String?
+  reason         String?
+  createdAt      DateTime                       @default(now())
+
+  @@index([schoolId, createdAt])
+  @@index([membershipId, createdAt])
+  @@index([targetUserId])
+  @@index([permissionCode])
 }
 
 model RolePermission {

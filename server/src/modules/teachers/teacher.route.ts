@@ -4,6 +4,7 @@ import { requirePermission } from "../../middleware/requirePermission.js"
 import {
   createTeacherHandler,
   getTeacherHandler,
+  getTeacherMembershipHandler,
   getTeacherMetaHandler,
   listTeachersHandler,
   updateTeacherHandler,
@@ -21,6 +22,12 @@ teachersRouter.use(requireAuth)
 teachersRouter.get("/", requirePermission("teachers:view"), listTeachersHandler)
 teachersRouter.get("/meta", requirePermission("teachers:view"), getTeacherMetaHandler)
 teachersRouter.post("/", requirePermission("teachers:create"), createTeacherHandler)
+teachersRouter.get(
+  "/:teacherId/membership",
+  requirePermission("teachers:view"),
+  requirePermission("membership-permissions:view"),
+  getTeacherMembershipHandler,
+)
 teachersRouter.get("/:id", requirePermission("teachers:view"), getTeacherHandler)
 teachersRouter.patch("/:id", requirePermission("teachers:update"), updateTeacherHandler)
 

@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useAuth } from "@/auth/useAuth"
 import { useUpcomingEvents } from "@/hooks/useDashboardData"
 import { cn } from "@/lib/utils"
 import { formatDateDay, formatDateMonth } from "@/lib/format"
@@ -36,22 +37,29 @@ interface UpcomingEventsProps {
 }
 
 export function UpcomingEvents({ className }: UpcomingEventsProps) {
-  const { data, isPending, isError } = useUpcomingEvents()
+  const { can } = useAuth()
+  const canViewDashboard = can("dashboard:view")
+  const canViewEvents = can("events:view")
+  const { data, isPending, isError } = useUpcomingEvents(canViewDashboard)
   const events = data?.filter((event) => filterUpcoming(event.date))
+
+  if (!canViewDashboard) return null
 
   return (
     <Card className={cn("flex h-full flex-col", className)}>
       <CardHeader>
         <CardTitle>Upcoming Events</CardTitle>
         <CardDescription data-slot="card-description">School calendar highlights</CardDescription>
-        <CardAction>
-          <Button asChild variant="ghost" size="sm">
-            <Link to="/events">
-              View all
-              <ArrowRight className="size-4" aria-hidden="true" />
-            </Link>
-          </Button>
-        </CardAction>
+        {canViewEvents && (
+          <CardAction>
+            <Button asChild variant="ghost" size="sm">
+              <Link to="/events">
+                View all
+                <ArrowRight className="size-4" aria-hidden="true" />
+              </Link>
+            </Button>
+          </CardAction>
+        )}
       </CardHeader>
       <CardContent className="flex flex-1 flex-col">
         {isPending &&
@@ -104,14 +112,16 @@ export function UpcomingEvents({ className }: UpcomingEventsProps) {
           </ul>
         )}
       </CardContent>
-      <CardFooter className="justify-center border-t pt-3">
-        <Button asChild variant="ghost" size="sm">
-          <Link to="/events">
-            View All Events
-            <ArrowRight className="size-4" aria-hidden="true" />
-          </Link>
-        </Button>
-      </CardFooter>
+      {canViewEvents && (
+        <CardFooter className="justify-center border-t pt-3">
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/events">
+              View All Events
+              <ArrowRight className="size-4" aria-hidden="true" />
+            </Link>
+          </Button>
+        </CardFooter>
+      )}
     </Card>
   )
 }

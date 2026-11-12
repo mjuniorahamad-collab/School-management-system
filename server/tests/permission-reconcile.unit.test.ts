@@ -283,11 +283,16 @@ describe("reconciliation source contract", () => {
   const readSource = (relative: string) => readFileSync(path.resolve(import.meta.dirname, "..", relative), "utf8")
   const script = readSource("prisma/reconcile-permissions.ts")
   const planner = readSource("prisma/permission-reconcile.ts")
+  const writer = readSource("prisma/permission-reconcile-db.ts")
 
   it("the apply path performs insert operations only", () => {
     expect(script).not.toMatch(/\.(deleteMany|deleteManyAndReturn|delete|updateMany|update|upsert|executeRaw)\s*\(/)
-    expect(script).toMatch(/permission\.create\(/)
-    expect(script).toMatch(/rolePermission\.createMany\(/)
+    expect(writer).not.toMatch(/\.(deleteMany|deleteManyAndReturn|delete|updateMany|update|upsert|executeRaw)\s*\(/)
+    expect(writer).not.toMatch(/\brole\.create(?:Many)?\s*\(/)
+    expect(script).not.toMatch(/permission\.create\(/)
+    expect(script).not.toMatch(/rolePermission\.createMany\(/)
+    expect(writer).toMatch(/permission\.create\(/)
+    expect(writer).toMatch(/rolePermission\.createMany\(/)
   })
 
   it("the command requires an explicit mode and a verified target", () => {

@@ -11,7 +11,8 @@ import { ImportantNotices } from "@/components/dashboard/ImportantNotices"
 import { FeeCollectionStatus } from "@/components/dashboard/FeeCollectionStatus"
 import { BirthdayStudents } from "@/components/dashboard/BirthdayStudents"
 import { RecentActivity } from "@/components/dashboard/RecentActivity"
-import { useDashboardStats } from "@/hooks/useDashboardData"
+import { useAuth } from "@/auth/useAuth"
+import { useDashboardStats, useFeeStat } from "@/hooks/useDashboardData"
 import type { DashboardStatTone } from "@/types/dashboard"
 
 const STAT_PRESENTATION: Record<
@@ -25,21 +26,31 @@ const STAT_PRESENTATION: Record<
 }
 
 export function DashboardPage() {
-  const { data: stats, isPending, isError } = useDashboardStats()
+  const { can } = useAuth()
+  const canViewFees = can("fees:view")
+  const statsQuery = useDashboardStats()
+  const feeStatQuery = useFeeStat(canViewFees)
+
+  const stats = [
+    ...(statsQuery.data ?? []),
+    ...(canViewFees && feeStatQuery.data ? [feeStatQuery.data] : []),
+  ]
+  const pendingCount =
+    (statsQuery.isPending ? 3 : 0) + (canViewFees && feeStatQuery.isPending ? 1 : 0)
+  const isError = statsQuery.isError || (canViewFees && feeStatQuery.isError)
 
   return (
     <PageContainer>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {isPending &&
-          Array.from({ length: 4 }).map((_, index) => (
-            <div key={index} className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
-              <div className="h-4 w-24 animate-pulse rounded bg-muted" />
-              <div className="mt-3 h-7 w-28 animate-pulse rounded bg-muted" />
-              <div className="mt-3 h-4 w-32 animate-pulse rounded bg-muted" />
-            </div>
-          ))}
+        {Array.from({ length: pendingCount }).map((_, index) => (
+          <div key={index} className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
+            <div className="h-4 w-24 animate-pulse rounded bg-muted" />
+            <div className="mt-3 h-7 w-28 animate-pulse rounded bg-muted" />
+            <div className="mt-3 h-4 w-32 animate-pulse rounded bg-muted" />
+          </div>
+        ))}
         {isError && <div className="sr-only">Could not load dashboard statistics.</div>}
-        {stats?.map((stat) => (
+        {stats.map((stat) => (
           <StatCard key={stat.id} stat={stat} presentation={STAT_PRESENTATION[stat.id]} />
         ))}
       </div>

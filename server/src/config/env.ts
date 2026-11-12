@@ -2,11 +2,16 @@ import { z } from "zod"
 
 // Single root `.env` serves both sides. Best-effort load so the server works
 // with `npm run dev:server` from the repo root; CI sets vars directly.
-try {
-  process.loadEnvFile()
-} catch (error) {
-  const code = (error as NodeJS.ErrnoException).code
-  if (code !== "ENOENT") throw error
+// The staging-server wrapper supplies configuration through the shell only, so
+// in that mode the file must never be read.
+const stagingServer = process.env.SMS_STAGING_SERVER === "1"
+if (!stagingServer) {
+  try {
+    process.loadEnvFile()
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code !== "ENOENT") throw error
+  }
 }
 
 const envSchema = z.object({

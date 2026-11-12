@@ -18,6 +18,7 @@ import type {
   DashboardBirthdayStudentItem,
   DashboardFeeAnalyticsResult,
   DashboardFeeCollectionStatusResult,
+  DashboardFeeStatResult,
   DashboardNoticeItem,
   DashboardRecentStudentItem,
   DashboardStatsResult,
@@ -94,12 +95,6 @@ export async function getStats(schoolId: string): Promise<DashboardStatsResult> 
   const now = new Date()
   const currentMonthStart = startOfMonth(now)
   const priorMonthStart = startOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1))
-  // Fee collections compare against date-only `paymentDate`; use UTC date-only,
-  // month-to-date boundaries (the timestamp-based counts above keep local
-  // boundaries). The prior window is the equivalent elapsed part of the prior
-  // month, never the entire prior month.
-  const feeMonthToDate = feeMonthToDateRanges(now)
-  const sessionId = await getActiveSessionId(prisma, schoolId)
 
   const [
     totalStudents,
@@ -111,8 +106,6 @@ export async function getStats(schoolId: string): Promise<DashboardStatsResult> 
     totalClasses,
     newClassesThisMonth,
     newClassesLastMonth,
-    collectedThisMonth,
-    collectedLastMonth,
   ] = await Promise.all([
     prisma.student.count({ where: { schoolId, status: "ACTIVE" } }),
     prisma.student.count({
@@ -143,6 +136,45 @@ export async function getStats(schoolId: string): Promise<DashboardStatsResult> 
     prisma.class.count({
       where: { schoolId, createdAt: { gte: priorMonthStart, lt: currentMonthStart } },
     }),
+  ])
+
+  return {
+    stats: [
+      {
+        id: "total-students",
+        label: "Total Students",
+        value: totalStudents.toLocaleString(),
+        trendPercent: trendPercent(newStudentsThisMonth, newStudentsLastMonth),
+        comparison: "vs last month",
+      },
+      {
+        id: "total-teachers",
+        label: "Total Teachers",
+        value: totalTeachers.toLocaleString(),
+        trendPercent: trendPercent(newTeachersThisMonth, newTeachersLastMonth),
+        comparison: "vs last month",
+      },
+      {
+        id: "total-classes",
+        label: "Total Classes",
+        value: totalClasses.toLocaleString(),
+        trendPercent: trendPercent(newClassesThisMonth, newClassesLastMonth),
+        comparison: "vs last month",
+      },
+    ],
+  }
+}
+
+export async function getFeeStat(schoolId: string): Promise<DashboardFeeStatResult> {
+  const prisma = await requirePrisma()
+  const now = new Date()
+  // Fee collections compare against date-only `paymentDate`; use UTC date-only,
+  // month-to-date boundaries. The prior window is the equivalent elapsed part of
+  // the prior month, never the entire prior month.
+  const feeMonthToDate = feeMonthToDateRanges(now)
+  const sessionId = await getActiveSessionId(prisma, schoolId)
+
+  const [collectedThisMonth, collectedLastMonth] = await Promise.all([
     prisma.feePayment.aggregate({
       where: {
         schoolId,
@@ -172,39 +204,14 @@ export async function getStats(schoolId: string): Promise<DashboardStatsResult> 
   }
 
   return {
-    stats: [
-      {
-        id: "total-students",
-        label: "Total Students",
-        value: totalStudents.toLocaleString(),
-        trendPercent: trendPercent(newStudentsThisMonth, newStudentsLastMonth),
-        comparison: "vs last month",
-      },
-      {
-        id: "total-teachers",
-        label: "Total Teachers",
-        value: totalTeachers.toLocaleString(),
-        trendPercent: trendPercent(newTeachersThisMonth, newTeachersLastMonth),
-        comparison: "vs last month",
-      },
-      {
-        id: "total-classes",
-        label: "Total Classes",
-        value: totalClasses.toLocaleString(),
-        trendPercent: trendPercent(newClassesThisMonth, newClassesLastMonth),
-        comparison: "vs last month",
-      },
-      {
-        id: "fees-collection",
-        label: "Fees Collection",
-        value: `₹${sessionCollected.toLocaleString("en-IN")}`,
-        trendPercent: trendPercent(
-          toMoney(collectedThisMonth._sum.amount ?? 0),
-          toMoney(collectedLastMonth._sum.amount ?? 0),
-        ),
-        comparison: "vs last month",
-      },
-    ],
+    id: "fees-collection",
+    label: "Fees Collection",
+    value: `₹${sessionCollected.toLocaleString("en-IN")}`,
+    trendPercent: trendPercent(
+      toMoney(collectedThisMonth._sum.amount ?? 0),
+      toMoney(collectedLastMonth._sum.amount ?? 0),
+    ),
+    comparison: "vs last month",
   }
 }
 
@@ -609,6 +616,7 @@ export async function getImportantNotices(
 
 export async function getRecentActivity(
   schoolId: string,
+  includeFees = false,
 ): Promise<DashboardActivityItem[]> {
   const prisma = await requirePrisma()
   const items: DashboardActivityItem[] = []
@@ -634,40 +642,44 @@ export async function getRecentActivity(
       entity: name,
       timestamp: s.createdAt.toISOString(),
       tone: "success",
+      source: "student",
     })
   }
 
-  const recentPayments = await prisma.feePayment.findMany({
-    where: { schoolId },
-    orderBy: { createdAt: "desc" },
-    take: 2,
-    select: {
-      id: true,
-      amount: true,
-      invoice: {
-        select: {
-          student: {
-            select: { firstName: true, middleName: true, lastName: true },
+  if (includeFees) {
+    const recentPayments = await prisma.feePayment.findMany({
+      where: { schoolId },
+      orderBy: { createdAt: "desc" },
+      take: 2,
+      select: {
+        id: true,
+        amount: true,
+        invoice: {
+          select: {
+            student: {
+              select: { firstName: true, middleName: true, lastName: true },
+            },
           },
         },
+        createdAt: true,
       },
-      createdAt: true,
-    },
-  })
-
-  for (const p of recentPayments) {
-    const studentName = p.invoice.student
-      ? [p.invoice.student.firstName, p.invoice.student.middleName, p.invoice.student.lastName]
-          .filter(Boolean)
-          .join(" ")
-      : "Unknown"
-    items.push({
-      id: `payment-${p.id}`,
-      action: "Fee payment received",
-      entity: studentName,
-      timestamp: p.createdAt.toISOString(),
-      tone: "success",
     })
+
+    for (const p of recentPayments) {
+      const studentName = p.invoice.student
+        ? [p.invoice.student.firstName, p.invoice.student.middleName, p.invoice.student.lastName]
+            .filter(Boolean)
+            .join(" ")
+        : "Unknown"
+      items.push({
+        id: `payment-${p.id}`,
+        action: "Fee payment received",
+        entity: studentName,
+        timestamp: p.createdAt.toISOString(),
+        tone: "success",
+        source: "fee",
+      })
+    }
   }
 
   const recentNotices = await prisma.notice.findMany({
@@ -684,6 +696,7 @@ export async function getRecentActivity(
       entity: n.title,
       timestamp: (n.publishedAt ?? n.createdAt).toISOString(),
       tone: "warning",
+      source: "notice",
     })
   }
 
@@ -707,6 +720,7 @@ export async function getRecentActivity(
       entity: `${e.class.name} · ${e.name}`,
       timestamp: (e.finalizedAt ?? e.createdAt).toISOString(),
       tone: "info",
+      source: "exam",
     })
   }
 

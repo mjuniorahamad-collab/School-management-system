@@ -51,10 +51,32 @@ const unguarded = suites.filter((suite) => suite.reachesDatabase && !suite.isGat
  */
 const ALLOWED_UNGATED = ["app.integration.test.ts", "health-http.integration.test.ts"]
 
+/**
+ * Intentionally disabled suites that are not environment-gated. These are
+ * quarantined with unconditional `describe.skip`, not allowed to run when a
+ * test database happens to be configured. The exception is exact: it does not
+ * apply to any other suite, and the checks below require the file to remain
+ * unconditionally skipped and database-inert.
+ */
+const QUARANTINED_UNGATED = [
+  {
+    name: "membership-permissions.lastadmin.integration.test.ts",
+    reason:
+      "The last-admin integration suite is quarantined until a non-destructive " +
+      "per-run database/schema strategy exists; it must remain describe.skip.",
+  },
+] as const
+
 const ungatedNames = suites
   .filter((suite) => !suite.isGated)
   .map((suite) => suite.name)
   .sort()
+
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "")
+}
 
 describe("integration suite self-gating", () => {
   it("finds the integration suites", () => {
@@ -75,8 +97,47 @@ describe("integration suite self-gating", () => {
     // connect through the app under test, which resolves DATABASE_URL from the
     // process env. Rather than guess which suites do that, any suite that is not
     // gated must be on the allowlist, so a new one forces a deliberate decision.
-    const unexpected = ungatedNames.filter((name) => !ALLOWED_UNGATED.includes(name))
+    const quarantinedNames: string[] = QUARANTINED_UNGATED.map((suite) => suite.name)
+    const unexpected = ungatedNames.filter(
+      (name) => !ALLOWED_UNGATED.includes(name) && !quarantinedNames.includes(name),
+    )
     expect(unexpected).toEqual([])
+  })
+
+  it("keeps quarantined suites unconditionally skipped and database-inert", () => {
+    for (const quarantined of QUARANTINED_UNGATED) {
+      const suite = suites.find((candidate) => candidate.name === quarantined.name)
+      expect(suite, `${quarantined.name} is quarantined but no longer exists`).toBeDefined()
+      expect(quarantined.reason.trim().length).toBeGreaterThan(0)
+
+      const code = stripComments(suite?.source ?? "")
+      expect(code, `${quarantined.name} must remain unconditionally skipped`).toContain(
+        "describe.skip(",
+      )
+      expect(code, `${quarantined.name} must not become environment-gated`).not.toContain(
+        "skipIf",
+      )
+      expect(
+        suite?.reachesDatabase,
+        `${quarantined.name} must stay database-inert while quarantined`,
+      ).toBe(false)
+
+      const importLines = code.match(/^\s*import\b.*$/gm) ?? []
+      expect(
+        importLines.every((line) => /from\s+["']vitest["']/.test(line)),
+        `${quarantined.name} may import only from vitest while quarantined`,
+      ).toBe(true)
+      expect(code, `${quarantined.name} must not add setup hooks`).not.toMatch(
+        /\b(?:beforeAll|beforeEach|afterAll|afterEach)\s*\(/,
+      )
+      expect(code, `${quarantined.name} must not add dynamic imports or require`).not.toMatch(
+        /\b(?:import|require)\s*\(/,
+      )
+      expect(
+        code,
+        `${quarantined.name} must not reference database clients or connection env`,
+      ).not.toMatch(/\b(?:PrismaClient|DATABASE_URL|TEST_DATABASE_URL|resetTestDatabase)\b/)
+    }
   })
 
   it("keeps the allowlist honest", () => {

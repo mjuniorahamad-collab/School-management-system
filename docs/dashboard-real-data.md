@@ -13,14 +13,15 @@ attendance today/week/month, fee analytics, the active session's fee collection
 status, class performance against a comparable finalized exam, recent students,
 upcoming events, published notices, recent creates, and birthdays. It is
 read-only, performance-safe (aggregations + limited `take`), tenant-scoped, and
-guarded by the existing `dashboard:view` permission.
+guarded by the existing `dashboard:view` / `fees:view` permissions.
 
 ## 2. Guard rails
 
 - **Read-only.** No endpoint mutates anything.
 - **Tenant-scoped.** Every query filters through `req.auth.school.id`.
-- **RBAC.** The router mounts `requireAuth`; every route then requires
-  `dashboard:view` as route middleware.
+- **RBAC.** The router mounts `requireAuth`; dashboard reads require
+  `dashboard:view`, and fee reads (including `/stats/fees`) require `fees:view`
+  as route middleware.
 - **No schema changes / no migrations.** The service aggregates existing domain
   rows only.
 - **Performance-safe.** Counts/aggregates in parallel `Promise.all`; lists are
@@ -32,14 +33,15 @@ guarded by the existing `dashboard:view` permission.
 ## 3. Endpoints (`/api/v1/dashboard`)
 
 All return the standard `{ success, data }` envelope and require
-`dashboard:view`.
+`dashboard:view`, except fee reads which require `fees:view`.
 
-| Method + path             | Handler output                                              |
-| ------------------------- | ----------------------------------------------------------- |
-| `GET /stats`              | Four `{ id, label, value, trendPercent, comparison }` stats. |
-| `GET /attendance?period=` | `{ total, present, late, absent, average }` for `today\|week\|month`. |
-| `GET /fees?period=`       | `{ totalCollected, trendPercent, comparison, months[] }` for `month\|session\|year`. |
-| `GET /fee-status`         | `{ collected, pending, total }` for the ACTIVE session.     |
+| Method + path             | Permission       | Handler output                                              |
+| ------------------------- | ---------------- | ----------------------------------------------------------- |
+| `GET /stats`              | `dashboard:view` | Three non-fee `{ id, label, value, trendPercent, comparison }` stats. |
+| `GET /stats/fees`         | `fees:view`      | The `fees-collection` stat object.                          |
+| `GET /attendance?period=` | `dashboard:view` | `{ total, present, late, absent, average }` for `today\|week\|month`. |
+| `GET /fees?period=`       | `fees:view`      | `{ totalCollected, trendPercent, comparison, months[] }` for `month\|session\|year`. |
+| `GET /fee-status`         | `fees:view`      | `{ collected, pending, total }` for the ACTIVE session.     |
 | `GET /top-classes`        | `{ context, classes[] }` — see §4.                          |
 | `GET /recent-students`    | Up to 6 newest students with active placement.              |
 | `GET /events`             | Up to 5 future `SCHEDULED` events (startAt ≥ now).          |
@@ -52,9 +54,12 @@ to `session`. Unknown values → 400 `BAD_REQUEST`.
 
 ### Statcard semantics
 
-- `total-students` / `total-teachers` count `ACTIVE` rows; `total-classes` counts
-  all classes; `fees-collection` sums `FeePayment` against the ACTIVE session's
-  invoices (formatted `₹NNN`, en-IN).
+- `getStats` returns the three count cards: `total-students` / `total-teachers`
+  count `ACTIVE` rows; `total-classes` counts all classes.
+- `getFeeStat` (`GET /stats/fees`, `fees:view`) returns only `fees-collection`,
+  which sums `FeePayment` against the ACTIVE session's invoices (formatted
+  `₹NNN`, en-IN). The frontend merges it into the top stats row only when the
+  actor has `fees:view`.
 - `trendPercent` is creation-based: new-entities-this-month vs last month for the
   three count cards, and current month-to-date vs the equivalent prior-month-to-date
   collections for the fees card (`comparison` labels accordingly; the prior window
@@ -63,8 +68,8 @@ to `session`. Unknown values → 400 `BAD_REQUEST`.
   0 prior + positive current = 100, else 0; otherwise percentage change rounded to
   1 decimal. Icons/tones stay on the frontend (`STAT_PRESENTATION` in
   `DashboardPage.tsx`) because tones and icons are not serializable.
-- `getStats` returns raw values as strings exactly as the old mock did, so the
-  `StatCard` component needs no value reformatting.
+- `getStats` / `getFeeStat` return raw values as strings exactly as the old mock
+  did, so the `StatCard` component needs no value reformatting.
 
 ### Fee semantics
 
@@ -152,14 +157,17 @@ runs in UTC and cannot see the negative-offset failure.
 ## 6. Frontend
 
 - `src/types/dashboard.ts` — the wire contract mirroring the backend types
-  (`DashboardStatItem`, `DashboardAttendance`, `DashboardFeeAnalytics`,
-  `DashboardFeeCollectionStatus`, `DashboardTopClasses` (+ context),
-  `DashboardRecentStudent`, `DashboardUpcomingEvent`, `DashboardNotice`,
-  `DashboardActivity`, `DashboardBirthdayStudent`, period/tone unions).
-- `src/services/dashboardService.ts` — all-ten real API calls via `@/lib/apiClient`.
-- `src/hooks/useDashboardData.ts` — TanStack Query hooks (query keys unchanged:
-  `dashboard-stats`, `dashboard-attendance`, `dashboard-fees`, …); the old
-  `useQuickActions` hook was removed.
+  (`DashboardStatItem` / `DashboardStats`, `DashboardFeeStat`,
+  `DashboardAttendance`, `DashboardFeeAnalytics`, `DashboardFeeCollectionStatus`,
+  `DashboardTopClasses` (+ context), `DashboardRecentStudent`,
+  `DashboardUpcomingEvent`, `DashboardNotice`, `DashboardActivity`,
+  `DashboardBirthdayStudent`, period/tone unions).
+- `src/services/dashboardService.ts` — real API calls via `@/lib/apiClient`,
+  including the separate fee-stat read.
+- `src/hooks/useDashboardData.ts` — TanStack Query hooks (`dashboard/stats`,
+  `dashboard/fee-stat`, `dashboard/attendance`, `dashboard/fees`, …); hooks
+  accept `enabled` for permission gating, and the old `useQuickActions` hook was
+  removed.
 - Widgets in `src/components/dashboard/` (StatCard, AttendanceOverview,
   FeesCollectionCard, FeeCollectionStatus, TopPerformingClasses, RecentStudents,
   UpcomingEvents, ImportantNotices, RecentActivity, BirthdayStudents,
@@ -180,6 +188,13 @@ runs in UTC and cannot see the negative-offset failure.
   name tie-break, min window, <2 classes → null); `computeClassRanking` (grouping,
   averages, tie-break, empty); `dateOnlyMonthKey` / `recentMonthKeys` (UTC
   date-only first-of-month mapping, year rollover).
+- `server/tests/dashboard-stats-split.unit.test.ts` — DB-free: route middleware
+  contract for `/stats` (`dashboard:view`) and `/stats/fees` (`fees:view`), and
+  service isolation (three count cards vs the fee-only stat).
+- `src/components/dashboard/DashboardPage.permissions.test.tsx` /
+  `src/hooks/useDashboardData.permissions.test.tsx` — fee-stat gating: the query
+  runs only with `fees:view`, and the fee card merges into the top stats only
+  when permitted.
 - `server/tests/dashboard.integration.test.ts` — skipped unless
   `TEST_DATABASE_URL`; exercises 401/403 guards, stats values, attendance
   aggregation + period defaults/validation, fee-status zero + totals, fee

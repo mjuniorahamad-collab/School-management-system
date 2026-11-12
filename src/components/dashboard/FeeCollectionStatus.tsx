@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Progress } from "@/components/ui/progress"
+import { useAuth } from "@/auth/useAuth"
 import { useFeeCollectionStatus } from "@/hooks/useDashboardData"
 import { cn } from "@/lib/utils"
 import { formatINR, formatPercent } from "@/lib/format"
@@ -16,7 +17,11 @@ interface FeeCollectionStatusProps {
 }
 
 export function FeeCollectionStatus({ className }: FeeCollectionStatusProps) {
-  const { data, isPending, isError } = useFeeCollectionStatus()
+  const { can } = useAuth()
+  const canViewFees = can("fees:view")
+  const { data, isPending, isError } = useFeeCollectionStatus(canViewFees)
+
+  if (!canViewFees) return null
 
   return (
     <Card className={cn("flex h-full flex-col", className)}>

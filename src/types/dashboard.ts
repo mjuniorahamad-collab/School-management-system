@@ -11,6 +11,12 @@ export interface DashboardStatItem {
   comparison: string
 }
 
+export interface DashboardStats {
+  stats: DashboardStatItem[]
+}
+
+export type DashboardFeeStat = DashboardStatItem
+
 export type AttendancePeriod = "today" | "week" | "month"
 
 export interface DashboardAttendance {
@@ -88,12 +94,15 @@ export interface DashboardNotice {
 
 export type DashboardActivityTone = "success" | "info" | "warning" | "neutral"
 
+export type DashboardActivitySource = "student" | "fee" | "notice" | "exam"
+
 export interface DashboardActivity {
   id: string
   action: string
   entity: string
   timestamp: string
   tone: DashboardActivityTone
+  source: DashboardActivitySource
 }
 
 export interface DashboardBirthdayStudent {

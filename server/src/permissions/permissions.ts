@@ -147,6 +147,11 @@ export const PERMISSION_CODES = [
   // card: `report-cards:generate` must never imply the ability to change the
   // calculation rules a card is generated under.
   "report-cards:manage-schemes",
+  // Membership-scoped extra permission grants (V1). Narrow management codes:
+  // `view` reads a membership's effective/default/override permissions;
+  // `grant` adds one allow-listed ALLOW override to a target membership.
+  "membership-permissions:view",
+  "membership-permissions:grant",
 ] as const
 
 export type PermissionCode = (typeof PERMISSION_CODES)[number]
@@ -257,6 +262,8 @@ export const ROLE_PERMISSIONS: Record<RoleName, readonly string[]> = {
     "portal:view",
     "notifications:view",
     "notifications:create",
+    "membership-permissions:view",
+    "membership-permissions:grant",
   ],
 
   TEACHER: [
@@ -367,4 +374,47 @@ export function describePermission(code: string): string {
   const { resource, action } = parsePermissionCode(code)
   const actionLabel = action ? `${action.charAt(0).toUpperCase()}${action.slice(1)}` : "Access"
   return `${actionLabel} ${resource.replace(/:/g, " ")}`
+}
+
+// Permissions that must never be granted via membership-level custom ALLOW overrides
+// to prevent indirect administrative privilege escalation.
+// Essential School Admin management permissions (inspect routes/guards)
+export const SCHOOL_ADMIN_ESSENTIAL_PERMISSIONS = [
+  "users:view",
+  "users:create",
+  "users:update",
+  "users:delete",
+  "roles:view",
+  "roles:update",
+  "roles:create",
+  "roles:delete",
+  "settings:view",
+  "settings:update",
+] as const
+
+export const NON_DELEGABLE_PERMISSION_CODES = [
+  "users:create",
+  "users:update",
+  "users:delete",
+  "roles:create",
+  "roles:update",
+  "roles:delete",
+  "roles:view",
+  "concessions:override",
+  "audit-logs:view",
+  "audit-logs:export",
+  "settings:update",
+  "settings:view",
+  "membership-permissions:view",
+  "membership-permissions:grant",
+] as const
+
+export type NonDelegablePermissionCode = (typeof NON_DELEGABLE_PERMISSION_CODES)[number]
+
+export function isNonDelegablePermission(code: string): boolean {
+  return (NON_DELEGABLE_PERMISSION_CODES as readonly string[]).includes(code)
+}
+
+export function isKnownPermissionCode(code: string): boolean {
+  return (PERMISSION_CODES as readonly string[]).includes(code)
 }

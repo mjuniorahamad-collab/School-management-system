@@ -57,6 +57,10 @@ export interface TeacherListResult {
   total: number
 }
 
+export interface TeacherMembershipLookup {
+  membershipId: string | null
+}
+
 export interface TeacherMetaSubject {
   id: string
   code: string

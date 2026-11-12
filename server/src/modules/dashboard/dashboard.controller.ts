@@ -15,6 +15,11 @@ export const getStatsHandler: RequestHandler = async (req, res) => {
   res.json(ok(await dashboardService.getStats(schoolId)))
 }
 
+export const getFeeStatHandler: RequestHandler = async (req, res) => {
+  const schoolId = extractSchoolId(req)
+  res.json(ok(await dashboardService.getFeeStat(schoolId)))
+}
+
 export const getAttendanceHandler: RequestHandler = async (req, res) => {
   const schoolId = extractSchoolId(req)
   const query = parseWithZod(attendanceQuerySchema, req.query, "Invalid attendance query")
@@ -54,7 +59,8 @@ export const getImportantNoticesHandler: RequestHandler = async (req, res) => {
 
 export const getRecentActivityHandler: RequestHandler = async (req, res) => {
   const schoolId = extractSchoolId(req)
-  res.json(ok(await dashboardService.getRecentActivity(schoolId)))
+  const includeFees = res.locals.canViewFeeActivity === true
+  res.json(ok(await dashboardService.getRecentActivity(schoolId, includeFees)))
 }
 
 export const getBirthdayStudentsHandler: RequestHandler = async (req, res) => {

@@ -11,6 +11,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ChartTooltip } from "@/components/charts/ChartTooltip"
+import { useAuth } from "@/auth/useAuth"
 import { useAttendance } from "@/hooks/useDashboardData"
 import { cn } from "@/lib/utils"
 import { formatPercent } from "@/lib/format"
@@ -33,8 +34,10 @@ interface AttendanceOverviewProps {
 }
 
 export function AttendanceOverview({ className }: AttendanceOverviewProps) {
+  const { can } = useAuth()
+  const canViewDashboard = can("dashboard:view")
   const [period, setPeriod] = useState<AttendancePeriod>("today")
-  const { data, isPending, isError } = useAttendance(period)
+  const { data, isPending, isError } = useAttendance(period, canViewDashboard)
 
   const pieData = useMemo(() => {
     if (!data) return []
@@ -44,6 +47,8 @@ export function AttendanceOverview({ className }: AttendanceOverviewProps) {
       { name: "Absent", value: data.absent, color: DONUT_COLORS.absent },
     ]
   }, [data])
+
+  if (!canViewDashboard) return null
 
   return (
     <Card className={cn("flex h-full flex-col", className)}>

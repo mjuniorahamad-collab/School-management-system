@@ -6,9 +6,11 @@ import type {
   DashboardBirthdayStudent,
   DashboardFeeAnalytics,
   DashboardFeeCollectionStatus,
+  DashboardFeeStat,
   DashboardNotice,
   DashboardRecentStudent,
   DashboardStatItem,
+  DashboardStats,
   DashboardTopClasses,
   DashboardUpcomingEvent,
   FeePeriod,
@@ -27,9 +29,11 @@ function queryString(params: Record<string, string>): string {
 
 export const dashboardService = {
   getStats(): Promise<DashboardStatItem[]> {
-    return api
-      .get<{ stats: DashboardStatItem[] }>("/dashboard/stats")
-      .then((response) => response.stats)
+    return api.get<DashboardStats>("/dashboard/stats").then((response) => response.stats)
+  },
+
+  getFeeStat(): Promise<DashboardFeeStat> {
+    return api.get<DashboardFeeStat>("/dashboard/stats/fees")
   },
 
   getAttendance(period: AttendancePeriod): Promise<DashboardAttendance> {

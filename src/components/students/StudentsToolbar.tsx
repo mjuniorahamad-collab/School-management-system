@@ -65,12 +65,14 @@ export function StudentsToolbar({
           />
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Button variant="outline" size="default" asChild>
-            <a href={`${API_BASE_URL}${exportHref}`} download>
-              <Download className="size-4" aria-hidden="true" />
-              Export
-            </a>
-          </Button>
+          {can("students:export") && (
+            <Button variant="outline" size="default" asChild>
+              <a href={`${API_BASE_URL}${exportHref}`} download>
+                <Download className="size-4" aria-hidden="true" />
+                Export
+              </a>
+            </Button>
+          )}
           {can("students:create") && (
             <Button asChild>
               <Link to="/students/new">

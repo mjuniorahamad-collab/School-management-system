@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client"
 import {
   attendanceExistsError,
   badRequestError,
+  forbiddenError,
   notFoundError,
 } from "../../lib/ApiError.js"
 import { getPrisma } from "../../lib/database.js"
@@ -25,6 +26,7 @@ import type {
   AttendanceSummaryResult,
   BulkMarkAttendanceResult,
 } from "./attendance.types.js"
+import { assertTeacherAssignedToClassSection, getTeacherForUser, isPlatformSuperAdmin, isTeacher } from "../../lib/teacher-scope.js"
 
 type PrismaClient = NonNullable<Awaited<ReturnType<typeof getPrisma>>>
 
@@ -44,6 +46,7 @@ async function requirePrisma(): Promise<PrismaClient> {
 export async function listAttendanceRecords(
   query: ListAttendanceQuery,
   schoolId: string,
+  actor?: AuthUser,
 ): Promise<AttendanceRecordListResult> {
   const prisma = await requirePrisma()
 
@@ -56,6 +59,27 @@ export async function listAttendanceRecords(
     where.date = {}
     if (query.dateFrom) where.date.gte = new Date(`${query.dateFrom}T00:00:00.000Z`)
     if (query.dateTo) where.date.lte = new Date(`${query.dateTo}T23:59:59.999Z`)
+  }
+
+  if (actor && !isPlatformSuperAdmin(actor) && isTeacher(actor)) {
+    const teacher = await getTeacherForUser(prisma, actor.id, schoolId)
+    if (!teacher) throw forbiddenError("Teacher profile not linked")
+    const classes = (teacher as any).teacherClasses || []
+    const allowedClassIds = [...new Set(classes.map((c: any) => c.classId))]
+    const allowedSectionPairs = new Set(classes.map((c: any) => `${c.classId}:${c.sectionId ?? ""}`))
+    if (query.classId && query.sectionId !== undefined) {
+      const key = `${query.classId}:${query.sectionId ?? ""}`
+      if (!allowedSectionPairs.has(key) && !classes.some((c: any) => c.classId === query.classId && c.sectionId === null)) {
+        throw forbiddenError("Not assigned to this class/section")
+      }
+    } else if (query.classId) {
+      if (!allowedClassIds.includes(query.classId) && !classes.some((c: any) => c.classId === query.classId)) {
+        throw forbiddenError("Not assigned to this class")
+      }
+      where.classId = query.classId
+    } else {
+      where.classId = { in: allowedClassIds } as any
+    }
   }
 
   const [total, rows] = await prisma.$transaction([
@@ -94,6 +118,10 @@ export async function markAttendance(
   const prisma = await requirePrisma()
   const date = new Date(`${input.date}T00:00:00.000Z`)
   const auditActor = await resolveAuditActor(prisma, schoolId, actor)
+
+  if (!isPlatformSuperAdmin(actor) && isTeacher(actor)) {
+    await assertTeacherAssignedToClassSection(prisma, actor.id, schoolId, input.classId, input.sectionId ?? null)
+  }
 
   const enrollment = await findEnrollment(
     prisma,
@@ -172,6 +200,10 @@ export async function bulkMarkAttendance(
   const prisma = await requirePrisma()
   const date = new Date(`${input.date}T00:00:00.000Z`)
   const auditActor = await resolveAuditActor(prisma, schoolId, actor)
+
+  if (!isPlatformSuperAdmin(actor) && isTeacher(actor)) {
+    await assertTeacherAssignedToClassSection(prisma, actor.id, schoolId, input.classId, input.sectionId ?? null)
+  }
 
   const studentIds = input.records.map((r) => r.studentId)
   const enrollments = await prisma.studentEnrollment.findMany({

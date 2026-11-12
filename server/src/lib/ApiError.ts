@@ -7,6 +7,7 @@ export const UNAUTHORIZED = "UNAUTHORIZED"
 export const FORBIDDEN = "FORBIDDEN"
 export const INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
 export const ACCOUNT_DISABLED = "ACCOUNT_DISABLED"
+export const PERMISSION_GRANT_CONFLICT = "PERMISSION_GRANT_CONFLICT"
 export const STORAGE_ERROR = "STORAGE_ERROR"
 export const ATTENDANCE_EXISTS = "ATTENDANCE_EXISTS"
 export const ATTENDANCE_REGISTER_LOCKED = "ATTENDANCE_REGISTER_LOCKED"
@@ -69,6 +70,17 @@ export function invalidCredentialsError(message = "Invalid email or password"): 
 
 export function accountDisabledError(message = "This account is disabled or suspended"): ApiError {
   return new ApiError(403, ACCOUNT_DISABLED, message)
+}
+
+/**
+ * A membership already has a DENY override for the same permission. Grants are
+ * additive-only in V1, so the existing row is left untouched and the caller
+ * must resolve the conflict deliberately.
+ */
+export function permissionGrantConflictError(
+  message = "An existing DENY override conflicts with this grant",
+): ApiError {
+  return new ApiError(409, PERMISSION_GRANT_CONFLICT, message)
 }
 
 /**

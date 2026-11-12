@@ -23,8 +23,8 @@
 
 import path from "node:path"
 import { pathToFileURL } from "node:url"
-import type { Prisma } from "@prisma/client"
-import { CATALOG_COUNTS, buildReconcilePlan, formatReconcilePlan, type DatabaseSnapshot } from "./permission-reconcile.js"
+import { CATALOG_COUNTS, buildReconcilePlan, formatReconcilePlan } from "./permission-reconcile.js"
+import { applyAdditiveReconcile, loadReconcileSnapshot } from "./permission-reconcile-db.js"
 import { assertProductionTarget } from "./production-target-guard.js"
 
 type Mode = "check" | "apply"
@@ -146,15 +146,6 @@ function parseMode(argv: readonly string[]): Mode {
   return parseReconcileArgs(argv).mode
 }
 
-async function loadSnapshot(client: Prisma.TransactionClient): Promise<DatabaseSnapshot> {
-  const [permissions, roles, grants] = await Promise.all([
-    client.permission.findMany({ select: { id: true, code: true, resource: true, action: true, description: true } }),
-    client.role.findMany({ select: { id: true, name: true } }),
-    client.rolePermission.findMany({ select: { id: true, roleId: true, permissionId: true } }),
-  ])
-  return { permissions, roles, grants }
-}
-
 function print(lines: readonly string[]): void {
   for (const line of lines) console.log(line)
 }
@@ -193,7 +184,7 @@ async function main(): Promise<void> {
   const { PrismaClient } = await import("@prisma/client")
   const prisma = new PrismaClient()
   try {
-    const plan = buildReconcilePlan(await loadSnapshot(prisma))
+    const plan = buildReconcilePlan(await loadReconcileSnapshot(prisma))
     console.log(`catalogue: ${CATALOG_COUNTS.permissions} permission(s), ${CATALOG_COUNTS.roles} role(s), ${CATALOG_COUNTS.grants} grant(s)`)
     print(formatReconcilePlan(plan))
 
@@ -212,48 +203,11 @@ async function main(): Promise<void> {
       return
     }
 
-    const applied = await prisma.$transaction(
-      async (tx) => {
-        const snapshot = await loadSnapshot(tx)
-        const inner = buildReconcilePlan(snapshot)
-        if (!inner.canApply) {
-          throw new Error(`target state changed while applying: ${inner.blockers.join("; ")}`)
-        }
-        const roleIds = new Map(snapshot.roles.map((role) => [role.name, role.id]))
-        const permissionIds = new Map(snapshot.permissions.map((permission) => [permission.code, permission.id]))
-
-        for (const permission of inner.missingPermissions) {
-          const created = await tx.permission.create({
-            data: {
-              code: permission.code,
-              resource: permission.resource,
-              action: permission.action,
-              description: permission.description,
-            },
-          })
-          permissionIds.set(created.code, created.id)
-        }
-
-        const grantRows: { roleId: string; permissionId: string }[] = []
-        for (const grant of inner.missingGrants) {
-          const roleId = roleIds.get(grant.roleName)
-          const permissionId = permissionIds.get(grant.code)
-          if (roleId === undefined || permissionId === undefined) {
-            throw new Error(`cannot resolve catalogue entry for grant ${grant.roleName} ${grant.code}`)
-          }
-          grantRows.push({ roleId, permissionId })
-        }
-        if (grantRows.length > 0) {
-          await tx.rolePermission.createMany({ data: grantRows, skipDuplicates: true })
-        }
-        return { permissions: inner.missingPermissions.length, grants: grantRows.length }
-      },
-      { maxWait: 15_000, timeout: 60_000 },
-    )
+    const applied = await applyAdditiveReconcile(prisma, plan)
 
     console.log(`applied: inserted ${applied.permissions} permission row(s) and ${applied.grants} grant row(s) additively.`)
 
-    const verify = buildReconcilePlan(await loadSnapshot(prisma))
+    const verify = buildReconcilePlan(await loadReconcileSnapshot(prisma))
     if (verify.canApply && verify.missingPermissions.length === 0 && verify.missingGrants.length === 0) {
       console.log("verified: the database now matches the catalogue (0 missing permissions, 0 missing grants).")
       return

@@ -4,6 +4,7 @@ import type { AttendancePeriod, FeePeriod } from "@/types/dashboard"
 
 const QUERY_KEYS = {
   stats: ["dashboard", "stats"] as const,
+  feeStat: ["dashboard", "fee-stat"] as const,
   attendance: (period: AttendancePeriod) => ["dashboard", "attendance", period] as const,
   fees: (period: FeePeriod) => ["dashboard", "fees", period] as const,
   feeStatus: ["dashboard", "fee-status"] as const,
@@ -15,57 +16,82 @@ const QUERY_KEYS = {
   birthdays: ["dashboard", "birthdays"] as const,
 }
 
-export function useDashboardStats() {
-  return useQuery({ queryKey: QUERY_KEYS.stats, queryFn: dashboardService.getStats })
+export function useDashboardStats(enabled = true) {
+  return useQuery({ queryKey: QUERY_KEYS.stats, queryFn: dashboardService.getStats, enabled })
 }
 
-export function useAttendance(period: AttendancePeriod) {
+export function useFeeStat(enabled = true) {
+  return useQuery({ queryKey: QUERY_KEYS.feeStat, queryFn: dashboardService.getFeeStat, enabled })
+}
+
+export function useAttendance(period: AttendancePeriod, enabled = true) {
   return useQuery({
     queryKey: QUERY_KEYS.attendance(period),
     queryFn: () => dashboardService.getAttendance(period),
+    enabled,
   })
 }
 
-export function useFeeAnalytics(period: FeePeriod) {
+export function useFeeAnalytics(period: FeePeriod, enabled = true) {
   return useQuery({
     queryKey: QUERY_KEYS.fees(period),
     queryFn: () => dashboardService.getFeeAnalytics(period),
+    enabled,
   })
 }
 
-export function useFeeCollectionStatus() {
+export function useFeeCollectionStatus(enabled = true) {
   return useQuery({
     queryKey: QUERY_KEYS.feeStatus,
     queryFn: dashboardService.getFeeCollectionStatus,
+    enabled,
   })
 }
 
-export function useRecentStudents() {
+export function useRecentStudents(enabled = true) {
   return useQuery({
     queryKey: QUERY_KEYS.recentStudents,
     queryFn: dashboardService.getRecentStudents,
+    enabled,
   })
 }
 
-export function useTopPerformingClasses() {
+export function useTopPerformingClasses(enabled = true) {
   return useQuery({
     queryKey: QUERY_KEYS.topClasses,
     queryFn: dashboardService.getTopPerformingClasses,
+    enabled,
   })
 }
 
-export function useUpcomingEvents() {
-  return useQuery({ queryKey: QUERY_KEYS.events, queryFn: dashboardService.getUpcomingEvents })
+export function useUpcomingEvents(enabled = true) {
+  return useQuery({
+    queryKey: QUERY_KEYS.events,
+    queryFn: dashboardService.getUpcomingEvents,
+    enabled,
+  })
 }
 
-export function useImportantNotices() {
-  return useQuery({ queryKey: QUERY_KEYS.notices, queryFn: dashboardService.getImportantNotices })
+export function useImportantNotices(enabled = true) {
+  return useQuery({
+    queryKey: QUERY_KEYS.notices,
+    queryFn: dashboardService.getImportantNotices,
+    enabled,
+  })
 }
 
-export function useRecentActivities() {
-  return useQuery({ queryKey: QUERY_KEYS.activities, queryFn: dashboardService.getRecentActivities })
+export function useRecentActivities(enabled = true) {
+  return useQuery({
+    queryKey: QUERY_KEYS.activities,
+    queryFn: dashboardService.getRecentActivities,
+    enabled,
+  })
 }
 
-export function useBirthdayStudents() {
-  return useQuery({ queryKey: QUERY_KEYS.birthdays, queryFn: dashboardService.getBirthdayStudents })
+export function useBirthdayStudents(enabled = true) {
+  return useQuery({
+    queryKey: QUERY_KEYS.birthdays,
+    queryFn: dashboardService.getBirthdayStudents,
+    enabled,
+  })
 }

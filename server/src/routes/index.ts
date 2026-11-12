@@ -43,6 +43,7 @@ import { portalLinksRouter, portalMeRouter } from "../modules/portal/portal.rout
 import { portalAccountRouter, portalActivationRouter } from "../modules/portal/portal-provisioning.route.js"
 import { reportCardsRouter } from "../modules/report-cards/report-card.route.js"
 import { reportCardSchemesRouter } from "../modules/report-card-schemes/report-card-scheme.route.js"
+import { membershipPermissionsRouter } from "../modules/membership-permissions/membership-permission.route.js"
 
 // Feature modules register their routers here (e.g. apiRouter.use(studentsRouter)).
 export const apiRouter: Router = Router()
@@ -58,6 +59,7 @@ apiRouter.use("/teachers", teachersRouter)
 apiRouter.use("/staff", staffRouter)
 apiRouter.use("/users", usersRouter)
 apiRouter.use("/roles", rolesRouter)
+apiRouter.use("/memberships", membershipPermissionsRouter)
 apiRouter.use("/fee-heads", feeHeadsRouter)
 apiRouter.use("/exam-types", examTypesRouter)
 apiRouter.use("/grading-bands", gradingBandsRouter)

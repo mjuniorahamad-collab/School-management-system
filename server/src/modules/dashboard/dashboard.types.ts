@@ -10,6 +10,8 @@ export interface DashboardStatsResult {
   stats: DashboardStatItem[]
 }
 
+export type DashboardFeeStatResult = DashboardStatItem
+
 export interface DashboardAttendanceResult {
   total: number
   present: number
@@ -77,12 +79,15 @@ export interface DashboardNoticeItem {
   priority: string
 }
 
+export type DashboardActivitySource = "student" | "fee" | "notice" | "exam"
+
 export interface DashboardActivityItem {
   id: string
   action: string
   entity: string
   timestamp: string
   tone: string
+  source: DashboardActivitySource
 }
 
 export interface DashboardBirthdayStudentItem {

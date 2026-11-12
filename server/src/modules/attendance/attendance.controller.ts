@@ -23,8 +23,8 @@ function routeParam(value: string | string[] | undefined): string {
 
 export const listAttendanceRecordsHandler: RequestHandler = async (req, res) => {
   const query = parseWithZod(listAttendanceQuerySchema, req.query, "Invalid attendance query")
-  const { school } = requireAuth(req)
-  res.json(ok(await attendanceService.listAttendanceRecords(query, school.id)))
+  const auth = requireAuth(req)
+  res.json(ok(await attendanceService.listAttendanceRecords(query, auth.school.id, auth)))
 }
 
 export const getAttendanceRecordHandler: RequestHandler = async (req, res) => {

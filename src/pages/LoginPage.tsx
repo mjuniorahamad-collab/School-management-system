@@ -4,7 +4,7 @@ import { Navigate, useLocation, useNavigate } from "react-router-dom"
 import { Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { useAuth } from "@/auth/useAuth"
-import { canAccessPath, defaultLandingPath } from "@/auth/routing"
+import { defaultLandingPath, resolvePostLoginPath } from "@/auth/routing"
 import { branding } from "@/config/branding"
 import { ApiClientError } from "@/lib/apiClient"
 import { Button } from "@/components/ui/button"
@@ -33,8 +33,7 @@ export default function LoginPage() {
     setSubmitting(true)
     try {
       const signedIn = await signIn({ email, password })
-      const destination = from && canAccessPath(signedIn, from) ? from : defaultLandingPath(signedIn)
-      navigate(destination, { replace: true })
+      navigate(resolvePostLoginPath(signedIn, from), { replace: true })
     } catch (error) {
       const message =
         error instanceof ApiClientError && error.message

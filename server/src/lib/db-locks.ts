@@ -156,3 +156,33 @@ export async function lockReportCardSchemeScope(
   const scope = `${params.academicSessionId}:${params.classId}:${params.scopeKey}`
   await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${params.schoolId}), hashtext(${scope}))::text`
 }
+
+const LAST_SCHOOL_ADMIN_LOCK_SCOPE = "last-school-admin"
+
+/**
+ * Canonical SCHOOL_ADMIN qualification serialization point.
+ *
+ * Every application path that can make a qualifying SCHOOL_ADMIN stop
+ * qualifying MUST call this FIRST inside its interactive transaction, before
+ * reading target membership/admin state, permissions, or any pre-lock count.
+ * That currently includes `createUser`, `updateUserMembership`, and
+ * `removeUserFromTenant`. Any future path that changes a membership role,
+ * status, removal, global user status, or effective essential permissions for a
+ * SCHOOL_ADMIN must acquire this same per-school lock.
+ *
+ * The lock is a transaction-scoped PostgreSQL advisory lock keyed by the
+ * server-resolved school ID and a fixed scope. It is held until the surrounding
+ * transaction commits or rolls back, so all qualification-changing writes for a
+ * school serialize. Different schools use different keys and remain independent.
+ *
+ * `pg_advisory_xact_lock` returns `void`, which Prisma's `$queryRaw` cannot
+ * deserialize; the same `::text` cast used by the report-card scheme lock keeps
+ * the call Prisma-decodable without changing the lock. A hash collision between
+ * different schools only causes harmless extra serialization.
+ */
+export async function lockSchoolAdminMutations(
+  tx: Prisma.TransactionClient,
+  params: { schoolId: string },
+): Promise<void> {
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${params.schoolId}), hashtext(${LAST_SCHOOL_ADMIN_LOCK_SCOPE}))::text`
+}

@@ -30,6 +30,7 @@ async function requirePrisma(): Promise<PrismaClient> {
 export async function listTimetableEntries(
   query: ListTimetableQuery,
   schoolId: string,
+  scope?: any,
 ): Promise<TimetableEntryListResult> {
   const prisma = await requirePrisma()
 
@@ -39,6 +40,22 @@ export async function listTimetableEntries(
   if (query.sectionId) where.sectionId = query.sectionId
   if (query.teacherId) where.teacherId = query.teacherId
   if (query.dayOfWeek) where.dayOfWeek = query.dayOfWeek
+
+  if (scope?.teacherId) {
+    if (query.teacherId && query.teacherId !== scope.teacherId) {
+      const { forbiddenError } = await import("../../lib/ApiError.js")
+      throw forbiddenError("Cannot view other teachers' timetables")
+    }
+    if (query.classId && query.sectionId !== undefined) {
+      const key = `${query.classId}:${query.sectionId ?? ""}`
+      const allowed = (scope.sectionPairs as Set<string>)?.has(key)
+      if (!allowed) {
+        const { forbiddenError } = await import("../../lib/ApiError.js")
+        throw forbiddenError("Not assigned to this class/section")
+      }
+    }
+    where.teacherId = scope.teacherId
+  }
 
   const [total, rows] = await prisma.$transaction([
     prisma.timetableEntry.count({ where }),

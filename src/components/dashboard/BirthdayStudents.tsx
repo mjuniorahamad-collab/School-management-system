@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { StudentAvatar } from "@/components/shared/StudentAvatar"
+import { useAuth } from "@/auth/useAuth"
 import { useBirthdayStudents } from "@/hooks/useDashboardData"
 import { cn } from "@/lib/utils"
 
@@ -19,7 +20,12 @@ interface BirthdayStudentsProps {
 }
 
 export function BirthdayStudents({ className }: BirthdayStudentsProps) {
-  const { data, isPending, isError } = useBirthdayStudents()
+  const { can } = useAuth()
+  const canViewDashboard = can("dashboard:view")
+  const canViewStudents = can("students:view")
+  const { data, isPending, isError } = useBirthdayStudents(canViewDashboard)
+
+  if (!canViewDashboard) return null
 
   return (
     <Card className={cn("flex h-full flex-col", className)}>
@@ -28,14 +34,16 @@ export function BirthdayStudents({ className }: BirthdayStudentsProps) {
         <CardDescription data-slot="card-description">
           Wish them a great day
         </CardDescription>
-        <CardAction>
-          <Button asChild variant="ghost" size="sm">
-            <Link to="/students">
-              View all
-              <ArrowRight className="size-4" aria-hidden="true" />
-            </Link>
-          </Button>
-        </CardAction>
+        {canViewStudents && (
+          <CardAction>
+            <Button asChild variant="ghost" size="sm">
+              <Link to="/students">
+                View all
+                <ArrowRight className="size-4" aria-hidden="true" />
+              </Link>
+            </Button>
+          </CardAction>
+        )}
       </CardHeader>
       <CardContent className="flex flex-1 flex-col">
         {isPending &&

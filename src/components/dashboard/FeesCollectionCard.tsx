@@ -20,6 +20,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ChartTooltip } from "@/components/charts/ChartTooltip"
+import { useAuth } from "@/auth/useAuth"
 import { useFeeAnalytics } from "@/hooks/useDashboardData"
 import { useTheme } from "@/theme/useTheme"
 import { cn } from "@/lib/utils"
@@ -62,14 +63,18 @@ interface FeesCollectionCardProps {
 }
 
 export function FeesCollectionCard({ className }: FeesCollectionCardProps) {
+  const { can } = useAuth()
+  const canViewFees = can("fees:view")
   const [period, setPeriod] = useState<FeePeriod>("session")
-  const { data, isPending, isError } = useFeeAnalytics(period)
+  const { data, isPending, isError } = useFeeAnalytics(period, canViewFees)
   const { isDark } = useTheme()
   const colors = CHART_COLORS[isDark ? "dark" : "light"]
 
   const trend = data != null && data.trendPercent !== null ? trendMeta(data.trendPercent) : null
   const TrendArrow = trend?.direction === "down" ? ArrowDownRight : ArrowUpRight
   const hasData = data != null && data.months.some((month) => month.collected > 0)
+
+  if (!canViewFees) return null
 
   return (
     <Card className={cn("flex h-full flex-col", className)}>

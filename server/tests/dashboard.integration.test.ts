@@ -333,21 +333,39 @@ describe.skipIf(!TEST_DATABASE_URL)("Dashboard API (integration)", () => {
       expect(res.status).toBe(403)
       expect(res.body.error.code).toBe("FORBIDDEN")
     })
+
+    it("rejects a role without the fees:view permission from the fee stat", async () => {
+      const res = await viewerAgent.get("/api/v1/dashboard/stats/fees")
+      expect(res.status).toBe(403)
+      expect(res.body.error.code).toBe("FORBIDDEN")
+    })
   })
 
   describe("stats", () => {
-    it("returns the four headline stats scoped to the current school", async () => {
+    it("returns only the three non-fee headline stats scoped to the current school", async () => {
       const res = await adminAgent.get("/api/v1/dashboard/stats")
       expect(res.status).toBe(200)
       const stats = res.body.data.stats
-      expect(stats).toHaveLength(4)
+      expect(stats).toHaveLength(3)
 
       const byId = new Map(stats.map((s: { id: string }) => [s.id, s]))
       expect(byId.get("total-students").value).toBe("6")
       expect(byId.get("total-classes").value).toBe("3")
       expect(byId.get("total-teachers").value).toBe("0")
-      expect(byId.get("fees-collection").value).toBe("₹0")
+      expect(byId.has("fees-collection")).toBe(false)
       expect(typeof byId.get("total-students").trendPercent).toBe("number")
+    })
+
+    it("returns only the fee stat from the fee-stat endpoint", async () => {
+      const res = await adminAgent.get("/api/v1/dashboard/stats/fees")
+      expect(res.status).toBe(200)
+      expect(res.body.data).toEqual({
+        id: "fees-collection",
+        label: "Fees Collection",
+        value: "₹0",
+        trendPercent: 0,
+        comparison: "vs last month",
+      })
     })
   })
 
@@ -981,9 +999,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Dashboard API (integration)", () => {
         expect(res.body.data.trendPercent).toBe(150)
 
         // The Fees Collection KPI uses the same comparison window.
-        const statsRes = await agent.get("/api/v1/dashboard/stats")
-        expect(statsRes.status).toBe(200)
-        const fees = new Map(statsRes.body.data.stats.map((s: { id: string }) => [s.id, s])).get("fees-collection")
+        const feeStatRes = await agent.get("/api/v1/dashboard/stats/fees")
+        expect(feeStatRes.status).toBe(200)
+        const fees = feeStatRes.body.data
         // Headline value stays the full active-session total (1000 + 400 + 100000).
         expect(fees.value).toBe("₹1,01,400")
         expect(fees.trendPercent).toBe(150)
@@ -1158,7 +1176,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Dashboard API (integration)", () => {
       })
     })
 
-    describe("stats: fees collection KPI", () => {
+    describe("fee stat: fees collection KPI", () => {
       it("G. reports a session-wide value with a month-to-month trend and 'vs last month' label", async () => {
         const agent = await agentAt("2026-12-15T09:00:00.000Z", TEST_ADMIN_A_EMAIL, TEST_ADMIN_A_PASS)
         const inv = await createInvoice({
@@ -1172,10 +1190,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Dashboard API (integration)", () => {
         await createPayment(fixtures.schoolAId, inv.id, 1000, "2026-11-10T09:00:00.000Z")
         await createPayment(fixtures.schoolAId, inv.id, 3000, "2026-12-05T09:00:00.000Z")
 
-        const res = await agent.get("/api/v1/dashboard/stats")
+        const res = await agent.get("/api/v1/dashboard/stats/fees")
         expect(res.status).toBe(200)
-        const byId = new Map(res.body.data.stats.map((s: { id: string }) => [s.id, s]))
-        const fees = byId.get("fees-collection")
+        const fees = res.body.data
         expect(fees.value).toBe("₹4,000")
         expect(fees.trendPercent).toBe(200)
         expect(fees.comparison).toBe("vs last month")

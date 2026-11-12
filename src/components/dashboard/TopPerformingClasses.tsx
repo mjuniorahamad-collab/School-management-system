@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useAuth } from "@/auth/useAuth"
 import { useTopPerformingClasses } from "@/hooks/useDashboardData"
 import { formatPercent } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -27,9 +28,14 @@ interface TopPerformingClassesProps {
 }
 
 export function TopPerformingClasses({ className }: TopPerformingClassesProps) {
-  const { data, isPending, isError } = useTopPerformingClasses()
+  const { can } = useAuth()
+  const canViewDashboard = can("dashboard:view")
+  const canViewResults = can("results:view")
+  const { data, isPending, isError } = useTopPerformingClasses(canViewDashboard)
   const classes = data?.classes ?? []
   const context = data?.context
+
+  if (!canViewDashboard) return null
 
   return (
     <Card className={cn("flex h-full flex-col", className)}>
@@ -40,14 +46,16 @@ export function TopPerformingClasses({ className }: TopPerformingClassesProps) {
             ? `${context.examName ?? "Latest exam"} · ${context.academicSessionName}`
             : "Average score in a comparable finalized exam"}
         </CardDescription>
-        <CardAction>
-          <Button asChild variant="ghost" size="sm">
-            <Link to="/results">
-              Details
-              <ArrowRight className="size-4" aria-hidden="true" />
-            </Link>
-          </Button>
-        </CardAction>
+        {canViewResults && (
+          <CardAction>
+            <Button asChild variant="ghost" size="sm">
+              <Link to="/results">
+                Details
+                <ArrowRight className="size-4" aria-hidden="true" />
+              </Link>
+            </Button>
+          </CardAction>
+        )}
       </CardHeader>
       <CardContent className="flex flex-1 flex-col">
         {isPending &&
@@ -105,14 +113,16 @@ export function TopPerformingClasses({ className }: TopPerformingClassesProps) {
           </ul>
         )}
       </CardContent>
-      <CardFooter className="justify-center border-t pt-3">
-        <Button asChild variant="ghost" size="sm">
-          <Link to="/results">
-            View all results
-            <ArrowRight className="size-4" aria-hidden="true" />
-          </Link>
-        </Button>
-      </CardFooter>
+      {canViewResults && (
+        <CardFooter className="justify-center border-t pt-3">
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/results">
+              View all results
+              <ArrowRight className="size-4" aria-hidden="true" />
+            </Link>
+          </Button>
+        </CardFooter>
+      )}
     </Card>
   )
 }

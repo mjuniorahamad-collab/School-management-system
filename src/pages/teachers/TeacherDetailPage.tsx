@@ -5,6 +5,7 @@ import { useAuth } from "@/auth/useAuth"
 import { PageContainer } from "@/components/layout/PageContainer"
 import { ProfilePhotoField } from "@/components/shared/ProfilePhotoField"
 import { TeacherFormDialog } from "@/components/teachers/TeacherFormDialog"
+import { TeacherPermissionsCard } from "@/components/teachers/TeacherPermissionsCard"
 import { TeacherStatusBadge } from "@/components/teachers/TeacherStatusBadge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -168,6 +169,8 @@ export function TeacherDetailPage() {
               </CardContent>
             </Card>
           </div>
+
+          <TeacherPermissionsCard teacherId={data.id} />
         </div>
       )}
 

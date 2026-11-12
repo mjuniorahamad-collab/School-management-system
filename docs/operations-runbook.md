@@ -162,6 +162,53 @@ data is cached, so the next request sees the restored data immediately (see
 Practice at least one restore drill (including into a scratch database) so the
 procedure is routine before an incident.
 
+## Staging migrations
+
+The staging database is a separate Neon project (`sms-integration-test`). Use the
+dedicated wrapper, never `db:migrate` or `npx prisma migrate deploy`:
+
+```sh
+# Read-only target check. Does not connect or start Prisma.
+npm run db:migrate:staging -- --check \
+  --target-env STAGING_DATABASE_URL \
+  --staging-project sms-integration-test \
+  --confirm-host <staging-host> --confirm-port 5432 \
+  --confirm-database <staging-database>
+
+# Apply pending migrations. Runs a read-only identity check first.
+npm run db:migrate:staging -- --apply \
+  --target-env STAGING_DATABASE_URL \
+  --staging-project sms-integration-test \
+  --confirm-host <staging-host> --confirm-port 5432 \
+  --confirm-database <staging-database>
+```
+
+Required environment (shell or secret injection only, never `.env`):
+
+- `STAGING_DATABASE_URL` — direct, unpooled Neon staging URL with
+  `sslmode=require` or stronger.
+- `PRODUCTION_DATABASE_HOST` and `PRODUCTION_DATABASE_NAME` — production
+  identity; both must be present and valid. Only the host is used as the deny
+  key because staging and production may share a database name.
+
+The wrapper refuses `NODE_ENV=production`; a staging host equal to
+`PRODUCTION_DATABASE_HOST`; loopback or unspecified, pooled (including labels
+containing `pooler` or `pgbouncer`), socket, non-5432, or weak/missing-TLS
+targets; duplicate or unexpected query parameters; a wrong `--target-env`,
+project label, or exact host/port/database confirmations; any other non-empty
+variable containing `DATABASE_URL`; `PG*` overrides;
+`NODE_TLS_REJECT_UNAUTHORIZED=0`; any non-empty `NODE_OPTIONS`; `DOTENV_*`
+configuration; and an existing `server/prisma/.env` (Prisma CLI
+environment-file isolation).
+
+`--apply` verifies `current_database()`, `current_user`, and
+`inet_server_port()` before running only `prisma migrate deploy` from an
+isolated temporary working directory. It never seeds, resets, truncates, or
+reconciles. It also refuses if the generated Prisma client embeds `.env` paths,
+because importing it would read that file; regenerate the client from an
+isolated working directory with an absolute `--schema` path before retrying.
+The URL and credentials are never printed.
+
 ## Container deployment
 
 Build and start the production stack (API + PostgreSQL):
@@ -207,8 +254,8 @@ compose stack sets `PRODUCTION_DATABASE_HOST=postgres` and
 `PRODUCTION_DATABASE_NAME` to the same database, so the target is
 production-equivalent and `--allow-production` is required.
 
-From a host checkout targeting a remote staging or production database, use the
-same wrapper:
+From a host checkout targeting a remote **production** database, use the same
+wrapper:
 
 ```sh
 npm run db:migrate -- \
@@ -224,6 +271,10 @@ A remote target requires `PRODUCTION_DATABASE_HOST` and
 Never bypass the wrapper with a direct `npx prisma migrate deploy`. Run the
 guarded migration after deploying a release that changes the schema, in a
 maintenance window, and verify with the checks below.
+
+For the separate Neon staging project, use `npm run db:migrate:staging` instead
+(see [Staging migrations](#staging-migrations)); it reads only
+`STAGING_DATABASE_URL` and never accepts `--allow-production`.
 
 For local development against a loopback or Unix-socket database, use
 `npm run db:migrate:dev`; it refuses non-local targets.

@@ -4,6 +4,7 @@ import type {
   TeacherDetail,
   TeacherFormPayload,
   TeacherListResult,
+  TeacherMembershipLookup,
   TeacherMeta,
   TeachersQuery,
 } from "@/types/teachers"
@@ -28,6 +29,9 @@ export const teachersService = {
   },
   meta(): Promise<TeacherMeta> {
     return api.get<TeacherMeta>("/teachers/meta")
+  },
+  membership(id: string): Promise<TeacherMembershipLookup> {
+    return api.get<TeacherMembershipLookup>(`/teachers/${id}/membership`)
   },
   create(payload: TeacherFormPayload): Promise<TeacherDetail> {
     return api.post<TeacherDetail>("/teachers", payload)

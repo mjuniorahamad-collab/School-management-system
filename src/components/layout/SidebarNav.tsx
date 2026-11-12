@@ -49,7 +49,7 @@ export function SidebarNav({ collapsed = false, onNavigate }: SidebarNavProps) {
   const sections = navigationSections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => !item.requiredPermission || can(item.requiredPermission)),
+      items: section.items.filter((item) => can(item.requiredPermission)),
     }))
     .filter((section) => section.items.length > 0)
 

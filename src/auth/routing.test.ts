@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { defaultLandingPath, isPortalOnlyUser } from "./routing"
+import {
+  accessibleLandingPath,
+  defaultLandingPath,
+  isPortalOnlyUser,
+  resolvePostLoginPath,
+} from "./routing"
 import type { AuthUser } from "./types"
 
 function makeUser(overrides: Partial<AuthUser> = {}): AuthUser {
@@ -55,5 +60,48 @@ describe("defaultLandingPath", () => {
     const admin = makeUser({ roles: ["SCHOOL_ADMIN"], permissions: ["dashboard:view"] })
     expect(defaultLandingPath(admin)).toBe("/dashboard")
     expect(defaultLandingPath(null)).toBe("/dashboard")
+  })
+})
+
+describe("accessibleLandingPath", () => {
+  it("returns the default landing page when the user can access it", () => {
+    const admin = makeUser({ roles: ["SCHOOL_ADMIN"], permissions: ["dashboard:view"] })
+    const parent = makeUser({ roles: ["PARENT"], permissions: ["portal:view"] })
+
+    expect(accessibleLandingPath(admin)).toBe("/dashboard")
+    expect(accessibleLandingPath(parent)).toBe("/portal")
+  })
+
+  it("returns null instead of a denied landing page", () => {
+    const studentViewer = makeUser({ permissions: ["students:view"] })
+
+    expect(accessibleLandingPath(studentViewer)).toBeNull()
+    expect(accessibleLandingPath(null)).toBeNull()
+  })
+})
+
+describe("resolvePostLoginPath", () => {
+  it("keeps the requested path when the user can access it", () => {
+    const teacher = makeUser({
+      roles: ["TEACHER"],
+      permissions: ["dashboard:view", "students:view"],
+    })
+
+    expect(resolvePostLoginPath(teacher, "/students/student-1")).toBe("/students/student-1")
+  })
+
+  it("falls back to the landing page when the requested path is denied", () => {
+    const teacher = makeUser({
+      roles: ["TEACHER"],
+      permissions: ["dashboard:view", "students:view"],
+    })
+
+    expect(resolvePostLoginPath(teacher, "/users")).toBe("/dashboard")
+  })
+
+  it("uses the portal landing page for portal-only users", () => {
+    const parent = makeUser({ roles: ["PARENT"], permissions: ["portal:view"] })
+
+    expect(resolvePostLoginPath(parent, "/students")).toBe("/portal")
   })
 })

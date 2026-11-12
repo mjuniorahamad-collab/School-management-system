@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { StudentAvatar } from "@/components/shared/StudentAvatar"
+import { useAuth } from "@/auth/useAuth"
 import { useRecentStudents } from "@/hooks/useDashboardData"
 import { cn } from "@/lib/utils"
 import type { DashboardRecentStudent } from "@/types/dashboard"
@@ -48,21 +49,28 @@ interface RecentStudentsProps {
 }
 
 export function RecentStudents({ className }: RecentStudentsProps) {
-  const { data, isPending, isError } = useRecentStudents()
+  const { can } = useAuth()
+  const canViewDashboard = can("dashboard:view")
+  const canViewStudents = can("students:view")
+  const { data, isPending, isError } = useRecentStudents(canViewDashboard)
+
+  if (!canViewDashboard) return null
 
   return (
     <Card className={cn("flex h-full flex-col", className)}>
       <CardHeader>
         <CardTitle>Recent Students</CardTitle>
         <CardDescription data-slot="card-description">Latest activity in the directory</CardDescription>
-        <CardAction>
-          <Button asChild variant="ghost" size="sm">
-            <Link to="/students">
-              View all
-              <ArrowRight className="size-4" aria-hidden="true" />
-            </Link>
-          </Button>
-        </CardAction>
+        {canViewStudents && (
+          <CardAction>
+            <Button asChild variant="ghost" size="sm">
+              <Link to="/students">
+                View all
+                <ArrowRight className="size-4" aria-hidden="true" />
+              </Link>
+            </Button>
+          </CardAction>
+        )}
       </CardHeader>
       <CardContent className="flex flex-1 flex-col">
         {isPending &&
@@ -106,14 +114,16 @@ export function RecentStudents({ className }: RecentStudentsProps) {
           </ul>
         )}
       </CardContent>
-      <CardFooter className="justify-center border-t pt-3">
-        <Button asChild variant="ghost" size="sm">
-          <Link to="/students">
-            View All Students
-            <ArrowRight className="size-4" aria-hidden="true" />
-          </Link>
-        </Button>
-      </CardFooter>
+      {canViewStudents && (
+        <CardFooter className="justify-center border-t pt-3">
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/students">
+              View All Students
+              <ArrowRight className="size-4" aria-hidden="true" />
+            </Link>
+          </Button>
+        </CardFooter>
+      )}
     </Card>
   )
 }

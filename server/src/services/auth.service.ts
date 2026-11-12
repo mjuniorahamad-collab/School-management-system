@@ -18,7 +18,7 @@ import {
 } from "../lib/ApiError.js"
 import { getPrisma } from "../lib/database.js"
 import { recordAuditAfterCommit } from "../modules/audit-logs/audit-log.service.js"
-import { resolveRolePermissions } from "./permission.service.js"
+import { resolveEffectivePermissions } from "./permission.service.js"
 import type { AuthUser } from "../types/auth.js"
 
 export interface LoginInput {
@@ -299,7 +299,7 @@ export async function loadPrincipalContext(
     if (!membership) {
       throw forbiddenError("You do not have access to that school")
     }
-    const principal = await resolveRolePermissions(membership.roleId)
+    const principal = await resolveEffectivePermissions(membership.id, membership.roleId)
     return {
       user: toAuthUserSource(user),
       school: tenantFromSchool(membership.school),
@@ -325,7 +325,7 @@ export async function loadPrincipalContext(
   const selected =
     (user.schoolId ? memberships.find((m) => m.schoolId === user.schoolId) : undefined) ??
     memberships[0]
-  const principal = await resolveRolePermissions(selected.roleId)
+  const principal = await resolveEffectivePermissions(selected.id, selected.roleId)
   return {
     user: toAuthUserSource(user),
     school: tenantFromSchool(selected.school),

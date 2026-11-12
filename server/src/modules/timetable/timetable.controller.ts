@@ -23,37 +23,37 @@ function routeParam(value: string | string[] | undefined): string {
 
 export const listTimetableEntriesHandler: RequestHandler = async (req, res) => {
   const query = parseWithZod(listTimetableQuerySchema, req.query, "Invalid timetable query")
-  const { schoolId } = requireAuth(req)
-  res.json(ok(await timetableService.listTimetableEntries(query, schoolId)))
+  const auth = requireAuth(req)
+  res.json(ok(await timetableService.listTimetableEntries(query, auth.schoolId, (req as any).teacherTimetableScope)))
 }
 
 export const getTimetableEntryHandler: RequestHandler = async (req, res) => {
-  const { schoolId } = requireAuth(req)
-  res.json(ok(await timetableService.getTimetableEntryById(routeParam(req.params.id), schoolId)))
+  const auth = requireAuth(req)
+  res.json(ok(await timetableService.getTimetableEntryById(routeParam(req.params.id), auth.schoolId)))
 }
 
 export const createTimetableEntryHandler: RequestHandler = async (req, res) => {
   const input = parseWithZod(createTimetableEntrySchema, req.body, "Invalid timetable entry data")
-  const { schoolId } = requireAuth(req)
-  const created = await timetableService.createTimetableEntry(input, schoolId)
+  const auth = requireAuth(req)
+  const created = await timetableService.createTimetableEntry(input, auth.schoolId)
   res.status(201).json(ok(created))
 }
 
 export const updateTimetableEntryHandler: RequestHandler = async (req, res) => {
   const input = parseWithZod(updateTimetableEntrySchema, req.body, "Invalid timetable entry data")
-  const { schoolId } = requireAuth(req)
-  const updated = await timetableService.updateTimetableEntry(routeParam(req.params.id), input, schoolId)
+  const auth = requireAuth(req)
+  const updated = await timetableService.updateTimetableEntry(routeParam(req.params.id), input, auth.schoolId)
   res.json(ok(updated))
 }
 
 export const deleteTimetableEntryHandler: RequestHandler = async (req, res) => {
-  const { schoolId } = requireAuth(req)
-  await timetableService.deleteTimetableEntry(routeParam(req.params.id), schoolId)
+  const auth = requireAuth(req)
+  await timetableService.deleteTimetableEntry(routeParam(req.params.id), auth.schoolId)
   res.json(ok({ deleted: true }))
 }
 
 export const copyTimetableDayHandler: RequestHandler = async (req, res) => {
   const input = parseWithZod(copyTimetableDaySchema, req.body, "Invalid copy-day data")
-  const { schoolId } = requireAuth(req)
-  res.json(ok(await timetableService.copyTimetableDay(input, schoolId)))
+  const auth = requireAuth(req)
+  res.json(ok(await timetableService.copyTimetableDay(input, auth.schoolId)))
 }

@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useAuth } from "@/auth/useAuth"
 import { useImportantNotices } from "@/hooks/useDashboardData"
 import { cn } from "@/lib/utils"
 import { timeAgo } from "@/lib/format"
@@ -27,7 +28,12 @@ interface ImportantNoticesProps {
 }
 
 export function ImportantNotices({ className }: ImportantNoticesProps) {
-  const { data, isPending, isError } = useImportantNotices()
+  const { can } = useAuth()
+  const canViewDashboard = can("dashboard:view")
+  const canViewNotices = can("notices:view")
+  const { data, isPending, isError } = useImportantNotices(canViewDashboard)
+
+  if (!canViewDashboard) return null
 
   return (
     <Card className={cn("flex h-full flex-col", className)}>
@@ -85,14 +91,16 @@ export function ImportantNotices({ className }: ImportantNoticesProps) {
           </ul>
         )}
       </CardContent>
-      <CardFooter className="justify-center border-t pt-3">
-        <Button asChild variant="ghost" size="sm">
-          <Link to="/notices">
-            View All Notices
-            <ArrowRight className="size-4" aria-hidden="true" />
-          </Link>
-        </Button>
-      </CardFooter>
+      {canViewNotices && (
+        <CardFooter className="justify-center border-t pt-3">
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/notices">
+              View All Notices
+              <ArrowRight className="size-4" aria-hidden="true" />
+            </Link>
+          </Button>
+        </CardFooter>
+      )}
     </Card>
   )
 }
